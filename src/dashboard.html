@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>pipeship</title>
+<style>
+  :root { color-scheme: light dark; --muted: #888; --line: #8884; }
+  body { font: 14px/1.5 system-ui, sans-serif; max-width: 1000px; margin: 2rem auto; padding: 0 1rem; }
+  h1 { font-size: 1.3rem; }
+  .card { border: 1px solid var(--line); border-radius: 8px; padding: 1rem; margin: 1rem 0; }
+  .head { display: flex; justify-content: space-between; align-items: baseline; gap: 1rem; }
+  .title { font-weight: 600; }
+  .meta { color: var(--muted); font-size: 12px; }
+  .badge { padding: 2px 8px; border-radius: 99px; font-size: 12px; background: #8882; }
+  .running { background: #3b82f633; } .waiting_for_user { background: #f59e0b44; }
+  .ready { background: #22c55e44; } .failed { background: #ef444444; } .stopped { background: #8883; }
+  .steps { display: flex; gap: 4px; margin: .75rem 0; flex-wrap: wrap; }
+  .step { font-size: 12px; padding: 2px 6px; border-radius: 4px; border: 1px solid var(--line); }
+  .step.done { background: #22c55e33; } .step.running { background: #3b82f644; font-weight: 600; }
+  .step.skipped { text-decoration: line-through; color: var(--muted); } .step.failed { background: #ef444444; }
+  ul { margin: .25rem 0; padding-left: 1.2rem; }
+  button { cursor: pointer; }
+  .empty { color: var(--muted); }
+</style>
+</head>
+<body>
+<h1>pipeship</h1>
+<div id="list"><p class="empty">Loading…</p></div>
+<script>
+const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
+const link = (url, text) => `<a href="${esc(url)}" target="_blank">${esc(text ?? url)}</a>`;
+
+function card(p) {
+  const ticket = p.ticket.url ? link(p.ticket.url, p.ticket.ref ?? p.ticket.title) : esc(p.ticket.ref ?? "");
+  const steps = p.steps.map((s) => `<span class="step ${s.status}">${s.name}</span>`).join("");
+  const chunks = p.chunks.map((c) =>
+    `<li>${esc(c.name)} ${c.branch ? `<code>${esc(c.branch)}</code>` : ""} ${c.pr ? link(c.pr, "PR") : ""} <span class="meta">${esc(c.status)}</span></li>`
+  ).join("");
+  const active = p.status !== "stopped";
+  return `<div class="card">
+    <div class="head">
+      <div><span class="title">${esc(p.ticket.title)}</span> <span class="meta">${ticket} · ${esc(p.ticket.source)} · ${esc(p.mode)}</span></div>
+      <span class="badge ${p.status}">${p.status.replaceAll("_", " ")}</span>
+    </div>
+    <div class="meta">${esc(p.repo)} · updated ${new Date(p.updatedAt).toLocaleTimeString()}</div>
+    <div class="steps">${steps}</div>
+    ${p.preview ? `<p>Test environment: ${link(p.preview.url)}</p>` : ""}
+    ${chunks ? `<ul>${chunks}</ul>` : ""}
+    ${active ? `<button onclick="stop('${esc(p.id)}', this)">Stop pipeline</button>` : ""}
+  </div>`;
+}
+
+async function stop(id, button) {
+  if (!confirm("Stop this pipeline and its test server?")) return;
+  button.disabled = true;
+  const res = await fetch(`/api/pipelines/${encodeURIComponent(id)}/stop`, { method: "POST" });
+  if (!res.ok) { alert((await res.json()).error); button.disabled = false; }
+}
+
+new EventSource("/api/events").onmessage = (e) => {
+  const list = JSON.parse(e.data);
+  document.getElementById("list").innerHTML = list.length ? list.map(card).join("") : `<p class="empty">No pipeline yet. Run <code>/pipeship &lt;ticket&gt;</code> in Claude Code.</p>`;
+};
+</script>
+</body>
+</html>
