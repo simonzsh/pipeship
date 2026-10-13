@@ -5,7 +5,7 @@ import { repoName } from "../repos.ts";
 import type { DiffErrorBody, DiffFile, DiffHunk, DiffResponse } from "../diff.ts";
 import { Button } from "./components/ui/button";
 import { highlightLines, languageOf } from "./highlight";
-import { diffRequests, diffUrl, isGenerated, type DiffRequest, type DiffTarget } from "./diff-requests";
+import { diffRequests, diffUrl, type DiffRequest, type DiffTarget } from "./diff-requests";
 import { prNumber } from "./utils";
 
 export type { DiffTarget };
@@ -48,11 +48,11 @@ function useDiff(id: string, requests: DiffRequest[], refreshKey: string): Resul
 }
 
 const STATUS_STYLE: Record<DiffFile["status"], string> = {
-  added: "text-emerald-600 dark:text-emerald-400",
-  deleted: "text-red-600 dark:text-red-400",
-  modified: "text-amber-600 dark:text-amber-400",
-  renamed: "text-sky-600 dark:text-sky-400",
-  copied: "text-sky-600 dark:text-sky-400",
+  added: "bg-emerald-500/10 text-emerald-700 dark:text-emerald-400",
+  deleted: "bg-red-500/10 text-red-700 dark:text-red-400",
+  modified: "bg-amber-500/10 text-amber-700 dark:text-amber-400",
+  renamed: "bg-sky-500/10 text-sky-700 dark:text-sky-400",
+  copied: "bg-sky-500/10 text-sky-700 dark:text-sky-400",
 };
 
 function Counts({ additions, deletions }: { additions: number; deletions: number }) {
@@ -113,22 +113,31 @@ function HunkRows({ hunk, lang }: { hunk: DiffHunk; lang: string | undefined }) 
   );
 }
 
+// Folder in muted text, file name in full colour: the eye finds the file first.
+function FilePath({ path }: { path: string }) {
+  const cut = path.lastIndexOf("/") + 1;
+  return (
+    <span className="min-w-0 truncate font-mono text-xs" title={path}>
+      <span className="text-muted-foreground">{path.slice(0, cut)}</span>
+      <span className="font-medium">{path.slice(cut)}</span>
+    </span>
+  );
+}
+
 function FileDiff({ file, open, onToggle }: { file: DiffFile; open: boolean; onToggle: () => void }) {
   const lang = useMemo(() => languageOf(file.path), [file.path]);
   const renamed = file.oldPath && file.newPath && file.oldPath !== file.newPath;
   return (
-    <section className="rounded-lg border bg-card">
+    <section className="rounded-lg border bg-card shadow-xs">
       <button
         type="button"
         onClick={onToggle}
         aria-expanded={open}
-        className={`sticky top-0 z-10 flex w-full items-center gap-2 bg-muted px-3 py-1.5 text-left text-sm ${open ? "rounded-t-lg border-b" : "rounded-lg"}`}
+        className={`sticky top-0 z-10 flex w-full items-center gap-2 bg-card/95 px-3 py-2 text-left text-sm backdrop-blur transition-colors hover:bg-accent/50 ${open ? "rounded-t-lg border-b" : "rounded-lg"}`}
       >
-        {open ? <ChevronDown className="size-4 shrink-0" /> : <ChevronRight className="size-4 shrink-0" />}
-        <span className="min-w-0 truncate font-mono text-xs" title={file.path}>
-          {renamed ? `${file.oldPath} → ${file.newPath}` : file.path}
-        </span>
-        <span className={`shrink-0 text-xs ${STATUS_STYLE[file.status]}`}>{file.status}</span>
+        {open ? <ChevronDown className="size-4 shrink-0 text-muted-foreground" /> : <ChevronRight className="size-4 shrink-0 text-muted-foreground" />}
+        <FilePath path={renamed ? `${file.oldPath} → ${file.newPath}` : file.path} />
+        <span className={`shrink-0 rounded px-1.5 py-0.5 text-[11px] font-medium ${STATUS_STYLE[file.status]}`}>{file.status}</span>
         {file.similarity !== undefined && file.status !== "modified" && (
           <span className="shrink-0 text-xs text-muted-foreground">{file.similarity}%</span>
         )}
@@ -161,25 +170,15 @@ function FileDiff({ file, open, onToggle }: { file: DiffFile; open: boolean; onT
   );
 }
 
-// Few enough lines to read at once: open everything, otherwise let the reviewer pick.
-const OPEN_ALL_LINES = 3000;
-const linesOf = (f: DiffFile) => f.hunks.reduce((n, h) => n + h.lines.length, 0);
-const fitsOnOpen = (datas: DiffResponse[]) =>
-  datas.reduce((n, d) => n + d.files.reduce((m, f) => m + linesOf(f), 0), 0) <= OPEN_ALL_LINES;
-
 // `all` is the last "expand/collapse all" click; it overrides every per-file choice made before it.
 type All = { open: boolean; n: number } | null;
 
 function RepoDiff({ data, all }: { data: DiffResponse; all: All }) {
-  const defaults = useMemo(() => {
-    const open = fitsOnOpen([data]);
-    return Object.fromEntries(data.files.map((f) => [f.path, open && !isGenerated(f.path)]));
-  }, [data]);
   const [overrides, setOverrides] = useState<Record<string, boolean>>({});
   useEffect(() => {
     if (all) setOverrides(Object.fromEntries(data.files.map((f) => [f.path, all.open])));
   }, [all, data]);
-  const isOpen = (path: string) => overrides[path] ?? defaults[path] ?? false;
+  const isOpen = (path: string) => overrides[path] ?? true;
 
   if (data.files.length === 0) {
     const msg = data.truncated ? "Diff too large to show." : "No changes in this range.";
@@ -218,7 +217,7 @@ export function CodeTab({ p, target, onTarget }: CodeTabProps) {
   const additions = datas.reduce((n, d) => n + d.additions, 0);
   const deletions = datas.reduce((n, d) => n + d.deletions, 0);
   const loading = results.some((r) => "loading" in r);
-  const allOpen = all ? all.open : fitsOnOpen(datas);
+  const allOpen = all?.open ?? true;
 
   return (
     <div className="flex flex-col gap-4">

@@ -23,7 +23,7 @@ import { groupByStatus } from "../src/dashboard/groups.ts";
 import { t3ThreadLink } from "../src/dashboard/session.tsx";
 import { buildSearch, parseUrl } from "../src/dashboard/url.ts";
 import { allMerged, displaySteps, finished, timeAgo } from "../src/dashboard/pipeline-info.ts";
-import { diffRequests, diffUrl, isGenerated } from "../src/dashboard/diff-requests.ts";
+import { diffRequests, diffUrl } from "../src/dashboard/diff-requests.ts";
 import { highlightLines, languageOf } from "../src/dashboard/highlight.tsx";
 
 const root = mkdtempSync(join(tmpdir(), "pipeship-test-"));
@@ -1719,12 +1719,4 @@ test("diffRequests: whole stack skips repos without branches, a chunk targets it
   expect(diffRequests(p, { chunk: "c2" })).toEqual([{ repo: "/r/web", chunk: "c2" }]);
   expect(diffRequests(p, { chunk: "nope" })).toEqual([]);
   expect(diffUrl("a b", { repo: "/r/api", chunk: "c1" })).toBe("/api/pipelines/a%20b/diff?repo=%2Fr%2Fapi&chunk=c1");
-});
-
-test("isGenerated flags lock files, minified files and dist", () => {
-  expect(isGenerated("bun.lock")).toBe(true);
-  expect(isGenerated("web/package-lock.json")).toBe(true);
-  expect(isGenerated("public/app.min.js")).toBe(true);
-  expect(isGenerated("dist/index.js")).toBe(true);
-  expect(isGenerated("src/index.ts")).toBe(false);
 });
