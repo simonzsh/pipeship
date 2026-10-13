@@ -6,22 +6,22 @@ import {
 } from "./components/ui/alert-dialog";
 import { Button } from "./components/ui/button";
 
-// Once the agents are done, the only thing left to stop is the test server.
+// Once the agents are done, the only things left to stop are the test servers.
 const ACTIONS = {
   stopPipeline: {
     endpoint: "stop",
     icon: Square,
     button: "Stop pipeline",
     title: "Stop this pipeline?",
-    description: "The agents stop after their current step, and the test server stops now.",
+    description: "The agents stop after their current step, and the test servers stop now.",
     confirm: "Stop",
   },
   stopServer: {
     endpoint: "stop",
     icon: Square,
-    button: "Stop test server",
-    title: "Stop the test server?",
-    description: "The test server stops. The code, branches and PRs stay in place.",
+    button: "Stop test servers",
+    title: "Stop the test servers?",
+    description: "The test servers stop. The code, branches and PRs stay in place.",
     confirm: "Stop",
   },
   delete: {
@@ -30,7 +30,7 @@ const ACTIONS = {
     button: "Delete",
     title: "Delete this pipeline?",
     description:
-      "The test server stops, and the worktrees and pipeline files are deleted. Branches and PRs stay. Uncommitted changes block the deletion.",
+      "The test servers stop, and the worktrees and pipeline files are deleted. Branches and PRs stay. Uncommitted changes block the deletion.",
     confirm: "Delete",
   },
 };
