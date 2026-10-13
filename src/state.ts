@@ -26,7 +26,6 @@ export interface MergeRun {
   mode: MergeMode; // "combine" folds the stack into the bottom PR; "base" merges each PR into the base branch
   pid?: number; // process that runs the merge (the dashboard server)
   current?: string; // name of the chunk being merged, or the one that stopped the merge
-  pr?: number; // PR number of `current`
   message?: string; // progress, e.g. "waiting for checks on #12 (2 pending)"
   error?: string; // why it stopped (status "failed" only)
   startedAt: string;
@@ -149,14 +148,13 @@ export function createPipeline(opts: {
 export function readState(id: string): State {
   const path = statePath(id);
   if (!existsSync(path)) throw new Error(`unknown pipeline: ${id}`);
-  const state = upgrade(JSON.parse(readFileSync(path, "utf8")));
-  // Runs saved before combine mode existed were all base merges.
-  if (state.merge && !state.merge.mode) state.merge.mode = "base";
-  return state;
+  return upgrade(JSON.parse(readFileSync(path, "utf8")));
 }
 
 // State files written before `links` existed hold one `ref` (sometimes "A-1,A-2") and one `url`.
 function upgrade(state: State & { ticket: { ref?: string; url?: string } }): State {
+  // Merge runs saved before combine mode existed were all base merges.
+  if (state.merge && !state.merge.mode) state.merge.mode = "base";
   const { ref, url, ...ticket } = state.ticket;
   if (ticket.links) return state;
   const refs = ref?.split(",").map((r) => r.trim()).filter(Boolean) ?? [];

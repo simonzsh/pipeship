@@ -1,6 +1,6 @@
 import tailwind from "bun-plugin-tailwind";
 import { withSessionState } from "./session.ts";
-import { failStaleMerges, MergeError, parseMergeMode, startMerge } from "./merge.ts";
+import { errorMessage, failStaleMerges, MergeError, parseMergeMode, startMerge } from "./merge.ts";
 import { listStates } from "./state.ts";
 import { deletePipeline, stopPipeline } from "./preview.ts";
 
@@ -28,8 +28,7 @@ async function buildDashboard(): Promise<Record<string, Response>> {
 
 export async function serve(port = DEFAULT_PORT) {
   const assets = await buildDashboard();
-  failStaleMerges();
-  return Bun.serve({
+  const server = Bun.serve({
     port,
     idleTimeout: 0, // keep SSE connections open
     routes: {
@@ -52,7 +51,7 @@ export async function serve(port = DEFAULT_PORT) {
             return Response.json(startMerge(req.params.id, {}, mode).state, { status: 202 });
           } catch (err) {
             const status = err instanceof MergeError ? err.status : 500;
-            return Response.json({ error: err instanceof Error ? err.message : String(err) }, { status });
+            return Response.json({ error: errorMessage(err) }, { status });
           }
         },
       },
@@ -62,7 +61,7 @@ export async function serve(port = DEFAULT_PORT) {
             await deletePipeline(req.params.id);
             return Response.json({ deleted: req.params.id });
           } catch (err) {
-            return Response.json({ error: err instanceof Error ? err.message : String(err) }, { status: 500 });
+            return Response.json({ error: errorMessage(err) }, { status: 500 });
           }
         },
       },
@@ -90,6 +89,8 @@ export async function serve(port = DEFAULT_PORT) {
     },
     fetch: () => new Response("not found", { status: 404 }),
   });
+  failStaleMerges(); // after the port is open, so a slow state read cannot delay startup
+  return server;
 }
 
 export async function isDashboardUp(port = DEFAULT_PORT): Promise<boolean> {

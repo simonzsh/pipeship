@@ -6,22 +6,23 @@ import {
   AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger,
 } from "./components/ui/alert-dialog";
 import { Button } from "./components/ui/button";
-
-const prNumber = (url: string) => url.match(/\/pull\/(\d+)/)?.[1];
+import { postAction, prNumber } from "./utils";
 
 type Mode = "combine" | "base";
 
+// Green for a stack, violet for the last PR (a plain Merge), so the two clicks look different.
+const TONE = { stack: "bg-emerald-600 hover:bg-emerald-700", single: "bg-violet-600 hover:bg-violet-700" };
+
 // Dialog body, exported so it can be rendered without the portal.
-export function MergeChoice({ todo, base, mode, onMode }: {
-  todo: Chunk[]; base?: string; mode: Mode; onMode: (m: Mode) => void;
+export function MergeChoice({ todo, single, baseName, mode, onMode }: {
+  todo: Chunk[]; single: boolean; baseName: string; mode: Mode; onMode: (m: Mode) => void;
 }) {
-  const baseName = base ?? "the base branch";
   const options: { value: Mode; label: string; text: string }[] = [
     { value: "combine", label: "Combine into one PR", text: `Merges each PR into the branch below, from the top. One PR is left, targeting ${baseName}; you merge it yourself.` },
     { value: "base", label: `Merge into ${baseName}`, text: `Squash-merges every PR into ${baseName}, bottom first, rebasing and retargeting each next PR.` },
   ];
   // Combining needs at least 2 open PRs.
-  const shown = todo.length < 2 ? options.filter((o) => o.value === "base") : options;
+  const shown = single ? options.filter((o) => o.value === "base") : options;
   return (
     <>
       <ol className="flex flex-col gap-1 text-sm text-muted-foreground">
@@ -43,7 +44,7 @@ export function MergeChoice({ todo, base, mode, onMode }: {
               type="radio"
               name="merge-mode"
               value={o.value}
-              checked={shown.length === 1 || mode === o.value}
+              checked={mode === o.value}
               onChange={() => onMode(o.value)}
               className="mt-1 accent-emerald-600"
             />
@@ -59,40 +60,31 @@ export function MergeChoice({ todo, base, mode, onMode }: {
   );
 }
 
-// While a merge runs, the button itself shows it: a spinner and the branch being merged.
-export function MergeButton({ id, chunks, base, merge }: { id: string; chunks: Chunk[]; base?: string; merge?: MergeRun }) {
+// Shown on finished pipelines with open PRs, and while a merge runs: then the button itself shows it.
+export function MergeButton({ id, chunks, base, merge, finished }: {
+  id: string; chunks: Chunk[]; base?: string; merge?: MergeRun; finished: boolean;
+}) {
   const [error, setError] = useState<string>();
   const [choice, setChoice] = useState<Mode>("combine");
   // Covers the gap between the POST and the first state update from the stream.
   const [starting, setStarting] = useState(false);
   // Merged PRs are skipped by the engine, so the dialog lists only the rest.
   const todo = chunks.filter((c) => c.pr && c.status !== "merged");
-  const mode: Mode = todo.length < 2 ? "base" : choice;
-  // One PR left (e.g. after a combine): a plain Merge button, in another colour.
   const single = todo.length < 2;
+  const mode: Mode = single ? "base" : choice;
   const baseName = base ?? "the base branch";
-  const tone = single ? "bg-violet-600 hover:bg-violet-700" : "bg-emerald-600 hover:bg-emerald-700";
   const running = merge?.status === "running";
+  // A combine merges PRs one by one: keep its colour while the open count drops.
+  const tone = TONE[running && merge?.mode === "combine" ? "stack" : single ? "single" : "stack"];
   useEffect(() => {
     if (running) setStarting(false);
   }, [running]);
   const run = async () => {
     setError(undefined);
     setStarting(true);
-    try {
-      const res = await fetch(`/api/pipelines/${encodeURIComponent(id)}/merge`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ mode }),
-      });
-      if (!res.ok) {
-        // The body may not be JSON (proxy error page).
-        const body: { error?: string } | null = await res.json().catch(() => null);
-        setError(body?.error ?? `Merge failed (${res.status})`);
-        setStarting(false);
-      }
-    } catch {
-      setError("Network error: the merge did not start");
+    const err = await postAction(id, "merge", { mode });
+    if (err) {
+      setError(err);
       setStarting(false);
     }
   };
@@ -100,18 +92,13 @@ export function MergeButton({ id, chunks, base, merge }: { id: string; chunks: C
     const current = chunks.find((c) => c.name === merge?.current);
     const label = running ? (current?.branch ?? merge?.current) : undefined;
     return (
-      <Button
-        size="xs"
-        disabled
-        // A combine merges PRs one by one: keep its colour while the open count drops.
-        className={`${merge?.mode === "combine" ? "bg-emerald-600" : tone} text-white disabled:opacity-80`}
-        title={merge?.message}
-      >
+      <Button size="xs" disabled className={`${tone} text-white disabled:opacity-80`} title={merge?.message}>
         <Loader2 className="animate-spin" />
         <span className="max-w-64 truncate">{label ? `Merging ${label}…` : "Merging…"}</span>
       </Button>
     );
   }
+  if (!finished || todo.length === 0) return null;
   return (
     <AlertDialog onOpenChange={(open) => open && setChoice("combine")}>
       {error && <span className="text-xs text-destructive">{error}</span>}
@@ -123,11 +110,11 @@ export function MergeButton({ id, chunks, base, merge }: { id: string; chunks: C
       </AlertDialogTrigger>
       <AlertDialogContent>
         <AlertDialogHeader>
-          <AlertDialogTitle>{single ? `Merge #${prNumber(todo[0]?.pr ?? "")} into ${baseName}?` : "Merge the PR stack?"}</AlertDialogTitle>
+          <AlertDialogTitle>{single ? `Merge #${prNumber(todo[0]!.pr!)} into ${baseName}?` : "Merge the PR stack?"}</AlertDialogTitle>
           {/* asChild: a list cannot sit inside the default <p>. */}
           <AlertDialogDescription asChild>
             <div className="flex flex-col gap-3">
-              <MergeChoice todo={todo} base={base} mode={mode} onMode={setChoice} />
+              <MergeChoice todo={todo} single={single} baseName={baseName} mode={mode} onMode={setChoice} />
             </div>
           </AlertDialogDescription>
         </AlertDialogHeader>

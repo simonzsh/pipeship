@@ -1,11 +1,12 @@
-import { GitBranch, GitPullRequest, Loader2, XCircle } from "lucide-react";
+import { GitBranch, GitPullRequest } from "lucide-react";
 import type { Chunk, MergeRun } from "../state.ts";
 import { Button } from "./components/ui/button";
 import { ChunkStatusIcon } from "./status";
+import { prNumber } from "./utils";
 
 // "#12" for a GitHub PR URL; other hosts keep the plain label.
 const prLabel = (url: string) => {
-  const n = url.match(/\/pull\/(\d+)/)?.[1];
+  const n = prNumber(url);
   return n ? `#${n}` : "PR";
 };
 
@@ -47,12 +48,11 @@ export function StackTree({ base, chunks, merge }: { base?: string; chunks: Chun
               </code>
             )}
             <span className="ml-auto flex shrink-0 items-center gap-2">
-              {mergeHere?.status === "running" ? (
-                <Loader2 className="size-4 animate-spin text-violet-600 dark:text-violet-400" aria-label="merging" />
-              ) : mergeHere?.status === "failed" ? (
-                <XCircle className="size-4 text-red-600 dark:text-red-400" aria-label="merge stopped" role="img">
-                  <title>{mergeHere.error}</title>
-                </XCircle>
+              {mergeHere ? (
+                <ChunkStatusIcon
+                  status={mergeHere.status === "running" ? "merging" : "failed"}
+                  title={mergeHere.status === "failed" ? `merge stopped: ${mergeHere.error}` : "merging"}
+                />
               ) : (
                 c.status && <ChunkStatusIcon status={c.status} />
               )}

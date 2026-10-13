@@ -1,13 +1,25 @@
-import { Square, Trash2 } from "lucide-react";
+import { Square, Trash2, type LucideIcon } from "lucide-react";
 import { useState } from "react";
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription,
   AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger,
 } from "./components/ui/alert-dialog";
 import { Button } from "./components/ui/button";
+import { postAction } from "./utils";
+
+interface ActionDef {
+  endpoint: string;
+  icon: LucideIcon;
+  iconClass: string;
+  button: string;
+  title: string;
+  description: string;
+  serversNote?: string; // appended when the pipeline has test servers
+  confirm: string;
+}
 
 // Once the agents are done, the only things left to stop are the test servers.
-const ACTIONS = {
+const ACTIONS: Record<"stopPipeline" | "stopServer" | "delete", ActionDef> = {
   stopPipeline: {
     endpoint: "stop",
     icon: Square,
@@ -41,14 +53,11 @@ const ACTIONS = {
 
 // Test servers usually start at the last step: only mention them when some exist.
 export function ActionButton({ id, action, hasServers }: { id: string; action: keyof typeof ACTIONS; hasServers?: boolean }) {
-  const def: { serversNote?: string } & (typeof ACTIONS)[typeof action] = ACTIONS[action];
-  const { endpoint, icon: Icon, iconClass, button, title, confirm } = def;
-  const description = hasServers && def.serversNote ? `${def.description} ${def.serversNote}` : def.description;
+  const { endpoint, icon: Icon, iconClass, button, title, description, serversNote, confirm } = ACTIONS[action];
   const [error, setError] = useState<string>();
   const run = async () => {
     setError(undefined);
-    const res = await fetch(`/api/pipelines/${encodeURIComponent(id)}/${endpoint}`, { method: "POST" });
-    if (!res.ok) setError((await res.json()).error);
+    setError(await postAction(id, endpoint));
   };
   return (
     <AlertDialog>
@@ -61,7 +70,7 @@ export function ActionButton({ id, action, hasServers }: { id: string; action: k
       <AlertDialogContent>
         <AlertDialogHeader>
           <AlertDialogTitle>{title}</AlertDialogTitle>
-          <AlertDialogDescription>{description}</AlertDialogDescription>
+          <AlertDialogDescription>{hasServers && serversNote ? `${description} ${serversNote}` : description}</AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter>
           <AlertDialogCancel>Cancel</AlertDialogCancel>
