@@ -161,3 +161,19 @@ test("package.json and both plugin manifests declare the same version", () => {
   expect(version(".claude-plugin/plugin.json")).toBe(expected);
   expect(version(".codex-plugin/plugin.json")).toBe(expected);
 });
+
+test("ids have no date: refs, --name, then the first 3 words of the title", () => {
+  const one = createPipeline({ repo, title: "t", source: "linear", links: [{ ref: "IDA-1" }] });
+  expect(one.id).toBe("ida-1");
+  const two = createPipeline({ repo, title: "t", source: "linear", links: [{ ref: "IDB-1" }, { ref: "IDB-2" }] });
+  expect(two.id).toBe("idb-1-idb-2");
+  expect(createPipeline({ repo, title: "Link sessions", name: "session-link", source: "text" }).id).toBe("session-link");
+  expect(createPipeline({ repo, title: "t", name: "ignored-name", source: "linear", links: [{ ref: "IDC-1" }] }).id).toBe("idc-1");
+  expect(createPipeline({ repo, title: "Link each pipeline to its agent", source: "text" }).id).toBe("link-each-pipeline");
+  expect(createPipeline({ repo, title: "Créer un lien rapide", source: "text" }).id).toBe("creer-un-lien");
+});
+
+test("duplicate ids get -2 then -3", () => {
+  const ids = [1, 2, 3].map(() => createPipeline({ repo, title: "t", name: "dup-name", source: "text" }).id);
+  expect(ids).toEqual(["dup-name", "dup-name-2", "dup-name-3"]);
+});
