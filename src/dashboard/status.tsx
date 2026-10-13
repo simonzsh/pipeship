@@ -1,4 +1,4 @@
-import { CheckCircle2, GitMerge, Loader2, MessageCircleQuestion, Square, Unplug, XCircle, type LucideIcon } from "lucide-react";
+import { CheckCircle2, GitMerge, Loader2, MessageCircleQuestion, Square, XCircle, type LucideIcon } from "lucide-react";
 import type { Status } from "../state.ts";
 import { Badge } from "./components/ui/badge";
 
@@ -9,9 +9,6 @@ const STATUS: Record<Status, { label: string; icon: LucideIcon; className: strin
   failed: { label: "Failed", icon: XCircle, className: "bg-red-500/15 text-red-700 dark:text-red-400" },
   stopped: { label: "Stopped", icon: Square, className: "bg-muted text-muted-foreground" },
 };
-
-// Display only: the pipeline keeps its status, so Stop and Delete work as before.
-const AGENT_STOPPED = { label: "Agent stopped", icon: Unplug, className: "bg-red-500/15 text-red-700 dark:text-red-400" };
 
 // A chunk's status is free text from the skill: "done", "pr", "merged" and "failed" are final, anything else is in progress.
 // "merging" comes from the dashboard while a merge runs on that chunk: violet, so it does not look like an agent coding.
@@ -29,8 +26,8 @@ function chunkIcon(status: string, label: string) {
   return <Loader2 className="size-4 animate-spin text-blue-600 dark:text-blue-400" aria-label={label} />;
 }
 
-export function StatusBadge({ status, agentStopped }: { status: Status; agentStopped?: boolean }) {
-  const { label, icon: Icon, className } = agentStopped ? AGENT_STOPPED : STATUS[status];
+export function StatusBadge({ status }: { status: Status }) {
+  const { label, icon: Icon, className } = STATUS[status];
   return (
     <Badge variant="secondary" className={className}>
       <Icon /> {label}
