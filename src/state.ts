@@ -20,8 +20,10 @@ export interface Chunk {
 export const MERGED = "merged";
 
 export type MergeStatus = "running" | "done" | "failed";
+export type MergeMode = "combine" | "base";
 export interface MergeRun {
   status: MergeStatus;
+  mode: MergeMode; // "combine" folds the stack into the bottom PR; "base" merges each PR into the base branch
   pid?: number; // process that runs the merge (the dashboard server)
   current?: string; // name of the chunk being merged, or the one that stopped the merge
   pr?: number; // PR number of `current`
@@ -147,7 +149,10 @@ export function createPipeline(opts: {
 export function readState(id: string): State {
   const path = statePath(id);
   if (!existsSync(path)) throw new Error(`unknown pipeline: ${id}`);
-  return upgrade(JSON.parse(readFileSync(path, "utf8")));
+  const state = upgrade(JSON.parse(readFileSync(path, "utf8")));
+  // Runs saved before combine mode existed were all base merges.
+  if (state.merge && !state.merge.mode) state.merge.mode = "base";
+  return state;
 }
 
 // State files written before `links` existed hold one `ref` (sometimes "A-1,A-2") and one `url`.

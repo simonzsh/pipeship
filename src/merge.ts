@@ -1,6 +1,6 @@
 import { existsSync } from "node:fs";
 import { isAlive } from "./preview.ts";
-import { listStates, MERGED, readState, updateState, upsertChunk, type Chunk, type MergeRun, type State } from "./state.ts";
+import { listStates, MERGED, readState, updateState, upsertChunk, type Chunk, type MergeMode, type MergeRun, type State } from "./state.ts";
 
 export interface RunResult {
   code: number;
@@ -95,6 +95,10 @@ export function classifyPr(v: PrView): Verdict {
   return { kind: "ready" };
 }
 
+// Anything but an explicit "base" gets the safe default: combine never touches the base branch.
+export const parseMergeMode = (body: unknown): MergeMode =>
+  (body as { mode?: unknown } | null)?.mode === "base" ? "base" : "combine";
+
 // Pipeline ids with a merge job in this process.
 const active = new Set<string>();
 
@@ -103,7 +107,7 @@ const STALE_MS = 5 * 60_000;
 const isStale = (m: MergeRun | undefined, alive: (pid: number) => boolean) =>
   m?.status === "running" && (m.pid === undefined || !alive(m.pid) || Date.now() - Date.parse(m.updatedAt) > STALE_MS);
 
-export function startMerge(id: string, deps: Partial<MergeDeps> = {}): { state: State; done: Promise<void> } {
+export function startMerge(id: string, deps: Partial<MergeDeps> = {}, mode: MergeMode = "combine"): { state: State; done: Promise<void> } {
   let s: State;
   try {
     s = readState(id);
@@ -113,14 +117,16 @@ export function startMerge(id: string, deps: Partial<MergeDeps> = {}): { state: 
   if (active.has(id) || (s.merge?.status === "running" && !isStale(s.merge, isAlive))) {
     throw new MergeError("a merge is already running", 409);
   }
-  if (!s.chunks.some((c) => c.pr && c.status !== MERGED)) throw new MergeError("no open PR to merge", 400);
+  const open = s.chunks.filter((c) => c.pr && c.status !== MERGED).length;
+  if (open === 0) throw new MergeError("no open PR to merge", 400);
+  if (mode === "combine" && open < 2) throw new MergeError("only one open PR: nothing to combine", 400);
 
   active.add(id);
   const now = new Date().toISOString();
   updateState(id, (x) => {
-    x.merge = { status: "running", pid: process.pid, message: "starting", startedAt: now, updatedAt: now, oldTips: s.merge?.oldTips };
+    x.merge = { status: "running", mode, pid: process.pid, message: "starting", startedAt: now, updatedAt: now, oldTips: s.merge?.oldTips };
   });
-  const done = mergeStack(id, deps).finally(() => active.delete(id));
+  const done = mergeStack(id, deps, mode).finally(() => active.delete(id));
   return { state: readState(id), done };
 }
 
@@ -144,7 +150,7 @@ export function failStaleMerges(alive: (pid: number) => boolean = isAlive): void
 const firstLine = (text: string) => text.trim().split("\n")[0] ?? "";
 
 // Never throws: every failure ends up in state.merge.
-export async function mergeStack(id: string, deps: Partial<MergeDeps> = {}): Promise<void> {
+export async function mergeStack(id: string, deps: Partial<MergeDeps> = {}, mode: MergeMode = "combine"): Promise<void> {
   const d: MergeDeps = {
     run: defaultRunner,
     sleep: (ms) => Bun.sleep(ms),
@@ -164,7 +170,7 @@ export async function mergeStack(id: string, deps: Partial<MergeDeps> = {}): Pro
     const s = readState(id);
     const startedAt = s.merge?.status === "running" ? s.merge.startedAt : iso();
     updateState(id, (x) => {
-      x.merge = { status: "running", pid: process.pid, message: "starting", startedAt, updatedAt: iso(), oldTips: x.merge?.oldTips };
+      x.merge = { status: "running", mode, pid: process.pid, message: "starting", startedAt, updatedAt: iso(), oldTips: x.merge?.oldTips };
     });
 
     const gh = async (args: string[]) => d.run("gh", args, { cwd: s.repo });
@@ -175,7 +181,103 @@ export async function mergeStack(id: string, deps: Partial<MergeDeps> = {}): Pro
       return JSON.parse(r.stdout) as PrView;
     };
 
+    // Just after a push, CI has not queued yet: "no checks" and "blocked" are not final answers.
+    const waitReady = async (c: Chunk, url: string, n: number, first: PrView, pushed: boolean, expectedHead: string): Promise<PrView> => {
+      let v = first;
+      const hadChecks = v.statusCheckRollup.length > 0;
+      const t0 = d.now();
+      let checksSince: number | undefined;
+      for (;;) {
+        v = await view(url);
+        let verdict = classifyPr(v);
+        if (pushed && d.now() - t0 <= d.limits.mergeableMs) {
+          const unseen = v.headRefOid !== expectedHead;
+          const noChecks = hadChecks && v.statusCheckRollup.length === 0;
+          if (unseen || (verdict.kind === "ready" && noChecks) || (verdict.kind === "blocked" && verdict.transient)) {
+            verdict = { kind: "wait", reason: `waiting for checks to start on #${n}`, pendingChecks: false };
+          }
+        }
+        if (verdict.kind === "ready") break;
+        if (verdict.kind === "blocked") throw new Error(verdict.reason);
+        if (verdict.pendingChecks) {
+          checksSince ??= d.now();
+          if (d.now() - checksSince > d.limits.checksMs) throw new Error(`checks still running on #${n} after 15 min`);
+        } else if (d.now() - t0 > d.limits.mergeableMs) {
+          throw new Error(`GitHub has not computed whether #${n} can merge after 2 min`);
+        }
+        progress(c, n, verdict.reason);
+        await d.sleep(d.limits.pollMs);
+      }
+      return v;
+    };
+
+    // Combine: fold each PR into the branch of the PR below, top first. No rebase, retarget or push:
+    // origin and the base branch stay untouched, and the bottom PR collects the whole stack.
+    const combine = async (chunks: Chunk[]) => {
+      const views = await Promise.all(chunks.map((c) => view(c.pr!)));
+      const closed = views.find((v) => v.state === "CLOSED");
+      if (closed) throw new Error(`PR #${closed.number} is closed`);
+      chunks.forEach((c, i) => views[i]!.state === "MERGED" && upsertChunk(id, { name: c.name, status: MERGED }));
+      const open = chunks.map((c, i) => ({ c, v: views[i]! })).filter((x) => x.v.state === "OPEN");
+      const bottom = open[0];
+      if (!bottom) throw new Error("no open PR to combine");
+      const bottomIdx = chunks.indexOf(bottom.c);
+
+      // Tip of the branch that the last fold went into: GitHub shows it on the next PR only after a delay.
+      let foldTip: string | undefined;
+      for (let i = open.length - 1; i >= 1; i--) {
+        const { c } = open[i]!;
+        const below = open[i - 1]!.v;
+        const url = c.pr!;
+        const n = parsePrUrl(url).number;
+        progress(c, n, `checking #${n}`);
+        let v = await view(url);
+        if (v.baseRefName !== below.headRefName) throw new Error(`PR #${n} targets ${v.baseRefName}, not ${below.headRefName}`);
+        v = await waitReady(c, url, n, v, foldTip !== undefined, foldTip ?? v.headRefOid);
+
+        // No -d: the remote branches stay.
+        const args = (kind: string) => ["pr", "merge", url, kind, "--match-head-commit", v.headRefOid];
+        let merge = await gh(args("--merge"));
+        // Squash is the fallback only when the repo refuses merge commits, not for any other failure.
+        if (merge.code !== 0 && /merge commits are not allowed/i.test(merge.stderr)) {
+          merge = await gh(args("--squash"));
+        }
+        if (merge.code !== 0) throw new Error(`gh pr merge #${n} failed: ${firstLine(merge.stderr)}`);
+        upsertChunk(id, { name: c.name, status: MERGED });
+        progress(c, n, `combined #${n} into ${below.headRefName}`);
+        const tip = await d.run("git", ["ls-remote", "origin", `refs/heads/${below.headRefName}`], { cwd: s.repo });
+        foldTip = tip.stdout.split(/\s/)[0];
+        if (tip.code !== 0 || !foldTip) throw new Error(`could not read the new head of ${below.headRefName}: ${firstLine(tip.stderr)}`);
+      }
+
+      // Every PR above the bottom one is merged now, including those from an earlier run.
+      const folded = chunks.slice(bottomIdx + 1).map((c) => c.pr!);
+      const bottomUrl = bottom.c.pr!;
+      const bn = parsePrUrl(bottomUrl);
+      if (folded.length) {
+        progress(bottom.c, bn.number, `updating the description of #${bn.number}`);
+        const fail = (why: string) =>
+          new Error(`could not update the description of #${bn.number}: ${why}. The PRs are combined; edit the description by hand.`);
+        const got = await gh(["pr", "view", bottomUrl, "--json", "body"]);
+        if (got.code !== 0) throw fail(firstLine(got.stderr));
+        const body: string = (JSON.parse(got.stdout) as { body?: string }).body ?? "";
+        // Exact match: .../pull/1 must not count as listed because .../pull/12 is.
+        const todo = folded.filter((u) => !new RegExp(`${u.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?!\\d)`).test(body));
+        if (todo.length) {
+          const line = `Combines ${todo.map((u) => `#${parsePrUrl(u).number}`).join(", ")} (merged into this branch):\n${todo.map((u) => `- ${u}`).join("\n")}`;
+          const patch = await gh(["api", "-X", "PATCH", `repos/${bn.owner}/${bn.repo}/pulls/${bn.number}`, "-f", `body=${body.trimEnd()}\n\n${line}\n`]);
+          if (patch.code !== 0) throw fail(firstLine(patch.stderr));
+        }
+      }
+      const total = folded.length + 1;
+      write({ status: "done", current: undefined, pr: undefined, oldTips: undefined, message: `combined ${total} PRs into #${bn.number}`, endedAt: iso() });
+    };
+
     const chunks = s.chunks.filter((c) => c.pr);
+    if (mode === "combine") {
+      await combine(chunks);
+      return;
+    }
     let base = s.base;
     if (!base) base = (await view(chunks[0]!.pr!)).baseRefName;
     // The PR below, once merged. GitHub reports its rebased head, but the next branch still sits on
@@ -245,31 +347,7 @@ export async function mergeStack(id: string, deps: Partial<MergeDeps> = {}): Pro
         progress(c, n, `${pushed ? `rebased ${branch} and ` : ""}retargeted #${n} to ${base}`);
       }
 
-      // Just after a push, CI has not queued yet: "no checks" and "blocked" are not final answers.
-      const hadChecks = v.statusCheckRollup.length > 0;
-      const t0 = d.now();
-      let checksSince: number | undefined;
-      for (;;) {
-        v = await view(url);
-        let verdict = classifyPr(v);
-        if (pushed && d.now() - t0 <= d.limits.mergeableMs) {
-          const unseen = v.headRefOid !== expectedHead;
-          const noChecks = hadChecks && v.statusCheckRollup.length === 0;
-          if (unseen || (verdict.kind === "ready" && noChecks) || (verdict.kind === "blocked" && verdict.transient)) {
-            verdict = { kind: "wait", reason: `waiting for checks to start on #${n}`, pendingChecks: false };
-          }
-        }
-        if (verdict.kind === "ready") break;
-        if (verdict.kind === "blocked") throw new Error(verdict.reason);
-        if (verdict.pendingChecks) {
-          checksSince ??= d.now();
-          if (d.now() - checksSince > d.limits.checksMs) throw new Error(`checks still running on #${n} after 15 min`);
-        } else if (d.now() - t0 > d.limits.mergeableMs) {
-          throw new Error(`GitHub has not computed whether #${n} can merge after 2 min`);
-        }
-        progress(c, n, verdict.reason);
-        await d.sleep(d.limits.pollMs);
-      }
+      v = await waitReady(c, url, n, v, pushed, expectedHead);
 
       // No -d: the remote branches stay.
       const merge = await gh(["pr", "merge", url, "--squash", "--match-head-commit", expectedHead]);

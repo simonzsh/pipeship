@@ -4,7 +4,7 @@ import type { PipelineView } from "../state.ts";
 import { ActionButton } from "./action-button";
 import { Badge } from "./components/ui/badge";
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "./components/ui/card";
-import { MergeButton, MergeLine } from "./merge-button";
+import { CombinedNote, MergeButton } from "./merge-button";
 import { PreviewPanel } from "./preview-panel";
 import { AgentLogo, isAgentStopped } from "./session";
 import { StackTree } from "./stack-tree";
@@ -81,7 +81,7 @@ export function PipelineCard({ p }: { p: PipelineView }) {
           <div className="flex shrink-0 flex-col items-end gap-2">
             <div className="flex items-center gap-1.5">
               {p.mode === "quick" && (
-                <Badge variant="secondary" className="bg-violet-500/15 text-violet-700 dark:text-violet-400">
+                <Badge variant="secondary" className="bg-pink-500/15 text-pink-700 dark:text-pink-400">
                   Quick
                 </Badge>
               )}
@@ -104,7 +104,6 @@ export function PipelineCard({ p }: { p: PipelineView }) {
 
         <CardContent>
           <Steps steps={steps} />
-          {p.merge && <MergeLine merge={p.merge} />}
         </CardContent>
       </div>
 
@@ -112,6 +111,7 @@ export function PipelineCard({ p }: { p: PipelineView }) {
         <CardContent className="flex flex-col gap-4 border-t py-5">
           {p.preview && <PreviewPanel preview={p.preview} />}
           {p.chunks.length > 0 && <StackTree base={p.base} chunks={p.chunks} merge={p.merge} />}
+          {p.merge && <CombinedNote merge={p.merge} chunks={p.chunks} />}
         </CardContent>
       )}
 
@@ -121,7 +121,9 @@ export function PipelineCard({ p }: { p: PipelineView }) {
         <span>·</span>
         <span className="whitespace-nowrap">updated {timeAgo(p.updatedAt)}</span>
         <div className="ml-auto flex items-center gap-2">
-          {finished && prChunks.length > 0 && !allMerged && !merging && <MergeButton id={p.id} chunks={p.chunks} base={p.base} />}
+          {(merging || (finished && prChunks.length > 0 && !allMerged)) && (
+            <MergeButton id={p.id} chunks={p.chunks} base={p.base} merge={p.merge} />
+          )}
           {p.status === "ready" ? (
             p.preview && <ActionButton id={p.id} action="stopServer" />
           ) : p.status === "running" || p.status === "waiting_for_user" || (p.status === "failed" && p.preview) ? (

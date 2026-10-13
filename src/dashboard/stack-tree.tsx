@@ -3,6 +3,12 @@ import type { Chunk, MergeRun } from "../state.ts";
 import { Button } from "./components/ui/button";
 import { ChunkStatusIcon } from "./status";
 
+// "#12" for a GitHub PR URL; other hosts keep the plain label.
+const prLabel = (url: string) => {
+  const n = url.match(/\/pull\/(\d+)/)?.[1];
+  return n ? `#${n}` : "PR";
+};
+
 // The stack is linear: each PR targets the previous one, so depth is the index (plus one under the base root).
 export function StackTree({ base, chunks, merge }: { base?: string; chunks: Chunk[]; merge?: MergeRun }) {
   const offset = base ? 1 : 0;
@@ -42,7 +48,7 @@ export function StackTree({ base, chunks, merge }: { base?: string; chunks: Chun
             )}
             <span className="ml-auto flex shrink-0 items-center gap-2">
               {mergeHere?.status === "running" ? (
-                <Loader2 className="size-4 animate-spin text-blue-600 dark:text-blue-400" aria-label="merging" />
+                <Loader2 className="size-4 animate-spin text-violet-600 dark:text-violet-400" aria-label="merging" />
               ) : mergeHere?.status === "failed" ? (
                 <XCircle className="size-4 text-red-600 dark:text-red-400" aria-label="merge stopped" role="img">
                   <title>{mergeHere.error}</title>
@@ -53,7 +59,7 @@ export function StackTree({ base, chunks, merge }: { base?: string; chunks: Chun
               {c.pr && (
                 <Button asChild variant="ghost" size="sm">
                   <a href={c.pr} target="_blank">
-                    <GitPullRequest /> PR
+                    <GitPullRequest /> {prLabel(c.pr)}
                   </a>
                 </Button>
               )}
