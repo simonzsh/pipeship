@@ -57,7 +57,7 @@ You can also ask in plain words: "ship ABC-123 with pipeship". pipeship writes t
 
 - **Modes**: `full` (default, all 7 steps) and `quick` (one chunk, blocking questions only, map in the main session, one `sonnet` cleanup pass instead of the full review, no `opus`).
 - **`--skip`** removes steps, e.g. `--skip questions,stack`. You can also say "skip the review" during the run.
-- **Several repos**: a ticket can span several repos. Pass `--repo` once per repo, or let the map step find them. All repos are equal. Each repo gets its own stack of PRs.
+- **Several repos**: a ticket can span several repos. Pass `--repo` once per repo, or let the map step find them. Each repo gets its own stack of PRs.
 - pipeship only starts when you name it. It does not run on ordinary feature requests.
 
 ## Test environment
@@ -83,7 +83,7 @@ This recipe is one front service. For a monorepo, list `services` instead. pipes
 }
 ```
 
-For a ticket that spans several repos, give each service its `repo` (the repo's folder name). It runs from the top worktree of that repo. Put `install` and `copyFiles` on the services. The recipe is saved for this set of repos.
+For a ticket that spans several repos, give each service its `repo` (the repo's folder name). It runs from the top worktree of that repo. Put `install` and `copyFiles` on the services. The recipe is saved for this set of repos. A pipeline with several repos never reads `.pipeship.json`.
 
 ```json
 {

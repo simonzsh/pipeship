@@ -29,7 +29,7 @@ pipeship get <id>                      # read state: check stopRequested and ski
 pipeship step <id> <step> running|done|skipped|failed
 pipeship mode <id> quick|full         # switch the mode after creation; quick skips the pending plan step
 pipeship status <id> waiting_for_user|running|ready|failed
-pipeship chunk <id> <name> [--repo r] [--worktree p] [--branch b] [--status s] [--pr url]   # --repo (name or path): required for a new chunk when the pipeline has several repos
+pipeship chunk <id> <name> [--repo r] [--worktree p] [--branch b] [--status s] [--pr url]   # --repo (name or path) needed for a new chunk with several repos
 pipeship recipe <repo>...              # the saved recipe to start the app for these repos, or "none"
 pipeship preview <id> [<worktree>] [--recipe file]   # starts the app, prints the URL(s); each service runs from the top worktree of its repo
 pipeship dashboard                     # starts the dashboard if needed, prints its URL
@@ -52,8 +52,8 @@ Steps: `map`, `questions`, `plan`, `implement`, `review`, `stack`, `preview`.
 
 1. Parse the arguments (if `$ARGUMENTS` is empty or was not replaced, use the user's request): an optional mode (`quick` or `full`, default `full`), an optional `--skip a,b`, and the ticket (reference, URL or text).
 2. **Read the ticket** with whatever tool this session has for its source: an MCP server (Linear, Notion, Jira…), `gh issue view`, or fetching the URL. Plain text is the ticket itself. A bare reference like `ABC-123` does not name its source: infer it from the tools you have, and ask if unsure. If no tool can read the source, ask the user to paste the ticket.
-3. The repos are the git root of the current directory, plus any repo the user names. All repos are equal. The base branch of each repo is its current branch. If a working tree has uncommitted changes, tell the user — they will not be in the worktrees.
-4. `pipeship new ...` with one `--repo <path>` per repo, the ticket title, the source (`linear`, `notion`, `github`, `jira`, `url`…; omit `--source` for a plain-text ticket), and one `--ref`/`--url` pair per ticket when the pipeline covers several (never join refs into one `--ref`). Note the `id` and `dir` it prints. It lists each repo with its `base` and `dirty`: tell the user about dirty repos. `pipeship new` records the session that runs it (harness, id, cwd). Run it from this orchestrator session, never from a subagent.
+3. The repos are the git root of the current directory, plus any repo the user names. If the current directory is not in a git repo, run `new` without `--repo`: the map step adds the repos. The base branch of each repo is its current branch. If a working tree has uncommitted changes, tell the user — they will not be in the worktrees.
+4. `pipeship new ...` with one `--repo <path>` per repo, the ticket title, the source (`linear`, `notion`, `github`, `jira`, `url`…; omit `--source` for a plain-text ticket), and one `--ref`/`--url` pair per ticket when the pipeline covers several (never join refs into one `--ref`). `new --repo` and `repo` reduce a path to its git root and refuse a path outside git. Note the `id` and `dir` it prints. It lists each repo with its `base` and `dirty`: tell the user about dirty repos. `pipeship new` records the session that runs it (harness, id, cwd). Run it from this orchestrator session, never from a subagent.
    - For a plain-text ticket, pick a 2 or 3 word name that sums it up (`session-link`, `quick-mode`) and pass it with `--name`. Ticket refs win over the name.
 5. Write the full ticket text to `<dir>/ticket.md`. Later steps read only this file, never the original source.
 6. Run `pipeship dashboard` and give the user the URL.
@@ -61,11 +61,11 @@ Steps: `map`, `questions`, `plan`, `implement`, `review`, `stack`, `preview`.
 ## Step 1 — map
 
 Subagent (read-only, model `sonnet`; Claude Code: `Explore` type). Input: `ticket.md` and the repos. Output: `<dir>/map.md` with:
-- `## Repos`: other repos the ticket touches, when it names them or sibling git repos in the parent folder of the current directory match its code. Give the path and the reason. The subagent stays read-only: you run `pipeship repo <id> <path>` for each one and tell the user about dirty repos;
+- `## Repos`: other repos the ticket touches, when it names them or sibling git repos in the parent folder of each repo's git root match its code. Give the path and the reason. The subagent stays read-only: you run `pipeship repo <id> <path>` for each one and tell the user about dirty repos;
 - every file the ticket touches (modules, routes, models, UI, tests), with paths and one line on what each does today (per repo, when there are several);
 - repo conventions to follow (structure, naming, test style, branch names from recent `git branch -r`), per repo;
 - the exact **check commands** (lint, typecheck, tests) from each repo config;
-- how to start the app: run `pipeship recipe <repo>...` with all the repos. If it prints `none` and the repo has anything that serves requests (a web app, an API, an MCP server, a worker with a health route), write a draft recipe to `<dir>/recipe.json` (see "Test environment recipe"). If the repo runs several apps (a monorepo, a front and an API), the recipe lists one service per app. With several repos, the draft gives each service a `repo` (the repo's folder name). Back-end only changes count: do not conclude "no preview needed" because the change has no UI. Say "nothing to run" only for a pure library, a CLI that cannot start, or a docs-only change. List what the app needs to run (database, env files, seed data, other services) and how to get test data locally.
+- how to start the app: run `pipeship recipe <repo>...` with all the repos. If it prints `none` and the repo has anything that serves requests (a web app, an API, an MCP server, a worker with a health route), write a draft recipe to `<dir>/recipe.json` (see "Test environment recipe"). If the repo runs several apps (a monorepo, a front and an API), the recipe lists one service per app. Back-end only changes count: do not conclude "no preview needed" because the change has no UI. Say "nothing to run" only for a pure library, a CLI that cannot start, or a docs-only change. List what the app needs to run (database, env files, seed data, other services) and how to get test data locally.
 
 In `quick` mode, do the map yourself in the main session, not in a subagent: on a small ticket a subagent costs as much as the work. Keep the map short: only the files to change, the check commands and how to start the app.
 
@@ -77,7 +77,7 @@ In `quick` mode, do the map yourself in the main session, not in a subagent: on 
 4. `pipeship status <id> waiting_for_user`, then **stop and wait** for the answers.
 5. When the user answers: append the answers to `ticket.md` under `## Answers`, then `pipeship step <id> questions done`.
 
-In `quick` mode, ask only **blocking** questions. If there are none, mark the step done and continue without a pause.
+In `quick` mode, ask only **blocking** questions. When the map step added repos, the repo list is a blocking question. If there are none, mark the step done and continue without a pause.
 
 ## Step 3 — plan
 
@@ -129,7 +129,7 @@ If a repo has no remote, skip its PRs and tell the user.
 
 Run the changed code, front end or back end. An API, MCP or engine change needs a running server as much as a UI change: unit tests do not show what a real client gets. Mark this step `skipped` only when nothing the change touches can run (a pure library with no server, a CLI you cannot start, a docs-only change), and say why in the final summary. "No UI" and "engine only" are not reasons to skip. Once every step is done or skipped, the pipeline becomes `ready` on its own.
 
-1. **Start.** Run `pipeship preview <id>` (it finds each repo's top worktree; for one repo, `<top worktree>` still works), with `--recipe <dir>/recipe.json` if step 1 wrote a draft. It copies local files, installs, starts each service of the recipe on its own free port (back ends first, then fronts), waits until each answers, and marks the pipeline `ready`. A draft recipe that works is saved, so later pipelines in this repo skip this work. Give the user the URLs it prints (the first is the main front). Services the app needs (a local database, a queue) belong in a `start` command of the recipe, so the dashboard's "Stop preview" button stops them with the app (see "Test environment recipe"). Other one-off setup is fine to run yourself; test data follows the data rule of step 7.
+1. **Start.** First run `pipeship recipe <repo>...` again with the final repo list. If the list changed since step 1, update the `repo` names in the draft. Then run `pipeship preview <id>`. It uses each repo's top worktree. Add `--recipe <dir>/recipe.json` if there is a draft. It copies local files, installs, starts each service of the recipe on its own free port (back ends first, then fronts), waits until each answers, and marks the pipeline `ready`. A draft recipe that works is saved, so later pipelines in this repo skip this work. Give the user the URLs it prints (the first is the main front). Services the app needs (a local database, a queue) belong in a `start` command of the recipe, so the dashboard's "Stop preview" button stops them with the app (see "Test environment recipe"). Other one-off setup is fine to run yourself; test data follows the data rule of step 7.
 2. **Verify.** Use the changed behaviour the way its client does, and write what you called and what came back to `<dir>/verify.md`: a UI change in a browser (the preview tools of your harness), an HTTP API with `curl`, an MCP or other protocol with a real client. Cover the main path and one failure path. If you cannot exercise it (no test data, a missing service), say so in the summary. Never claim it works from unit tests alone.
 3. **Fix.** If verification fails, fix the code in the worktree of the chunk that owns it, commit, restack and re-run the checks. Push only if step 6 opened PRs.
 4. **Test guide.** After verify, write `<dir>/test.md` for the user, in the user's language. The dashboard shows it under the test URLs, so the user can test without leaving the dashboard. `verify.md` stays your evidence; `test.md` is the user's guide. Keep it short:
@@ -142,7 +142,7 @@ Run the changed code, front end or back end. An API, MCP or engine change needs 
    - **Data.** Use the data already there. Create data only in a local database, and list it in the guide. If the database is not local, create nothing and say so in the guide.
    - **No external effects.** Never send an SMS, an email or a payment, and never call a real third-party service. If the feature depends on one, mark it "to test by hand" in the guide and explain how.
 
-If the preview fails to start, it prints the log tail: diagnose, fix the recipe or the code, and retry up to twice before asking the user. To fix the recipe: if `pipeship recipe <repo>` points to a `.pipeship.json` in the repo, fix that file in the top worktree (it will be part of the PRs) and tell the user; otherwise write a fixed draft and pass it with `--recipe`. With several repos, always write a draft: they share no `.pipeship.json`.
+If the preview fails to start, it prints the log tail: diagnose, fix the recipe or the code, and retry up to twice before asking the user. To fix the recipe: if `pipeship recipe <repo>` points to a `.pipeship.json` in the repo, fix that file in the top worktree (it will be part of the PRs) and tell the user; otherwise write a fixed draft and pass it with `--recipe`. With several repos there is no `.pipeship.json`: fix the saved recipe with a new draft passed with `--recipe`.
 
 ## End
 
