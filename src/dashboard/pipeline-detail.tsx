@@ -126,10 +126,11 @@ export function PipelineDetail({ p, onBack }: { p: DashboardState; onBack: () =>
             {p.session?.t3Thread && <T3ThreadButton thread={p.session.t3Thread} />}
             <AgentLogo p={p} />
             {p.status === "ready" ? (
-              <>
-                {(!p.preview || starting) && <StartPreviewButton id={p.id} starting={starting} />}
-                {p.preview && <ActionButton id={p.id} action="stopServer" />}
-              </>
+              !p.preview || starting ? (
+                <StartPreviewButton id={p.id} starting={starting} />
+              ) : (
+                <ActionButton id={p.id} action="stopServer" />
+              )
             ) : p.status === "running" || p.status === "waiting_for_user" || (p.status === "failed" && p.preview) ? (
               <ActionButton id={p.id} action="stopPipeline" hasServers={!!p.preview} />
             ) : null}
