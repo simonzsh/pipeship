@@ -1,10 +1,12 @@
 import { afterAll, beforeEach, expect, test } from "bun:test";
-import { mkdtempSync, rmSync, writeFileSync, existsSync, readFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync, existsSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createPipeline, listStates, pipelineDir, readState, setStep, updateState, upsertChunk } from "../src/state.ts";
 import { deletePipeline, findRecipe, isAlive, savedRecipePath, startPreview, stopPipeline } from "../src/preview.ts";
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
+import { Database } from "bun:sqlite";
+import { detectSession, lockHeld, procStart, sessionState, withSessionState, type ReadProc } from "../src/session.ts";
 
 const root = mkdtempSync(join(tmpdir(), "pipeship-test-"));
 process.env.PIPESHIP_HOME = join(root, "home");
@@ -176,4 +178,145 @@ test("ids have no date: refs, --name, then the first 3 words of the title", () =
 test("duplicate ids get -2 then -3", () => {
   const ids = [1, 2, 3].map(() => createPipeline({ repo, title: "t", name: "dup-name", source: "text" }).id);
   expect(ids).toEqual(["dup-name", "dup-name-2", "dup-name-3"]);
+});
+
+const CLAUDE_ID = "cb41411e-2eaf-4c0e-b494-97ea2a18163f";
+const CODEX_ID = "01a135f6-c8ab-7312-975b-351fdc9c7173";
+
+function fakeHomes() {
+  const dir = mkdtempSync(join(root, "homes-"));
+  const homes = { claude: join(dir, "claude"), codex: join(dir, "codex") };
+  mkdirSync(join(homes.claude, "sessions"), { recursive: true });
+  mkdirSync(homes.codex, { recursive: true });
+  return homes;
+}
+
+function procs(chain: { argv0: string; comm?: string; exe?: string }[]): ReadProc {
+  return (pid) => {
+    const p = chain[pid - 100];
+    return p && { ppid: pid + 1 === 100 + chain.length ? 1 : pid + 1, argv0: p.argv0, comm: p.comm ?? "x", exe: p.exe };
+  };
+}
+
+test("detection finds the nearest claude ancestor", () => {
+  const homes = fakeHomes();
+  writeFileSync(join(homes.claude, "sessions", "1.json"), JSON.stringify({ pid: 1, sessionId: CLAUDE_ID, cwd: "/work/dir" }));
+  const read = procs([{ argv0: "zsh" }, { argv0: "claude" }, { argv0: "t3" }]);
+  const env = { CLAUDE_CODE_SESSION_ID: CLAUDE_ID };
+  expect(detectSession({ env, startPid: 100, readProc: read, homes, cwd: "/fallback" })).toEqual({ harness: "claude", id: CLAUDE_ID, cwd: "/work/dir" });
+  expect(detectSession({ env, startPid: 100, readProc: read, homes: fakeHomes(), cwd: "/fallback" })?.cwd).toBe("/fallback");
+});
+
+test("a codex shell under a claude session counts as codex", () => {
+  const homes = fakeHomes();
+  const read = procs([{ argv0: "zsh" }, { argv0: "/x/bin/codex", comm: "codex" }, { argv0: "claude" }]);
+  const both = { CLAUDE_CODE_SESSION_ID: CLAUDE_ID, CODEX_THREAD_ID: CODEX_ID, CODEX_SESSION_ID: "01a135f8-b528-7c11-9204-49a8a1627a10" };
+  expect(detectSession({ env: both, startPid: 100, readProc: read, homes, cwd: "/c" })).toEqual({ harness: "codex", id: CODEX_ID, cwd: "/c" });
+  const only = { CLAUDE_CODE_SESSION_ID: CLAUDE_ID, CODEX_SESSION_ID: "01a135f8-b528-7c11-9204-49a8a1627a10" };
+  expect(detectSession({ env: only, startPid: 100, readProc: read, homes })?.id).toBe("01a135f8-b528-7c11-9204-49a8a1627a10");
+});
+
+test("env vars alone are not enough", () => {
+  const homes = fakeHomes();
+  const env = { CLAUDE_CODE_SESSION_ID: CLAUDE_ID };
+  const none = procs([{ argv0: "zsh" }, { argv0: "sshd" }]);
+  expect(detectSession({ env, startPid: 100, readProc: none, homes })).toBeUndefined();
+  const claude = procs([{ argv0: "zsh" }, { argv0: "claude" }]);
+  expect(detectSession({ env: {}, startPid: 100, readProc: claude, homes })).toBeUndefined();
+  expect(detectSession({ env: { CLAUDE_CODE_SESSION_ID: "../../etc" }, startPid: 100, readProc: claude, homes })).toBeUndefined();
+});
+
+test("claude is matched by CLAUDE_CODE_EXECPATH", () => {
+  const homes = fakeHomes();
+  const path = "/opt/x/2.1.296";
+  const env = { CLAUDE_CODE_SESSION_ID: CLAUDE_ID, CLAUDE_CODE_EXECPATH: path };
+  const read = procs([{ argv0: "zsh" }, { argv0: path, comm: "2.1.296", exe: path }]);
+  expect(detectSession({ env, startPid: 100, readProc: read, homes })?.harness).toBe("claude");
+  expect(detectSession({ env: { ...env, CLAUDE_CODE_EXECPATH: "/usr/bin/node" }, startPid: 100, readProc: read, homes })).toBeUndefined();
+});
+
+test.skipIf(process.platform !== "linux")("a claude session is active only while its registry entry matches a live process", () => {
+  const homes = fakeHomes();
+  const entry = (start: unknown) =>
+    writeFileSync(join(homes.claude, "sessions", `${process.pid}.json`), JSON.stringify({ pid: process.pid, sessionId: CLAUDE_ID, procStart: start, status: "busy", cwd: "/w" }));
+  writeFileSync(join(homes.claude, "sessions", `${process.pid}.abc.key`), "not read");
+  const session = { harness: "claude" as const, id: CLAUDE_ID, cwd: "/w" };
+
+  entry(procStart(process.pid));
+  expect(sessionState(session, homes)).toEqual({ status: "active", activity: "busy" });
+
+  entry("1");
+  mkdirSync(join(homes.claude, "projects", "-x"), { recursive: true });
+  writeFileSync(join(homes.claude, "projects", "-x", `${CLAUDE_ID}.jsonl`), "");
+  expect(sessionState(session, homes)).toEqual({ status: "stopped" });
+
+  entry(undefined);
+  expect(sessionState(session, homes)).toEqual({ status: "active", activity: "busy" });
+
+  entry(procStart(process.pid));
+  expect(sessionState(session, homes, { isAlive: () => false })).toEqual({ status: "stopped" });
+
+  rmSync(join(homes.claude, "projects"), { recursive: true });
+  expect(sessionState(session, homes, { isAlive: () => false })).toEqual({ status: "deleted" });
+  expect(sessionState({ ...session, id: "../../etc" }, homes)).toEqual({ status: "unknown" });
+});
+
+test("codex states come from the lock, the threads table and the rollouts", async () => {
+  const homes = fakeHomes();
+  const other = "01a135f8-b528-7c11-9204-49a8a1627a10";
+  const db = new Database(join(homes.codex, "state_5.sqlite"));
+  db.run("CREATE TABLE threads(id TEXT PRIMARY KEY, cwd TEXT, archived INTEGER)");
+  db.run("INSERT INTO threads VALUES (?, '/w', 0)", [CODEX_ID]);
+  db.run("INSERT INTO threads VALUES (?, '/w', 1)", [other]);
+  db.close();
+  const at = (id: string) => sessionState({ harness: "codex", id, cwd: "/w" }, homes);
+  expect(at(CODEX_ID)).toEqual({ status: "stopped" });
+  expect(at(other)).toEqual({ status: "archived" });
+
+  const orphan = "01a135f9-0000-7000-8000-000000000001";
+  expect(at(orphan)).toEqual({ status: "deleted" });
+  mkdirSync(join(homes.codex, "sessions", "2026", "10", "13"), { recursive: true });
+  writeFileSync(join(homes.codex, "sessions", "2026", "10", "13", `rollout-x-${orphan}.jsonl`), "");
+  expect(at(orphan)).toEqual({ status: "stopped" });
+
+  if (process.platform !== "linux" || !Bun.which("flock")) return;
+  mkdirSync(join(homes.codex, "thread-writer-locks"));
+  const lock = join(homes.codex, "thread-writer-locks", `${CODEX_ID}.lock`);
+  writeFileSync(lock, "");
+  expect(lockHeld(lock)).toBe(false);
+  expect(at(CODEX_ID)).toEqual({ status: "stopped" });
+  const child = spawn("flock", [lock, "sleep", "5"], { stdio: "ignore" });
+  try {
+    for (let i = 0; i < 50 && !lockHeld(lock); i++) await Bun.sleep(100);
+    expect(at(CODEX_ID)).toEqual({ status: "loaded" });
+  } finally {
+    child.kill();
+  }
+});
+
+test("pipelines record their session, and old state files without one still load", () => {
+  const session = { harness: "codex" as const, id: CODEX_ID, cwd: "/w" };
+  const withSession = createPipeline({ repo, title: "t", source: "text", session });
+  expect(readState(withSession.id).session).toEqual(session);
+
+  const plain = createPipeline({ repo, title: "t", source: "text" });
+  expect("session" in readState(plain.id)).toBe(false);
+  const path = join(pipelineDir(plain.id), "state.json");
+  const old = JSON.parse(readFileSync(path, "utf8"));
+  delete old.session;
+  writeFileSync(path, JSON.stringify(old));
+  expect(readState(plain.id).session).toBeUndefined();
+  expect(withSessionState([readState(plain.id)])[0]).not.toHaveProperty("sessionState");
+});
+
+test("the server never forwards registry secrets", () => {
+  const homes = fakeHomes();
+  writeFileSync(
+    join(homes.claude, "sessions", `${process.pid}.json`),
+    JSON.stringify({ pid: process.pid, sessionId: CLAUDE_ID, procStart: "1", status: "idle", cwd: "/w", peerToken: "secret", messagingSocketPath: "/tmp/secret.sock" }),
+  );
+  const state = createPipeline({ repo, title: "t", source: "text", session: { harness: "claude", id: CLAUDE_ID, cwd: "/w" } });
+  const out = JSON.stringify(withSessionState([state], { homes, now: Date.now() + 61_000 }));
+  expect(out).toContain("sessionState");
+  expect(out).not.toContain("secret");
 });
