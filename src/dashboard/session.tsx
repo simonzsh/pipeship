@@ -1,7 +1,9 @@
 import { Check } from "lucide-react";
 import { useEffect, useState } from "react";
 import { siClaude } from "simple-icons";
+import { Tooltip, TooltipContent, TooltipTrigger } from "./components/ui/tooltip";
 import type { Session, State } from "../state.ts";
+import { cn } from "./utils";
 
 export function resumeCommand(s: Session): string {
   const cwd = /^[\w./~-]+$/.test(s.cwd) ? s.cwd : `'${s.cwd.replace(/'/g, `'\\''`)}'`;
@@ -37,6 +39,7 @@ const CHATGPT = { title: "ChatGPT", path: "M9.205 8.658v-2.26c0-.19.072-.333.238
 // The provider logo; a click copies the resume command, so the card needs no session row.
 export function AgentLogo({ p }: { p: State }) {
   const [copied, setCopied] = useState(false);
+  const [hovered, setHovered] = useState(false);
   // Reset the icon after 1.5 s; clean up if the card unmounts first.
   useEffect(() => {
     if (!copied) return;
@@ -46,32 +49,54 @@ export function AgentLogo({ p }: { p: State }) {
   const session = p.session;
   if (typeof session?.id !== "string") return null;
   const claude = session.harness === "claude";
+  const name = claude ? "Claude Code" : "Codex";
   const icon = claude ? siClaude : CHATGPT;
   const cmd = resumeCommand(session);
   // Hand-edited state may hold anything: only offer a command for a real session id.
   const canResume = UUID.test(session.id);
-  const title = `${claude ? "Claude Code" : "Codex"} session` + (canResume ? ": click to copy the resume command" : "");
   return (
-    <button
-      type="button"
-      title={title}
-      aria-label={title}
-      disabled={!canResume}
-      className="flex size-6 items-center justify-center rounded-md enabled:hover:bg-accent"
-      onClick={async (e) => {
-        e.stopPropagation();
-        if (await copyText(cmd)) setCopied(true);
-        else window.prompt("Copy the resume command", cmd);
-      }}
-    >
-      {copied ? (
-        <Check className="size-3.5 text-emerald-600 dark:text-emerald-400" />
-      ) : (
-        // Claude in its brand orange; the ChatGPT logo is black or white, so it follows the text colour.
-        <svg viewBox="0 0 24 24" fill="currentColor" className="size-3.5 text-foreground" style={{ color: claude ? `#${siClaude.hex}` : undefined }}>
-          <path d={icon.path} />
-        </svg>
-      )}
-    </button>
+    // Radix closes the tooltip on click: keep it open while it says "Copied".
+    <Tooltip open={hovered || copied} onOpenChange={setHovered}>
+      <TooltipTrigger asChild>
+        <button
+          type="button"
+          aria-label={canResume ? `Copy the command to resume the ${name} session` : `${name} session`}
+          aria-disabled={!canResume}
+          className={cn(
+            "flex size-6 items-center justify-center rounded-md",
+            canResume ? "cursor-pointer hover:bg-accent" : "cursor-default",
+          )}
+          onClick={async (e) => {
+            e.stopPropagation();
+            if (!canResume) return;
+            if (await copyText(cmd)) setCopied(true);
+            else window.prompt("Copy the resume command", cmd);
+          }}
+        >
+          {copied ? (
+            <Check className="size-3.5 text-emerald-600 dark:text-emerald-400" />
+          ) : (
+            // Claude in its brand orange; the ChatGPT logo is black or white, so it follows the text colour.
+            <svg viewBox="0 0 24 24" fill="currentColor" className="size-3.5 text-foreground" style={{ color: claude ? `#${siClaude.hex}` : undefined }}>
+              <path d={icon.path} />
+            </svg>
+          )}
+        </button>
+      </TooltipTrigger>
+      <TooltipContent onClick={(e) => e.stopPropagation()}>
+        {!canResume ? (
+          `${name} session`
+        ) : copied ? (
+          <span className="flex items-center gap-1.5 font-medium text-emerald-600 dark:text-emerald-400">
+            <Check className="size-3.5" /> Copied, paste it in a terminal
+          </span>
+        ) : (
+          <div className="flex flex-col gap-1.5">
+            <span className="font-medium">Click to copy the command to resume the {name} session</span>
+            <code className="break-all rounded bg-muted px-1.5 py-1 font-mono text-[11px] text-muted-foreground">{cmd}</code>
+          </div>
+        )}
+      </TooltipContent>
+    </Tooltip>
   );
 }
