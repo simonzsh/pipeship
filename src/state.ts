@@ -6,7 +6,8 @@ import { assertRepoName, findRepo, repoName } from "./repos.ts";
 export const STEPS = ["map", "questions", "plan", "implement", "review", "stack", "preview"] as const;
 export type StepName = (typeof STEPS)[number];
 export type StepStatus = "pending" | "running" | "done" | "skipped" | "failed";
-export type Status = "running" | "waiting_for_user" | "ready" | "failed" | "stopped";
+export const STATUSES = ["running", "waiting_for_user", "ready", "failed", "stopped"] as const;
+export type Status = (typeof STATUSES)[number];
 export type Mode = "full" | "quick";
 
 export interface Repo {
@@ -69,6 +70,7 @@ export interface State {
   repos: Repo[];
   mode: Mode;
   status: Status;
+  waitingFor?: string; // the question the user must answer, set by `pipeship wait`
   step: StepName;
   steps: { name: StepName; status: StepStatus; startedAt?: string; endedAt?: string }[];
   chunks: Chunk[];
@@ -244,13 +246,45 @@ export function setStep(id: string, name: StepName, status: StepStatus): State {
     if (status === "running") {
       step.startedAt = now;
       s.step = name;
-      if (s.status === "waiting_for_user") s.status = "running";
+    }
+    // The wait ends when any step starts or when the step it blocked moves on.
+    if (s.status === "waiting_for_user" && (status === "running" || name === s.step)) {
+      s.status = "running";
+      delete s.waitingFor;
     }
     if (status === "done" || status === "failed") step.endedAt = now;
     if (status === "failed") s.status = "failed";
     // A skipped preview never reaches the code that marks the pipeline ready.
     const finished = s.steps.every((x) => x.status === "done" || x.status === "skipped");
     if (finished && (s.status === "running" || s.status === "waiting_for_user")) s.status = "ready";
+  });
+}
+
+// A pause always names its step, so the dashboard shows which step waits.
+export function waitForUser(id: string, name: StepName, reason?: string): State {
+  if (!STEPS.includes(name)) throw new Error(`unknown step: ${name} (expected ${STEPS.join(", ")})`);
+  return updateState(id, (s) => {
+    const step = s.steps.find((x) => x.name === name)!;
+    if (step.status === "done" || step.status === "skipped") throw new Error(`step ${name} is ${step.status}: nothing to wait on`);
+    if (step.status !== "running") {
+      step.status = "running";
+      step.startedAt = new Date().toISOString();
+    }
+    s.step = name;
+    s.status = "waiting_for_user";
+    if (reason) s.waitingFor = reason;
+    else delete s.waitingFor;
+  });
+}
+
+export function setStatus(id: string, status: Status): State {
+  if (!STATUSES.includes(status)) throw new Error(`unknown status: ${status} (expected ${STATUSES.join(", ")})`);
+  return updateState(id, (s) => {
+    if (status === "waiting_for_user" && !s.steps.some((x) => x.status === "running")) {
+      throw new Error(`no step is running: use "pipeship wait ${id} <step>" to say which step waits`);
+    }
+    s.status = status;
+    if (status !== "waiting_for_user") delete s.waitingFor;
   });
 }
 
