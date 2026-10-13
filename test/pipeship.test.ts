@@ -590,7 +590,7 @@ const sh = (cwd: string, ...args: string[]) => {
   return r.stdout.trim();
 };
 
-function makeStack(n: number) {
+function makeStack(n: number, commits = 1) {
   const dir = mkdtempSync(join(root, "stack-"));
   const origin = join(dir, "origin.git");
   const clone = join(dir, "repo");
@@ -602,8 +602,12 @@ function makeStack(n: number) {
   const worktrees: string[] = [];
   for (let i = 1; i <= n; i++) {
     sh(clone, "checkout", "-q", "-b", `c${i}`, i === 1 ? "main" : `c${i - 1}`);
-    writeFileSync(join(clone, `f${i}.txt`), `f${i}\n`);
-    sh(clone, "add", "."), sh(clone, "commit", "-q", "-m", `add f${i}`);
+    // Several commits per chunk: a rebase from the wrong old tip would replay (and conflict on) them.
+    for (let k = 0; k < commits; k++) {
+      const file = commits === 1 ? `f${i}.txt` : `f${i}${"ab"[k]}.txt`;
+      writeFileSync(join(clone, file), `${file}\n`);
+      sh(clone, "add", "."), sh(clone, "commit", "-q", "-m", `add ${file}`);
+    }
     sh(clone, "push", "-q", "origin", `c${i}`);
     worktrees.push(join(dir, `wt-${i}`));
   }
@@ -625,6 +629,7 @@ interface FakePr {
   reviewDecision: string;
   isDraft: boolean;
   view?: (count: number) => Partial<PrView>; // per-view override; count starts at 1
+  viewFails?: boolean;
   views: number;
 }
 
@@ -647,6 +652,7 @@ function fakeGh(stack: ReturnType<typeof makeStack>, count: number) {
       const n = Number(args[2]!.split("/").pop());
       const pr = prs[n]!;
       pr.views++;
+      if (pr.viewFails) return { code: 1, stdout: "", stderr: "boom\n" };
       const view = {
         number: n, url: args[2], state: pr.state, baseRefName: pr.base, headRefName: pr.head, headRefOid: originSha(pr.head),
         isDraft: pr.isDraft, mergeable: pr.mergeable, mergeStateStatus: "CLEAN", reviewDecision: pr.reviewDecision,
@@ -831,4 +837,117 @@ test("classifyPr: failed checks beat pending ones, BLOCKED waits for pending che
   expect(classifyPr(pr({ reviewDecision: "CHANGES_REQUESTED" }))).toEqual({ kind: "blocked", reason: "changes requested on #5" });
   expect(classifyPr(pr({ statusCheckRollup: [{ context: "x", state: "PENDING" }] })).kind).toBe("wait");
   expect(classifyPr(pr({ statusCheckRollup: [{ name: "a", status: "COMPLETED", conclusion: "SKIPPED" }] })).kind).toBe("ready");
+});
+
+test("merge: 2 commits per chunk keep the pre-rebase tip, so nothing is replayed", async () => {
+  const stack = makeStack(3, 2);
+  const gh = fakeGh(stack, 3);
+  await mergeStack(stack.id, gh.deps);
+  expect(readState(stack.id).merge).toMatchObject({ status: "done" });
+  expect(readState(stack.id).merge?.oldTips).toBeUndefined();
+  expect(gh.calls).toEqual(["merge 1", "patch 2 main", "merge 2", "patch 3 main", "merge 3"]);
+  expect(sh(stack.origin, "ls-tree", "--name-only", "main").split("\n")).toEqual(
+    ["base.txt", "f1a.txt", "f1b.txt", "f2a.txt", "f2b.txt", "f3a.txt", "f3b.txt"],
+  );
+  expect(sh(stack.origin, "rev-list", "--count", "main")).toBe("4");
+});
+
+test("merge: a resume after #2 merged still rebases #3 from the pre-rebase tip of #2", async () => {
+  const stack = makeStack(3, 2);
+  const gh = fakeGh(stack, 3);
+  gh.prs[3]!.viewFails = true;
+  await mergeStack(stack.id, gh.deps);
+  const s = readState(stack.id);
+  expect(s.merge).toMatchObject({ status: "failed", current: "c3" });
+  expect(chunkStatuses(stack.id)).toEqual(["merged", "merged", "pr"]);
+  expect(Object.keys(s.merge!.oldTips!)).toEqual(["c2"]);
+
+  gh.prs[3]!.viewFails = false;
+  await mergeStack(stack.id, gh.deps);
+  expect(readState(stack.id).merge?.status).toBe("done");
+  expect(gh.calls).toEqual(["merge 1", "patch 2 main", "merge 2", "patch 3 main", "merge 3"]);
+  expect(sh(stack.origin, "ls-tree", "--name-only", "main").split("\n")).toHaveLength(7);
+  expect(sh(stack.origin, "rev-list", "--count", "main")).toBe("4");
+});
+
+test("merge: commits on GitHub that the worktree lacks stop the rebase before any push", async () => {
+  const stack = makeStack(2);
+  const gh = fakeGh(stack, 2);
+  const other = join(stack.dir, "other");
+  sh(stack.dir, "clone", "-q", "-b", "c2", stack.origin, other);
+  writeFileSync(join(other, "suggestion.txt"), "x\n");
+  sh(other, "add", "."), sh(other, "commit", "-q", "-m", "suggestion");
+  sh(other, "push", "-q", "origin", "c2");
+  const before = sh(stack.origin, "rev-parse", "c2");
+  await mergeStack(stack.id, gh.deps);
+  expect(readState(stack.id).merge?.error).toMatch(/c2 on GitHub has commits that are not in .*wt-2: pull them first/);
+  expect(sh(stack.origin, "rev-parse", "c2")).toBe(before);
+  expect(gh.calls).toEqual(["merge 1"]);
+});
+
+test("merge: after a rebase, empty checks and BLOCKED are waited out until CI reports", async () => {
+  const stack = makeStack(2);
+  const gh = fakeGh(stack, 2);
+  const ci = (status: string, conclusion?: string) => [{ name: "ci", status, conclusion }];
+  gh.prs[2]!.checks = ci("COMPLETED", "SUCCESS");
+  gh.prs[2]!.view = (n) =>
+    n === 2 ? { statusCheckRollup: [], mergeStateStatus: "BLOCKED" } : n === 3 ? { statusCheckRollup: ci("IN_PROGRESS"), mergeStateStatus: "BLOCKED" } : {};
+  await mergeStack(stack.id, gh.deps);
+  expect(readState(stack.id).merge?.status).toBe("done");
+  expect(gh.calls).toEqual(["merge 1", "patch 2 main", "merge 2"]);
+  expect(gh.prs[2]!.views).toBe(4);
+});
+
+test("merge: after a rebase, BLOCKED with no checks fails once the wait limit passes", async () => {
+  const stack = makeStack(2);
+  const gh = fakeGh(stack, 2);
+  gh.prs[2]!.view = (n) => (n >= 2 ? { statusCheckRollup: [], mergeStateStatus: "BLOCKED" } : {});
+  await mergeStack(stack.id, gh.deps);
+  expect(readState(stack.id).merge?.error).toBe("merge blocked by branch protection on #2");
+  expect(gh.prs[2]!.views).toBeGreaterThan(10);
+  expect(gh.calls).toEqual(["merge 1", "patch 2 main"]);
+});
+
+test("merge: a STALE check run is not a failure", () => {
+  const v = { number: 1, url: "u", state: "OPEN", baseRefName: "main", headRefName: "h", headRefOid: "o", isDraft: false, mergeable: "MERGEABLE",
+    mergeStateStatus: "CLEAN", reviewDecision: "", statusCheckRollup: [{ name: "a", status: "COMPLETED", conclusion: "STALE" }] } as PrView;
+  expect(classifyPr(v).kind).toBe("ready");
+});
+
+test("merge: a running merge is stale when its pid is dead or it stopped refreshing updatedAt", async () => {
+  const old = new Date(Date.now() - 6 * 60_000).toISOString();
+  const stack = makeStack(1);
+  const gh = fakeGh(stack, 1);
+  const mark = (updatedAt: string) =>
+    updateState(stack.id, (s) => {
+      s.merge = { status: "running", pid: process.pid, startedAt: updatedAt, updatedAt };
+    });
+  mark(new Date().toISOString());
+  failStaleMerges(() => true);
+  expect(readState(stack.id).merge?.status).toBe("running");
+  expect(() => startMerge(stack.id, gh.deps)).toThrow("already running");
+
+  mark(old);
+  failStaleMerges(() => true);
+  expect(readState(stack.id).merge?.status).toBe("failed");
+
+  mark(old);
+  await startMerge(stack.id, gh.deps).done; // the pid is alive but silent: no 409
+  expect(readState(stack.id).merge?.status).toBe("done");
+});
+
+test("merge: every poll of a long wait refreshes updatedAt", async () => {
+  const stack = makeStack(1);
+  const gh = fakeGh(stack, 1);
+  gh.prs[1]!.view = (n) => (n < 6 ? { statusCheckRollup: [{ name: "ci", status: "IN_PROGRESS" }] } : {});
+  const seen: number[] = [];
+  const sleep = async () => {
+    seen.push(Date.parse(readState(stack.id).merge!.updatedAt));
+    updateState(stack.id, (s) => {
+      s.merge!.updatedAt = "2000-01-01T00:00:00.000Z";
+    });
+  };
+  await mergeStack(stack.id, { ...gh.deps, sleep });
+  expect(seen).toHaveLength(4);
+  expect(Math.min(...seen)).toBeGreaterThan(Date.now() - 60_000);
 });

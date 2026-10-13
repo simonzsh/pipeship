@@ -30,6 +30,7 @@ export interface MergeRun {
   startedAt: string;
   updatedAt: string; // refreshed on every progress write
   endedAt?: string;
+  oldTips?: Record<string, string>; // chunk name -> head before its rebase; the next rebase needs it after a resume
 }
 
 export interface TicketLink {
