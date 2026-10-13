@@ -22,11 +22,7 @@ export function chunksOf(state: Pick<State, "chunks">, repo: string): Chunk[] {
 }
 
 export function topChunk(state: Pick<State, "chunks">, repo: string): Chunk | undefined {
-  return chunksOf(state, repo).filter((c) => c.worktree).pop();
-}
-
-export function repoOf(state: Pick<State, "repos">, chunk: Pick<Chunk, "repo">): Repo | undefined {
-  return state.repos.find((r) => r.path === chunk.repo);
+  return chunksOf(state, repo).findLast((c) => c.worktree);
 }
 
 export function mergeOf(state: Pick<State, "merge">, repo: string): MergeRun | undefined {

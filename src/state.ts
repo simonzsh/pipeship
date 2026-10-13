@@ -10,7 +10,7 @@ export type Status = "running" | "waiting_for_user" | "ready" | "failed" | "stop
 export type Mode = "full" | "quick";
 
 export interface Repo {
-  path: string; // absolute path as given; not normalised to the git toplevel
+  path: string; // git toplevel of the repo, absolute
   base?: string; // branch checked out when the repo was added; unset on a detached HEAD or outside git
 }
 

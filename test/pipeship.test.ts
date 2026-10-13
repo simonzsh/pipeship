@@ -126,12 +126,12 @@ test("a draft recipe is saved for the repo only when the app starts", async () =
   writeFileSync(draft, JSON.stringify({ start: "exit 1" }));
   const first = createPipeline({ repos: [{ path: repo }], title: "t", source: "text" });
   await expect(startPreview(first.id, repo, draft)).rejects.toThrow();
-  expect(existsSync(savedRecipePath(repo))).toBe(false);
+  expect(existsSync(savedRecipePath([repo]))).toBe(false);
 
   writeFileSync(draft, JSON.stringify({ start: `bun -e "Bun.serve({ port: Number(process.env.PORT), fetch: () => new Response('ok') })"` }));
   await startPreview(first.id, repo, draft);
   await stopPipeline(first.id);
-  expect(findRecipe(repo)).toBe(savedRecipePath(repo));
+  expect(findRecipe([repo])).toBe(savedRecipePath([repo]));
 
   // The next pipeline in the same repo reuses the saved recipe without a draft.
   const second = createPipeline({ repos: [{ path: repo }], title: "t", source: "text" });
@@ -1218,6 +1218,22 @@ test("cli: new takes several --repo or none, and repo adds one with its base", (
   expect(readState(none.id).repos).toEqual([{ path: a, base: "main" }]);
 });
 
+test("cli: repo paths are reduced to the git root, and a non-git path fails", () => {
+  const a = gitRepo("root", "main");
+  mkdirSync(join(a, "sub"));
+  const made = JSON.parse(cli("new", "--repo", join(a, "sub"), "--repo", a, "--title", "t", "--name", "sub-new").out);
+  expect(made.repos).toHaveLength(1);
+  expect(readState(made.id).repos).toEqual([{ path: a, base: "main" }]);
+
+  const none = JSON.parse(cli("new", "--title", "t", "--name", "sub-repo").out);
+  const notGit = mkdtempSync(join(root, "not-git-"));
+  const bad = cli("repo", none.id, notGit);
+  expect(bad.code).not.toBe(0);
+  expect(bad.err).toContain(`not a git repo: ${notGit}`);
+  expect(JSON.parse(cli("repo", none.id, a).out)).toMatchObject({ path: a, added: true });
+  expect(JSON.parse(cli("repo", none.id, join(a, "sub")).out)).toMatchObject({ path: a, added: false });
+});
+
 test("upsertChunk fills the repo for one repo, and asks for it with several", () => {
   const one = createPipeline({ repos: [{ path: "/x/app" }], title: "t", name: "chunk-one" });
   upsertChunk(one.id, { name: "c1" });
@@ -1289,8 +1305,7 @@ test("recipe validation for several repos", () => {
 test("a recipe saved for several repos does not depend on their order", () => {
   expect(savedRecipePath(["/x/a", "/x/b"])).toBe(savedRecipePath(["/x/b", "/x/a"]));
   expect(savedRecipePath(["/x/a", "/x/b"])).not.toBe(savedRecipePath(["/x/a", "/x/c"]));
-  expect(savedRecipePath(["/x/a"])).toBe(savedRecipePath("/x/a"));
-  expect(savedRecipePath("/x/a")).toBe(join(process.env.PIPESHIP_HOME!, "recipes", "x-a.json"));
+  expect(savedRecipePath(["/x/a"])).toBe(join(process.env.PIPESHIP_HOME!, "recipes", "x-a.json"));
 });
 
 test("a preview over two repos starts each service from its own worktree", async () => {

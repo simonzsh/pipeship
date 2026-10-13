@@ -53,11 +53,14 @@ function need(value: string | undefined, name: string): string {
   return value;
 }
 
-// Base is empty on a detached HEAD or outside git; dirty means `git status` printed something.
-function repoInfo(path: string): { base?: string; dirty: boolean } {
+// The repo is its git root, so a subfolder never makes a second repo. Base is empty on a detached HEAD.
+function repoInfo(input: string): { path: string; base?: string; dirty: boolean } {
+  const top = git(input, "rev-parse", "--show-toplevel");
+  if (top.status !== 0) throw new Error(`not a git repo: ${input}`);
+  const path = top.stdout.trim();
   const base = git(path, "branch", "--show-current").stdout.trim();
   const status = git(path, "status", "--porcelain");
-  return { ...(base && { base }), dirty: status.status === 0 && status.stdout.trim() !== "" };
+  return { path, ...(base && { base }), dirty: status.status === 0 && status.stdout.trim() !== "" };
 }
 
 const repoReport = (path: string, base?: string, dirty = false) => ({ path, name: repoName(path), base: base ?? null, dirty });
@@ -94,8 +97,9 @@ async function stopDashboard(): Promise<string> {
 async function main() {
   switch (command) {
     case "new": {
-      const paths = [...new Set((values.repo ?? []).map((p) => resolve(p)))];
-      const infos = paths.map(repoInfo);
+      const all = (values.repo ?? []).map((p) => repoInfo(resolve(p)));
+      const infos = all.filter((r, i) => all.findIndex((o) => o.path === r.path) === i);
+      const paths = infos.map((r) => r.path);
       const state = createPipeline({
         repos: paths.map((path, i) => ({ path, ...(infos[i]!.base && { base: infos[i]!.base }) })),
         title: need(values.title, "--title"),
@@ -110,8 +114,8 @@ async function main() {
       return print({ id: state.id, dir: pipelineDir(state.id), steps: state.steps.map((s) => `${s.name}:${s.status}`), session: state.session ?? null, repos });
     }
     case "repo": {
-      const path = resolve(need(args[1], "<path>"));
-      const info = repoInfo(path);
+      const info = repoInfo(resolve(need(args[1], "<path>")));
+      const { path } = info;
       const { state, added } = addRepo(need(args[0], "<id>"), { path, ...(info.base && { base: info.base }) });
       const stored = state.repos.find((r) => r.path === path)!;
       return print({ ...repoReport(path, stored.base, info.dirty), added });
@@ -147,7 +151,7 @@ async function main() {
       return print("ok");
     }
     case "recipe": {
-      if (args.length === 0) need(undefined, "<repo>");
+      need(args[0], "<repo>");
       const repos = args.map((p) => resolve(p));
       const path = findRecipe(repos);
       return print(path ? { path, recipe: loadRecipe(path) } : "none");

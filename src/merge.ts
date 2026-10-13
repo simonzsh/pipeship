@@ -348,23 +348,24 @@ export async function mergeStack(
     limits: DEFAULT_LIMITS,
     ...deps,
   };
-  let repoPath = "";
+  let repo: Repo | undefined;
   try {
     const s = readState(id);
-    const repo = repoRef === undefined ? resolveMergeRepo(s, undefined) : lookupRepo(s, repoRef);
-    repoPath = repo.path;
+    repo = resolveMergeRepo(s, repoRef);
     const startedAt = s.merge?.status === "running" ? s.merge.startedAt : new Date().toISOString();
+    const found = repo;
     updateState(id, (x) => {
-      x.merge = runningMerge(mode, repo.path, startedAt);
+      x.merge = runningMerge(mode, found.path, startedAt);
     });
-    const x = makeCtx(id, repo.path, d);
-    const chunks = chunksOf(s, repo.path).filter((c) => c.pr);
-    await (mode === "combine" ? combine(x, chunks) : mergeIntoBase(x, repo, chunks));
+    const x = makeCtx(id, found.path, d);
+    const chunks = chunksOf(s, found.path).filter((c) => c.pr);
+    await (mode === "combine" ? combine(x, chunks) : mergeIntoBase(x, found, chunks));
   } catch (err) {
     try {
       updateState(id, (s) => {
         const now = new Date().toISOString();
-        const run = s.merge ?? runningMerge(mode, repoPath, now);
+        // Never reuse a run of another repo: an unresolved ref gets its own failed run.
+        const run = repo && s.merge?.repo === repo.path ? s.merge : runningMerge(mode, repo?.path ?? repoRef ?? "", now);
         s.merge = { ...run, status: "failed", error: errorMessage(err), endedAt: now, updatedAt: now };
       });
     } catch {

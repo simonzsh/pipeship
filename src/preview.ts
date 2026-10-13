@@ -4,7 +4,7 @@ import { connect, createServer } from "node:net";
 import { createHash } from "node:crypto";
 import { dirname, join } from "node:path";
 import { findRepo, repoName, sharesRepo, topChunk } from "./repos.ts";
-import { home, listStates, pipelineDir, readState, updateState, type PreviewService, type State } from "./state.ts";
+import { home, listStates, pipelineDir, readState, updateState, type PreviewService, type Repo, type State } from "./state.ts";
 
 export interface ServiceRecipe {
   name: string;
@@ -54,24 +54,23 @@ const PORT_SCAN = 1000;
 const READY_TIMEOUT_MS = 180_000; // per service
 const PORT_REF = /\$\{([A-Za-z0-9_-]+)\.port\}/g;
 
-export function savedRecipePath(repos: string | string[]): string {
-  const list = [repos].flat();
-  if (list.length === 1) {
-    return join(home(), "recipes", `${list[0]!.replace(/^\/+/, "").replace(/[^a-zA-Z0-9.]+/g, "-")}.json`);
+export function savedRecipePath(repos: string[]): string {
+  if (repos.length === 1) {
+    return join(home(), "recipes", `${repos[0]!.replace(/^\/+/, "").replace(/[^a-zA-Z0-9.]+/g, "-")}.json`);
   }
   // Sorted, so the same set of repos gives the same file in any order.
-  const sorted = [...list].sort();
+  const sorted = [...repos].sort();
   const hash = createHash("sha256").update(sorted.join("\n")).digest("hex").slice(0, 8);
   return join(home(), "recipes", `${sorted.map(repoName).join("+")}-${hash}.json`);
 }
 
 // A recipe shared in the repo wins over the one pipeship saved after a successful start.
 // Several repos have no shared place: only the saved recipe counts.
-export function findRecipe(repos: string | string[], worktree?: string): string | undefined {
-  const list = [repos].flat();
-  if (list.length !== 1) return [savedRecipePath(list)].find(existsSync);
-  const shared = [worktree, list[0]].filter((dir) => dir !== undefined).map((dir) => join(dir, ".pipeship.json"));
-  return [...shared, savedRecipePath(list)].find(existsSync);
+export function findRecipe(repos: string[], worktree?: string): string | undefined {
+  const saved = savedRecipePath(repos);
+  if (repos.length !== 1) return existsSync(saved) ? saved : undefined;
+  const shared = [worktree, repos[0]].filter((dir) => dir !== undefined).map((dir) => join(dir, ".pipeship.json"));
+  return [...shared, saved].find(existsSync);
 }
 
 export function loadRecipe(path: string): Recipe {
@@ -522,6 +521,11 @@ export async function stopPipeline(id: string): Promise<State> {
   });
 }
 
+// The worktree folders are flat: try each repo until one owns the worktree.
+function removeWorktree(repos: Repo[], wt: string): void {
+  repos.some((repo) => git(repo.path, "worktree", "remove", "--force", wt).status === 0);
+}
+
 // Deletes the worktrees and the pipeline's files. Branches and PRs stay: they live in the repo.
 export async function deletePipeline(id: string, opts: { force?: boolean } = {}): Promise<void> {
   const state = readState(id);
@@ -537,10 +541,7 @@ export async function deletePipeline(id: string, opts: { force?: boolean } = {})
     const dirty = worktrees.filter((wt) => git(wt, "status", "--porcelain").stdout.trim() !== "");
     if (dirty.length) throw new Error(`uncommitted changes would be lost in: ${dirty.join(", ")}`);
   }
-  // The worktree folders are flat: try each repo until one owns the worktree.
-  for (const wt of worktrees) {
-    for (const repo of state.repos) if (git(repo.path, "worktree", "remove", "--force", wt).status === 0) break;
-  }
+  for (const wt of worktrees) removeWorktree(state.repos, wt);
   rmSync(pipelineDir(id), { recursive: true, force: true });
   for (const repo of state.repos) git(repo.path, "worktree", "prune");
 }
