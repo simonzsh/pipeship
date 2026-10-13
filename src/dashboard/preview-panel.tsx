@@ -7,16 +7,25 @@ import { Button } from "./components/ui/button";
 type PanelPreview = { url: string; services?: { name: string; kind: string; url: string }[] };
 
 // Tailwind preflight resets lists and headings, so the guide styles them here.
+// react-markdown also passes a `node` prop: drop it so it does not reach the DOM.
+const styled =
+  (Tag: string, className: string, extra?: object) =>
+  ({ node: _node, ...props }: { node?: unknown }) => {
+    const El = Tag as React.ElementType;
+    return <El {...props} {...extra} className={className} />;
+  };
+
 const guideComponents: Components = {
-  h1: (p) => <h3 className="mt-3 text-base font-semibold first:mt-0" {...p} />,
-  h2: (p) => <h4 className="mt-3 text-sm font-semibold first:mt-0" {...p} />,
-  h3: (p) => <h5 className="mt-2 text-sm font-medium first:mt-0" {...p} />,
-  p: (p) => <p className="my-1.5" {...p} />,
-  ul: (p) => <ul className="my-1.5 list-disc space-y-1 pl-5" {...p} />,
-  ol: (p) => <ol className="my-1.5 list-decimal space-y-1 pl-5" {...p} />,
-  a: (p) => <a target="_blank" rel="noreferrer" className="text-primary underline underline-offset-2" {...p} />,
-  code: (p) => <code className="rounded bg-muted px-1 py-0.5 font-mono text-xs" {...p} />,
-  pre: (p) => <pre className="my-2 overflow-x-auto rounded bg-muted p-2 text-xs [&_code]:bg-transparent [&_code]:p-0" {...p} />,
+  h1: styled("h3", "mt-3 text-base font-semibold first:mt-0"),
+  h2: styled("h4", "mt-3 text-sm font-semibold first:mt-0"),
+  h3: styled("h5", "mt-2 text-sm font-medium first:mt-0"),
+  p: styled("p", "my-1.5"),
+  ul: styled("ul", "my-1.5 list-disc space-y-1 pl-5"),
+  ol: styled("ol", "my-1.5 list-decimal space-y-1 pl-5"),
+  // The guide comes from an agent: open links in a new tab, never in the dashboard.
+  a: styled("a", "text-primary underline underline-offset-2", { target: "_blank", rel: "noopener noreferrer" }),
+  code: styled("code", "rounded bg-muted px-1 py-0.5 font-mono text-xs"),
+  pre: styled("pre", "my-2 overflow-x-auto rounded bg-muted p-2 text-xs [&_code]:bg-transparent [&_code]:p-0"),
 };
 
 export function PreviewPanel({ preview, guide }: { preview: PanelPreview; guide?: string }) {
