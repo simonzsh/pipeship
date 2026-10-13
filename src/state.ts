@@ -16,9 +16,15 @@ export interface Chunk {
   pr?: string;
 }
 
+export interface TicketLink {
+  ref: string;
+  url?: string;
+}
+
 export interface State {
   id: string;
-  ticket: { source: string; ref?: string; url?: string; title: string };
+  // One pipeline can cover several tickets of the same source.
+  ticket: { source: string; title: string; links: TicketLink[] };
   repo: string;
   mode: Mode;
   status: Status;
@@ -54,13 +60,13 @@ export function createPipeline(opts: {
   repo: string;
   title: string;
   source: string;
-  ref?: string;
-  url?: string;
+  links?: TicketLink[];
   mode?: Mode;
   skip?: StepName[];
 }): State {
   const now = new Date().toISOString();
-  const base = `${now.slice(0, 10)}-${slug(opts.ref ?? opts.title)}`;
+  const links = opts.links ?? [];
+  const base = `${now.slice(0, 10)}-${slug(links.map((l) => l.ref).join("-") || opts.title)}`;
   let id = base;
   for (let n = 2; existsSync(pipelineDir(id)); n++) id = `${base}-${n}`;
 
@@ -68,7 +74,7 @@ export function createPipeline(opts: {
   const skipped = new Set([...(mode === "quick" ? QUICK_SKIPS : []), ...(opts.skip ?? [])]);
   const state: State = {
     id,
-    ticket: { source: opts.source, ref: opts.ref, url: opts.url, title: opts.title },
+    ticket: { source: opts.source, title: opts.title, links },
     repo: opts.repo,
     mode,
     status: "running",
@@ -87,7 +93,15 @@ export function createPipeline(opts: {
 export function readState(id: string): State {
   const path = statePath(id);
   if (!existsSync(path)) throw new Error(`unknown pipeline: ${id}`);
-  return JSON.parse(readFileSync(path, "utf8"));
+  return upgrade(JSON.parse(readFileSync(path, "utf8")));
+}
+
+// State files written before `links` existed hold one `ref` (sometimes "A-1,A-2") and one `url`.
+function upgrade(state: State & { ticket: { ref?: string; url?: string } }): State {
+  const { ref, url, ...ticket } = state.ticket;
+  if (ticket.links) return state;
+  const refs = ref?.split(",").map((r) => r.trim()).filter(Boolean) ?? [];
+  return { ...state, ticket: { ...ticket, links: refs.map((r, i) => (i === 0 && url ? { ref: r, url } : { ref: r })) } };
 }
 
 // Write to a temp file then rename, so the dashboard never reads half a file.

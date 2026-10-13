@@ -18,13 +18,13 @@ test("quick mode and --skip mark steps as skipped", () => {
   const quick = createPipeline({ repo, title: "Add date filter", source: "text", mode: "quick" });
   expect(quick.steps.find((s) => s.name === "plan")!.status).toBe("skipped");
 
-  const custom = createPipeline({ repo, title: "x", source: "linear", ref: "ABC-1", skip: ["questions", "stack"] });
+  const custom = createPipeline({ repo, title: "x", source: "linear", links: [{ ref: "ABC-1" }], skip: ["questions", "stack"] });
   expect(custom.steps.filter((s) => s.status === "skipped").map((s) => s.name)).toEqual(["questions", "stack"]);
 });
 
 test("ids are unique for the same ticket", () => {
-  const a = createPipeline({ repo, title: "t", source: "linear", ref: "ABC-2" });
-  const b = createPipeline({ repo, title: "t", source: "linear", ref: "ABC-2" });
+  const a = createPipeline({ repo, title: "t", source: "linear", links: [{ ref: "ABC-2" }] });
+  const b = createPipeline({ repo, title: "t", source: "linear", links: [{ ref: "ABC-2" }] });
   expect(a.id).not.toBe(b.id);
   expect(listStates().map((s) => s.id)).toContain(b.id);
 });
@@ -66,7 +66,7 @@ test("preview starts the app, copies local files, and stop kills it", async () =
       copyFiles: [".env.local"],
     }),
   );
-  const { id } = createPipeline({ repo, title: "Preview test", source: "text", ref: "DEMO-7" });
+  const { id } = createPipeline({ repo, title: "Preview test", source: "text", links: [{ ref: "DEMO-7" }] });
 
   const state = await startPreview(id, worktree);
   expect(state.status).toBe("ready");
@@ -111,8 +111,23 @@ test("a draft recipe is saved for the repo only when the app starts", async () =
 test("the URL falls back to localhost when the app rejects the ticket host", async () => {
   const strict = `Bun.serve({ port: Number(process.env.PORT), fetch: (r) => r.headers.get('host')?.startsWith('localhost') ? new Response('ok') : new Response('blocked', { status: 403 }) })`;
   writeFileSync(join(repo, ".pipeship.json"), JSON.stringify({ start: `bun -e "${strict}"` }));
-  const { id } = createPipeline({ repo, title: "t", source: "text", ref: "HOST-1" });
+  const { id } = createPipeline({ repo, title: "t", source: "text", links: [{ ref: "HOST-1" }] });
   const state = await startPreview(id, repo);
   expect(state.preview!.url).toBe(`http://localhost:${state.preview!.port}`);
   await stopPipeline(id);
 }, 30_000);
+
+test("a pipeline keeps one link per ticket, and old state files are upgraded", () => {
+  const { id } = createPipeline({
+    repo, title: "t", source: "linear",
+    links: [{ ref: "ABC-3", url: "https://example.com/ABC-3" }, { ref: "ABC-4", url: "https://example.com/ABC-4" }],
+  });
+  expect(id).toEndWith("abc-3-abc-4");
+  expect(readState(id).ticket.links.map((l) => l.ref)).toEqual(["ABC-3", "ABC-4"]);
+
+  const path = join(process.env.PIPESHIP_HOME!, "pipelines", id, "state.json");
+  const old = JSON.parse(readFileSync(path, "utf8"));
+  old.ticket = { source: "linear", title: "t", ref: "ABC-3,ABC-4", url: "https://example.com/ABC-3" };
+  writeFileSync(path, JSON.stringify(old));
+  expect(readState(id).ticket.links).toEqual([{ ref: "ABC-3", url: "https://example.com/ABC-3" }, { ref: "ABC-4" }]);
+});

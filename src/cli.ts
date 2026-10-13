@@ -12,7 +12,8 @@ import {
 
 const USAGE = `pipeship — state, test environments and dashboard for the /pipeship skill
 
-  new --repo <path> --title <text> --source <name> [--ref <id>] [--url <url>] [--mode full|quick] [--skip a,b]
+  new --repo <path> --title <text> --source <name> [--ref <id> [--url <url>]]... [--mode full|quick] [--skip a,b]
+                               repeat --ref/--url for each ticket; the nth --url belongs to the nth --ref
   get <id>                     print the state (JSON)
   list                         list pipelines
   step <id> <step> <status>    steps: ${STEPS.join(", ")}; status: pending, running, done, skipped, failed
@@ -28,7 +29,7 @@ const { positionals, values } = parseArgs({
   allowPositionals: true,
   options: {
     repo: { type: "string" }, title: { type: "string" }, source: { type: "string" },
-    ref: { type: "string" }, url: { type: "string" }, mode: { type: "string" }, skip: { type: "string" },
+    ref: { type: "string", multiple: true }, url: { type: "string", multiple: true }, mode: { type: "string" }, skip: { type: "string" },
     worktree: { type: "string" }, branch: { type: "string" }, status: { type: "string" }, pr: { type: "string" },
     port: { type: "string" }, recipe: { type: "string" }, help: { type: "boolean", short: "h" },
   },
@@ -78,8 +79,7 @@ async function main() {
         repo: resolve(need(values.repo, "--repo")),
         title: need(values.title, "--title"),
         source: need(values.source, "--source"),
-        ref: values.ref,
-        url: values.url,
+        links: (values.ref ?? []).map((ref, i) => (values.url?.[i] ? { ref, url: values.url[i] } : { ref })),
         mode: (values.mode as Mode) ?? "full",
         skip: values.skip?.split(",").map((s) => s.trim()) as StepName[] | undefined,
       });

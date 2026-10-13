@@ -113,14 +113,15 @@ function PipelineCard({ p }: { p: State }) {
         <div className="flex min-w-0 flex-col gap-1.5">
           <CardTitle className="truncate">{p.ticket.title}</CardTitle>
           <CardDescription className="flex flex-wrap items-center gap-x-2 gap-y-1">
-            {p.ticket.ref &&
-              (p.ticket.url ? (
-                <a href={p.ticket.url} target="_blank" className="font-medium text-foreground underline-offset-4 hover:underline">
-                  {p.ticket.ref}
+            {p.ticket.links.map((link) =>
+              link.url ? (
+                <a key={link.ref} href={link.url} target="_blank" className="font-medium text-foreground underline-offset-4 hover:underline">
+                  {link.ref}
                 </a>
               ) : (
-                <span className="font-medium text-foreground">{p.ticket.ref}</span>
-              ))}
+                <span key={link.ref} className="font-medium text-foreground">{link.ref}</span>
+              ),
+            )}
             <span>{p.ticket.source}</span>
             <Badge variant="outline" className="text-muted-foreground">{p.mode}</Badge>
           </CardDescription>

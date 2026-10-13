@@ -69,7 +69,7 @@ export async function killGroup(pid: number): Promise<void> {
 }
 
 function hostLabel(state: State): string {
-  return (state.ticket.ref ?? state.id).toLowerCase().replace(/[^a-z0-9-]+/g, "-").replace(/^-|-$/g, "");
+  return (state.ticket.links[0]?.ref ?? state.id).toLowerCase().replace(/[^a-z0-9-]+/g, "-").replace(/^-|-$/g, "");
 }
 
 function tail(path: string, lines = 30): string {
