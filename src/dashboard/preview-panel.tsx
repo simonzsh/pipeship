@@ -1,5 +1,6 @@
 import { ExternalLink, Globe } from "lucide-react";
 import Markdown, { type Components } from "react-markdown";
+import remarkGfm from "remark-gfm";
 import { Badge } from "./components/ui/badge";
 import { Button } from "./components/ui/button";
 
@@ -58,7 +59,8 @@ export function PreviewPanel({ preview, guide }: { preview: PanelPreview; guide?
       )}
       {guide && (
         <div className="mt-2 border-t border-emerald-500/20 pt-2 text-sm leading-relaxed">
-          <Markdown components={guideComponents}>{guide}</Markdown>
+          {/* GFM turns the bare test URLs into links. */}
+          <Markdown remarkPlugins={[remarkGfm]} components={guideComponents}>{guide}</Markdown>
         </div>
       )}
     </div>
