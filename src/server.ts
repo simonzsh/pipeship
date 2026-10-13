@@ -1,5 +1,6 @@
 import tailwind from "bun-plugin-tailwind";
 import { withSessionState } from "./session.ts";
+import { failStaleMerges, MergeError, startMerge } from "./merge.ts";
 import { listStates } from "./state.ts";
 import { deletePipeline, stopPipeline } from "./preview.ts";
 
@@ -27,6 +28,7 @@ async function buildDashboard(): Promise<Record<string, Response>> {
 
 export async function serve(port = DEFAULT_PORT) {
   const assets = await buildDashboard();
+  failStaleMerges();
   return Bun.serve({
     port,
     idleTimeout: 0, // keep SSE connections open
@@ -40,6 +42,16 @@ export async function serve(port = DEFAULT_PORT) {
             return Response.json(await stopPipeline(req.params.id));
           } catch (err) {
             return Response.json({ error: String(err) }, { status: 500 });
+          }
+        },
+      },
+      "/api/pipelines/:id/merge": {
+        POST: (req) => {
+          try {
+            return Response.json(startMerge(req.params.id).state, { status: 202 });
+          } catch (err) {
+            const status = err instanceof MergeError ? err.status : 500;
+            return Response.json({ error: err instanceof Error ? err.message : String(err) }, { status });
           }
         },
       },
