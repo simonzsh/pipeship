@@ -128,14 +128,14 @@ function FileDiff({ file, open, onToggle }: { file: DiffFile; open: boolean; onT
   const lang = useMemo(() => languageOf(file.path), [file.path]);
   const renamed = file.oldPath && file.newPath && file.oldPath !== file.newPath;
   return (
-    <section className="overflow-clip rounded-lg border bg-card shadow-xs">
+    <section className="border-y bg-card">
       {/* Opaque colours and no transition or blur: the old blur made the borders flicker on hover.
-          Square corners: the section clips them, and once stuck, round corners let the code show through. */}
+          Full-bleed file cards: square corners, so nothing shows through once the header sticks. */}
       <button
         type="button"
         onClick={onToggle}
         aria-expanded={open}
-        className={`sticky top-(--detail-header,0px) z-10 flex w-full items-center gap-2 bg-card px-3 py-2 text-left text-sm hover:bg-[color-mix(in_oklab,var(--card),var(--foreground)_4%)] ${open ? "border-b" : ""}`}
+        className={`sticky top-(--detail-header,0px) z-10 flex w-full items-center gap-2 bg-card px-6 py-2 text-left text-sm hover:bg-[color-mix(in_oklab,var(--card),var(--foreground)_4%)] ${open ? "border-b" : ""}`}
       >
         {open ? <ChevronDown className="size-4 shrink-0 text-muted-foreground" /> : <ChevronRight className="size-4 shrink-0 text-muted-foreground" />}
         <FilePath path={renamed ? `${file.oldPath} → ${file.newPath}` : file.path} />
@@ -184,12 +184,12 @@ function RepoDiff({ data, all }: { data: DiffResponse; all: All }) {
 
   if (data.files.length === 0) {
     const msg = data.truncated ? "Diff too large to show." : "No changes in this range.";
-    return <p className="text-sm text-muted-foreground">{msg}</p>;
+    return <p className="px-6 text-sm text-muted-foreground">{msg}</p>;
   }
   return (
     <div className="flex flex-col gap-3">
       {data.truncated && (
-        <p className="text-sm text-muted-foreground">Diff too large: the last files are not shown.</p>
+        <p className="px-6 text-sm text-muted-foreground">Diff too large: the last files are not shown.</p>
       )}
       {data.files.map((f) => (
         <FileDiff
@@ -223,7 +223,7 @@ export function CodeTab({ p, target }: CodeTabProps) {
 
   return (
     <div className="flex flex-col gap-4">
-      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm">
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 px-6 text-sm">
         <span className="font-medium">{chunk ? `${pr ? `PR #${pr} · ` : ""}${chunk.name}` : "Whole stack"}</span>
         {!multi && datas[0] && <code className="rounded bg-muted px-1.5 py-0.5 text-xs text-muted-foreground">{datas[0].range}</code>}
         {datas.length > 0 && <Counts additions={additions} deletions={deletions} />}
@@ -240,24 +240,24 @@ export function CodeTab({ p, target }: CodeTabProps) {
         </span>
       </div>
       {requests.length === 0 && (
-        <p className="text-sm text-muted-foreground">No branch yet: nothing to compare.</p>
+        <p className="px-6 text-sm text-muted-foreground">No branch yet: nothing to compare.</p>
       )}
       {requests.map((req, i) => {
         const r = results[i]!;
         return (
           <div key={`${req.repo}:${req.chunk ?? ""}`} className="flex flex-col gap-3">
             {multi && (
-              <h4 className="flex items-center gap-2 text-sm font-medium">
+              <h4 className="flex items-center gap-2 px-6 text-sm font-medium">
                 {repoName(req.repo)}
                 {"data" in r && <code className="rounded bg-muted px-1.5 py-0.5 text-xs font-normal text-muted-foreground">{r.data.range}</code>}
               </h4>
             )}
             {"loading" in r ? (
-              <p className="flex items-center gap-2 text-sm text-muted-foreground">
+              <p className="flex items-center gap-2 px-6 text-sm text-muted-foreground">
                 <Loader2 className="size-4 animate-spin" /> Loading diff…
               </p>
             ) : "error" in r ? (
-              <p className="flex items-center gap-2 rounded-lg border bg-muted/50 px-3 py-2 text-sm text-muted-foreground">
+              <p className="mx-6 flex items-center gap-2 rounded-lg border bg-muted/50 px-3 py-2 text-sm text-muted-foreground">
                 <AlertCircle className="size-4 shrink-0" /> {r.error}
               </p>
             ) : (
