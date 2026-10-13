@@ -128,13 +128,14 @@ function FileDiff({ file, open, onToggle }: { file: DiffFile; open: boolean; onT
   const lang = useMemo(() => languageOf(file.path), [file.path]);
   const renamed = file.oldPath && file.newPath && file.oldPath !== file.newPath;
   return (
-    <section className="rounded-lg border bg-card shadow-xs">
-      {/* Opaque colours and no transition or blur: the old blur made the borders flicker on hover. */}
+    <section className="overflow-clip rounded-lg border bg-card shadow-xs">
+      {/* Opaque colours and no transition or blur: the old blur made the borders flicker on hover.
+          Square corners: the section clips them, and once stuck, round corners let the code show through. */}
       <button
         type="button"
         onClick={onToggle}
         aria-expanded={open}
-        className={`sticky top-0 z-10 flex w-full items-center gap-2 bg-card px-3 py-2 text-left text-sm hover:bg-[color-mix(in_oklab,var(--card),var(--foreground)_4%)] ${open ? "rounded-t-lg border-b" : "rounded-lg"}`}
+        className={`sticky top-0 z-10 flex w-full items-center gap-2 bg-card px-3 py-2 text-left text-sm hover:bg-[color-mix(in_oklab,var(--card),var(--foreground)_4%)] ${open ? "border-b" : ""}`}
       >
         {open ? <ChevronDown className="size-4 shrink-0 text-muted-foreground" /> : <ChevronRight className="size-4 shrink-0 text-muted-foreground" />}
         <FilePath path={renamed ? `${file.oldPath} → ${file.newPath}` : file.path} />
@@ -157,7 +158,7 @@ function FileDiff({ file, open, onToggle }: { file: DiffFile; open: boolean; onT
             {file.oldMode && file.newMode ? `Mode changed ${file.oldMode} → ${file.newMode}` : "No content changes"}
           </p>
         ) : (
-          <div className="overflow-x-auto rounded-b-lg">
+          <div className="overflow-x-auto">
             <table className="w-max min-w-full border-collapse font-mono text-xs leading-5">
               <tbody>
                 {file.hunks.map((h, i) => (
