@@ -67,11 +67,17 @@ export function PipelineCard({ p }: { p: State }) {
                   <span key={link.ref} className="font-medium text-foreground">{link.ref}</span>
                 ),
               )}
-              <Badge variant="outline" className="text-muted-foreground">{p.mode}</Badge>
             </CardDescription>
           </div>
           <div className="flex shrink-0 flex-col items-end gap-2">
-            <StatusBadge status={p.status} />
+            <div className="flex items-center gap-1.5">
+              {p.mode === "quick" && (
+                <Badge variant="secondary" className="bg-violet-500/15 text-violet-700 dark:text-violet-400">
+                  Quick
+                </Badge>
+              )}
+              <StatusBadge status={p.status} />
+            </div>
             {hasDetails && (
               <span className="flex items-center gap-1 text-xs text-muted-foreground">
                 {detailsLabel}
