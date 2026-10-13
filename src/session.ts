@@ -108,7 +108,7 @@ export function detectSession(opts: { env?: Env; startPid?: number; readProc?: R
   const homes = opts.homes ?? harnessHomes(env);
   let pid = opts.startPid ?? process.ppid;
   let harness: Harness | undefined;
-  for (let hop = 0; hop < 32 && pid > 1 && !harness; hop++) {
+  for (let hop = 0; hop < 32 && pid >= 1 && !harness; hop++) {
     const info = read(pid);
     if (!info) break;
     harness = classify(info, env);
@@ -122,10 +122,17 @@ export function detectSession(opts: { env?: Env; startPid?: number; readProc?: R
   return { harness, id, cwd: found ?? opts.cwd ?? process.cwd() };
 }
 
+interface SessionDeps {
+  isAlive?: (pid: number) => boolean;
+  procStart?: (pid: number) => string | undefined;
+  lockHeld?: (path: string) => boolean;
+  registry?: RegistryEntry[];
+}
+
 export function sessionState(
   session: Session,
   homes: Homes,
-  deps: { isAlive?: (pid: number) => boolean; procStart?: (pid: number) => string | undefined; lockHeld?: (path: string) => boolean } = {},
+  deps: SessionDeps = {},
 ): SessionState {
   const { id } = session;
   if (!ID_RE.test(id)) return { status: "unknown" };
@@ -145,11 +152,11 @@ function defaultAlive(pid: number): boolean {
   }
 }
 
-function claudeState(id: string, home: string, deps: Parameters<typeof sessionState>[2]): SessionState {
-  const alive = deps?.isAlive ?? defaultAlive;
-  const start = deps?.procStart ?? procStart;
-  const live = registry(home).find(
-    (e) => e.sessionId === id && alive(e.pid) && (!linux || String(e.procStart) === start(e.pid)),
+function claudeState(id: string, home: string, deps: SessionDeps): SessionState {
+  const alive = deps.isAlive ?? defaultAlive;
+  const start = deps.procStart ?? procStart;
+  const live = (deps.registry ?? registry(home)).find(
+    (e) => e.sessionId === id && alive(e.pid) && (e.procStart == null || String(e.procStart) === start(e.pid)),
   );
   if (live) return live.status === "busy" || live.status === "idle" ? { status: "active", activity: live.status } : { status: "active" };
   const projects = join(home, "projects");
@@ -157,13 +164,13 @@ function claudeState(id: string, home: string, deps: Parameters<typeof sessionSt
   return { status: found ? "stopped" : "deleted" };
 }
 
-function codexState(id: string, home: string, deps: Parameters<typeof sessionState>[2]): SessionState {
-  const held = deps?.lockHeld ?? lockHeld;
+function codexState(id: string, home: string, deps: SessionDeps): SessionState {
+  const held = deps.lockHeld ?? lockHeld;
   const lock = join(home, "thread-writer-locks", `${id}.lock`);
   if (existsSync(lock) && held(lock)) return { status: "loaded" };
   const dbPath = join(home, "state_5.sqlite");
   if (existsSync(dbPath)) {
-    // Read-only: never touch the database Codex writes to.
+    // Read-only, not immutable=1 (unsafe while Codex writes). Opening may create -wal/-shm when Codex is idle: harmless.
     const db = new Database(dbPath, { readonly: true });
     try {
       const row = db.query("SELECT archived FROM threads WHERE id = ?").get(id) as { archived: number } | null;
@@ -187,7 +194,7 @@ export function lockHeld(path: string): boolean {
     const { dev, ino } = statSync(path, { bigint: true });
     const major = Number(((dev >> 8n) & 0xfffn) | ((dev >> 32n) & ~0xfffn));
     const minor = Number((dev & 0xffn) | ((dev >> 12n) & ~0xffn));
-    const re = /^\d+:\s+(?:->\s+)?\S+\s+\S+\s+\S+\s+\d+\s+([0-9a-f]+):([0-9a-f]+):(\d+)\s/i;
+    const re = /^\d+:\s+(?:->\s+)?\S+\s+\S+\s+\S+\s+-?\d+\s+([0-9a-f]+):([0-9a-f]+):(\d+)\s/i;
     return readFileSync("/proc/locks", "utf8").split("\n").some((line) => {
       const m = line.match(re);
       return !!m && parseInt(m[1], 16) === major && parseInt(m[2], 16) === minor && BigInt(m[3]) === ino;
@@ -198,18 +205,22 @@ export function lockHeld(path: string): boolean {
   }
 }
 
-const TTL_MS = 3000;
+const LIVE_TTL_MS = 3000;
+const TERMINAL_TTL_MS = 60_000;
 const cache = new Map<string, { at: number; value: SessionState }>();
 
 export function withSessionState(states: State[], opts: { homes?: Homes; now?: number } = {}): PipelineView[] {
   const homes = opts.homes ?? harnessHomes();
   const now = opts.now ?? Date.now();
+  let entries: RegistryEntry[] | undefined; // read once per call, only if a Claude session needs it
   return states.map((s) => {
     if (!s.session) return s;
     const key = `${s.session.harness}:${s.session.id}`;
     let hit = cache.get(key);
-    if (!hit || now - hit.at > TTL_MS) {
-      hit = { at: now, value: sessionState(s.session, homes) };
+    const terminal = hit?.value.status === "deleted" || hit?.value.status === "archived";
+    if (!hit || now - hit.at > (terminal ? TERMINAL_TTL_MS : LIVE_TTL_MS)) {
+      if (s.session.harness === "claude") entries ??= registry(homes.claude);
+      hit = { at: now, value: sessionState(s.session, homes, { registry: entries }) };
       cache.set(key, hit);
     }
     return { ...s, sessionState: hit.value };

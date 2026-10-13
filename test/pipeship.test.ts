@@ -250,6 +250,9 @@ test.skipIf(process.platform !== "linux")("a claude session is active only while
   writeFileSync(join(homes.claude, "projects", "-x", `${CLAUDE_ID}.jsonl`), "");
   expect(sessionState(session, homes)).toEqual({ status: "stopped" });
 
+  entry(undefined);
+  expect(sessionState(session, homes)).toEqual({ status: "active", activity: "busy" });
+
   entry(procStart(process.pid));
   expect(sessionState(session, homes, { isAlive: () => false })).toEqual({ status: "stopped" });
 
@@ -313,7 +316,7 @@ test("the server never forwards registry secrets", () => {
     JSON.stringify({ pid: process.pid, sessionId: CLAUDE_ID, procStart: "1", status: "idle", cwd: "/w", peerToken: "secret", messagingSocketPath: "/tmp/secret.sock" }),
   );
   const state = createPipeline({ repo, title: "t", source: "text", session: { harness: "claude", id: CLAUDE_ID, cwd: "/w" } });
-  const out = JSON.stringify(withSessionState([state], { homes, now: Date.now() + 60_000 }));
+  const out = JSON.stringify(withSessionState([state], { homes, now: Date.now() + 61_000 }));
   expect(out).toContain("sessionState");
   expect(out).not.toContain("secret");
 });
