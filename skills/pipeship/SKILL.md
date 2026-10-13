@@ -60,7 +60,7 @@ Subagent (read-only, model `sonnet`; Claude Code: `Explore` type). Input: `ticke
 - every file the ticket touches (modules, routes, models, UI, tests), with paths and one line on what each does today;
 - repo conventions to follow (structure, naming, test style, branch names from recent `git branch -r`);
 - the exact **check commands** (lint, typecheck, tests) from the repo config;
-- how to start the app: run `pipeship recipe <repo>`. If it prints `none` and the repo has a web app, write a draft recipe to `<dir>/recipe.json` (see "Test environment recipe"). If the repo has no app to run (a library, a CLI), say so.
+- how to start the app: run `pipeship recipe <repo>`. If it prints `none` and the repo has anything that serves requests (a web app, an API, an MCP server, a worker with a health route), write a draft recipe to `<dir>/recipe.json` (see "Test environment recipe"). Back-end only changes count: do not conclude "no preview needed" because the change has no UI. Say "nothing to run" only for a pure library, a CLI that cannot start, or a docs-only change. List what the app needs to run (database, env files, seed data, other services) and how to get test data locally.
 
 In `quick` mode, keep the map short: only the files to change.
 
@@ -114,17 +114,19 @@ Write a short summary to `<dir>/review.md`.
 
 If the repo has no remote, skip this step and tell the user.
 
-## Step 7 — preview
+## Step 7 — preview and verify
 
-If the repo has no app to run, mark this step `skipped`: once every step is done or skipped, the pipeline becomes `ready` on its own.
+Run the changed code, front end or back end. An API, MCP or engine change needs a running server as much as a UI change: unit tests do not show what a real client gets. Mark this step `skipped` only when nothing the change touches can run (a pure library with no server, a CLI you cannot start, a docs-only change), and say why in the final summary. "No UI" and "engine only" are not reasons to skip. Once every step is done or skipped, the pipeline becomes `ready` on its own.
 
-Run `pipeship preview <id> <top worktree>`, with `--recipe <dir>/recipe.json` if step 1 wrote a draft. It copies local files, installs, starts the app on a free port, waits until it answers, and marks the pipeline `ready`. A draft recipe that works is saved, so later pipelines in this repo skip this work. Give the user the URL.
+1. **Start.** Run `pipeship preview <id> <top worktree>`, with `--recipe <dir>/recipe.json` if step 1 wrote a draft. It copies local files, installs, starts the app on a free port, waits until it answers, and marks the pipeline `ready`. A draft recipe that works is saved, so later pipelines in this repo skip this work. Give the user the URL. Services the app needs (a local database, a queue) belong in the recipe's `start` command, so the dashboard's Stop button stops them with the app (see "Test environment recipe"). One-off setup such as seeding test data is fine to run yourself.
+2. **Verify.** Use the changed behaviour the way its client does, and write what you called and what came back to `<dir>/verify.md`: a UI change in a browser (the preview tools of your harness), an HTTP API with `curl`, an MCP or other protocol with a real client. Cover the main path and one failure path. If you cannot exercise it (no test data, a missing service), say so in the summary. Never claim it works from unit tests alone.
+3. **Fix.** If verification fails, fix the code in the worktree of the chunk that owns it, commit, restack and re-run the checks. Push only if step 6 opened PRs.
 
-If it fails, it prints the log tail: diagnose, fix the recipe or the code, and retry up to twice before asking the user. To fix the recipe: if `pipeship recipe <repo>` points to a `.pipeship.json` in the repo, fix that file in the top worktree (it will be part of the PRs) and tell the user; otherwise write a fixed draft and pass it with `--recipe`.
+If the preview fails to start, it prints the log tail: diagnose, fix the recipe or the code, and retry up to twice before asking the user. To fix the recipe: if `pipeship recipe <repo>` points to a `.pipeship.json` in the repo, fix that file in the top worktree (it will be part of the PRs) and tell the user; otherwise write a fixed draft and pass it with `--recipe`.
 
 ## End
 
-Give the user a short summary: the test URL, the PRs in stack order, and anything to check by hand. The test server keeps running on purpose; the user stops it with the dashboard's "Stop pipeline" button.
+Give the user a short summary: the test URL, the PRs in stack order, what the verification covered (or why it was skipped), and anything to check by hand. The test server keeps running on purpose; the user stops it with the dashboard's "Stop pipeline" button.
 
 ## Test environment recipe
 
@@ -141,5 +143,6 @@ You write the recipe; the user never has to. Read `package.json`, the lock file,
 ```
 
 - `start` must honour the port in `portEnv` (e.g. `next dev -p $PORT` if the framework ignores `PORT`).
+- Services the app needs must run in the foreground inside `start`, e.g. `docker compose up db & bun run dev`. pipeship stops the whole process group, so they stop with the app. A detached service (`docker compose up -d`) would outlive the pipeline.
 - `copyFiles`: untracked local files the app needs (`.env`, `.env.local`…), copied from the main checkout into the worktree. List them with `git -C <repo> status --ignored --short`.
 - The app is served as `http://<ticket>.localhost:<port>`. Some dev servers reject unknown hosts (Next.js `allowedDevOrigins`, Vite `server.allowedHosts`): pipeship detects this and prints `http://localhost:<port>` instead. Never change the repo's config only for pipeship.
