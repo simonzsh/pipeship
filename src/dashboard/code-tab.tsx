@@ -29,7 +29,11 @@ function useDiff(id: string, requests: DiffRequest[], refreshKey: string): Resul
       fetch(url, { signal: ctl.signal, cache: "no-store" })
         .then(async (res) => {
           const body = await res.json().catch(() => null);
-          const r: Result = res.ok ? { data: body as DiffResponse } : { error: (body as DiffErrorBody | null)?.error ?? `Request failed (${res.status})` };
+          if (ctl.signal.aborted) return;
+          const r: Result =
+            res.ok && Array.isArray((body as DiffResponse | null)?.files)
+              ? { data: body as DiffResponse }
+              : { error: (body as DiffErrorBody | null)?.error ?? `Request failed (${res.status})` };
           setResults((prev) => ({ ...prev, [url]: r }));
         })
         .catch((e) => {
@@ -75,15 +79,17 @@ const MARK = { add: "+", del: "-", context: " " } as const;
 // Old side (context + del) and new side (context + add) are highlighted as two blocks, then mapped back per line.
 function HunkRows({ hunk, lang }: { hunk: DiffHunk; lang: string | undefined }) {
   const rows = useMemo(() => {
-    const oldIdx: number[] = [];
-    const newIdx: number[] = [];
-    hunk.lines.forEach((l, i) => {
-      if (l.kind !== "add") oldIdx.push(i);
-      if (l.kind !== "del") newIdx.push(i);
+    const oldText: string[] = [];
+    const newText: string[] = [];
+    // Index of each line within the block of the side it is shown from.
+    const pos = hunk.lines.map((l) => {
+      if (l.kind !== "add") oldText.push(l.text);
+      if (l.kind !== "del") newText.push(l.text);
+      return (l.kind === "del" ? oldText : newText).length - 1;
     });
-    const oldHl = highlightLines(oldIdx.map((i) => hunk.lines[i]!.text).join("\n"), lang);
-    const newHl = highlightLines(newIdx.map((i) => hunk.lines[i]!.text).join("\n"), lang);
-    return hunk.lines.map((l, i) => (l.kind === "del" ? oldHl[oldIdx.indexOf(i)] : newHl[newIdx.indexOf(i)]));
+    const oldHl = highlightLines(oldText.join("\n"), lang);
+    const newHl = highlightLines(newText.join("\n"), lang);
+    return hunk.lines.map((l, i) => (l.kind === "del" ? oldHl[pos[i]!] : newHl[pos[i]!]));
   }, [hunk, lang]);
   return (
     <>
@@ -168,7 +174,10 @@ function RepoDiff({ id, data }: { id: string; data: DiffResponse }) {
   const isOpen = (path: string) => overrides[path] ?? defaults[path] ?? false;
   const anchor = (i: number) => `${id}-${data.repo}-${data.chunk ?? "stack"}-${i}`.replace(/[^\w-]/g, "_");
 
-  if (data.files.length === 0) return <p className="text-sm text-muted-foreground">No changes in this range.</p>;
+  if (data.files.length === 0) {
+    const msg = data.truncated ? "Diff too large to show." : "No changes in this range.";
+    return <p className="text-sm text-muted-foreground">{msg}</p>;
+  }
   return (
     <div className="flex flex-col gap-3">
       <ul className="flex flex-col rounded-lg border text-sm">
@@ -210,8 +219,9 @@ function RepoDiff({ id, data }: { id: string; data: DiffResponse }) {
 export function CodeTab({ p, target, onTarget }: CodeTabProps) {
   const [manual, setManual] = useState(0);
   const requests = useMemo(() => diffRequests(p, target), [p, target]);
-  const involved = new Set(requests.flatMap((r) => (r.chunk ? [r.chunk] : p.chunks.filter((c) => c.repo === r.repo).map((c) => c.name))));
-  const refreshKey = `${manual}:${JSON.stringify(p.chunks.filter((c) => involved.has(c.name)).map((c) => [c.branch, c.status]))}`;
+  // A chunk's range starts at the previous chunk, so any chunk of the repo can move it.
+  const repos = new Set(requests.map((r) => r.repo));
+  const refreshKey = `${manual}:${JSON.stringify(p.chunks.filter((c) => repos.has(c.repo)).map((c) => [c.branch, c.status]))}`;
   const results = useDiff(p.id, requests, refreshKey);
   const multi = p.repos.length > 1;
 

@@ -1,4 +1,5 @@
 import type { State } from "../state.ts";
+import { chunksOf } from "../repos.ts";
 
 // chunk undefined = whole stack (one diff per repo with at least one branch).
 export type DiffTarget = { chunk?: string };
@@ -12,7 +13,7 @@ export function diffRequests(p: Pick<State, "repos" | "chunks">, target: DiffTar
     const c = p.chunks.find((x) => x.name === target.chunk);
     return c ? [{ repo: c.repo, chunk: c.name }] : [];
   }
-  return p.repos.filter((r) => p.chunks.some((c) => c.repo === r.path && c.branch)).map((r) => ({ repo: r.path }));
+  return p.repos.filter((r) => chunksOf(p, r.path).some((c) => c.branch)).map((r) => ({ repo: r.path }));
 }
 
 export function diffUrl(id: string, req: DiffRequest): string {
