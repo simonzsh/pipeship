@@ -52,6 +52,7 @@ export interface State {
   chunks: Chunk[];
   preview?: { url: string; port: number; pid?: number; worktree: string; log: string; services?: PreviewService[] };
   session?: Session;
+  base?: string; // branch checked out in the repo when the pipeline started; unset on a detached HEAD
   stopRequested: boolean;
   createdAt: string;
   updatedAt: string;
@@ -94,6 +95,7 @@ export function createPipeline(opts: {
   mode?: Mode;
   skip?: StepName[];
   session?: Session;
+  base?: string;
 }): State {
   const now = new Date().toISOString();
   const links = opts.links ?? [];
@@ -114,6 +116,7 @@ export function createPipeline(opts: {
     steps: STEPS.map((name) => ({ name, status: skipped.has(name) ? "skipped" : "pending" })),
     chunks: [],
     ...(opts.session && { session: opts.session }),
+    ...(opts.base && { base: opts.base }),
     stopRequested: false,
     createdAt: now,
     updatedAt: now,

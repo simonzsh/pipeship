@@ -1,13 +1,13 @@
-import { ChevronDown, FolderGit2, GitBranch, GitPullRequest } from "lucide-react";
+import { ChevronDown, FolderGit2 } from "lucide-react";
 import { useState, type KeyboardEvent } from "react";
 import type { PipelineView } from "../state.ts";
 import { ActionButton } from "./action-button";
 import { Badge } from "./components/ui/badge";
-import { Button } from "./components/ui/button";
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "./components/ui/card";
 import { PreviewPanel } from "./preview-panel";
 import { AgentLogo, isAgentStopped } from "./session";
-import { ChunkStatusIcon, StatusBadge } from "./status";
+import { StackTree } from "./stack-tree";
+import { StatusBadge } from "./status";
 import { Steps } from "./steps";
 import { TicketIcon } from "./ticket-icon";
 import { cn } from "./utils";
@@ -100,31 +100,7 @@ export function PipelineCard({ p }: { p: PipelineView }) {
       {open && (
         <CardContent className="flex flex-col gap-4 border-t py-5">
           {p.preview && <PreviewPanel preview={p.preview} />}
-          {p.chunks.length > 0 && (
-            <ul className="flex flex-col divide-y rounded-lg border">
-              {p.chunks.map((c) => (
-                <li key={c.name} className="flex items-center gap-3 px-3 py-2 text-sm">
-                  <GitBranch className="size-4 shrink-0 text-muted-foreground" />
-                  <span className="shrink-0 whitespace-nowrap font-medium">{c.name}</span>
-                  {c.branch && (
-                    <code className="min-w-0 truncate rounded bg-muted px-1.5 py-0.5 text-xs text-muted-foreground" title={c.branch}>
-                      {c.branch}
-                    </code>
-                  )}
-                  <span className="ml-auto flex shrink-0 items-center gap-2">
-                    {c.status && <ChunkStatusIcon status={c.status} />}
-                    {c.pr && (
-                      <Button asChild variant="ghost" size="sm">
-                        <a href={c.pr} target="_blank">
-                          <GitPullRequest /> PR
-                        </a>
-                      </Button>
-                    )}
-                  </span>
-                </li>
-              ))}
-            </ul>
-          )}
+          {p.chunks.length > 0 && <StackTree base={p.base} chunks={p.chunks} />}
         </CardContent>
       )}
 
