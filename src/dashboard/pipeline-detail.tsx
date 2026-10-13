@@ -170,7 +170,8 @@ export function PipelineDetail({ p, onBack }: { p: DashboardState; onBack: () =>
           {p.testGuide && <TestGuide guide={p.testGuide} />}
           {!p.preview && !p.testGuide && <p className="text-sm text-muted-foreground">No test environment yet</p>}
         </TabsContent>
-        <TabsContent value="code">
+        {/* The diff spans the whole column; the code tab pads its own text rows. */}
+        <TabsContent value="code" className="-mx-6">
           <CodeTab p={p} target={target} />
         </TabsContent>
       </Tabs>
