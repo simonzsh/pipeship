@@ -7,7 +7,7 @@ import { groupByStatus } from "./groups";
 import { PipelineCard } from "./pipeline-card";
 import { STATUS_ORDER, statusConfig } from "./status";
 import { ThemeToggle } from "./theme";
-import { cn } from "./utils";
+import { cn, shortRepo } from "./utils";
 
 function EmptyState() {
   return (
@@ -25,8 +25,6 @@ function EmptyState() {
 }
 
 const ALL = "__all__"; // Radix forbids "" as an item value.
-
-const shortRepo = (path: string) => path.replace(/^\/(?:home|Users)\/[^/]+/, "~");
 
 function App() {
   const [pipelines, setPipelines] = useState<DashboardState[]>();
@@ -52,12 +50,12 @@ function App() {
 
   const repos = useMemo(() => {
     const counts = new Map<string, number>();
-    for (const p of pipelines ?? []) counts.set(p.repo, (counts.get(p.repo) ?? 0) + 1);
+    for (const p of pipelines ?? []) for (const r of p.repos) counts.set(r.path, (counts.get(r.path) ?? 0) + 1);
     return [...counts].sort((a, b) => shortRepo(a[0]).localeCompare(shortRepo(b[0])));
   }, [pipelines]);
   // An unknown repo in the URL falls back to all repos; the URL is left as is.
   const selected = repos.some(([r]) => r === repo) ? repo : null;
-  const shown = selected ? pipelines?.filter((p) => p.repo === selected) : pipelines;
+  const shown = selected ? pipelines?.filter((p) => p.repos.some((r) => r.path === selected)) : pipelines;
   const groups = shown ? groupByStatus(shown, STATUS_ORDER) : [];
   // Only states that are present, stopped ones left out: "3 pipelines · 1 waiting for you · 2 running".
   const summary = shown

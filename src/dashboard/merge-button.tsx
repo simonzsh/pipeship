@@ -17,8 +17,9 @@ const TONE: Record<Mode, string> = {
 };
 
 // Shown on finished pipelines with open PRs, and while a merge runs.
-export function MergeButton({ id, chunks, base, merge, finished }: {
-  id: string; chunks: Chunk[]; base?: string; merge?: MergeRun; finished: boolean;
+// `busy`: another repo's merge runs, and only one merge runs per pipeline.
+export function MergeButton({ id, repo, chunks, base, merge, busy, finished }: {
+  id: string; repo: string; chunks: Chunk[]; base?: string; merge?: MergeRun; busy: boolean; finished: boolean;
 }) {
   const [error, setError] = useState<string>();
   // The action just clicked, until the stream reports the run (or the POST fails).
@@ -32,12 +33,13 @@ export function MergeButton({ id, chunks, base, merge, finished }: {
   const run = async () => {
     setError(undefined);
     setStarting(mode);
-    const err = await postAction(id, "merge", { mode });
+    const err = await postAction(id, "merge", { mode, repo });
     if (err) {
       setError(err);
       setStarting(undefined);
     }
   };
+  if (busy) return null;
   if (running || starting) {
     return (
       <Button size="xs" disabled className={`${TONE[running ? merge!.mode : starting!]} text-white disabled:opacity-80`} title={merge?.message}>

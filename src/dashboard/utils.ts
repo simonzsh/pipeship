@@ -5,6 +5,9 @@ export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
 }
 
+// "/home/me/app" -> "~/app"; macOS paths too.
+export const shortRepo = (path: string) => path.replace(/^\/(?:home|Users)\/[^/]+/, "~");
+
 // "12" for a GitHub PR URL; undefined for other hosts.
 export const prNumber = (url: string) => url.match(/\/pull\/(\d+)/)?.[1];
 

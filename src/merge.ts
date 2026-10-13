@@ -1,5 +1,6 @@
 import { isAlive } from "./preview.ts";
-import { listStates, MERGED, readState, updateState, upsertChunk, type Chunk, type MergeMode, type MergeRun, type State } from "./state.ts";
+import { chunksOf, repoName } from "./repos.ts";
+import { listStates, lookupRepo, MERGED, readState, updateState, upsertChunk, type Chunk, type MergeMode, type MergeRun, type Repo, type State } from "./state.ts";
 
 export interface RunResult {
   code: number;
@@ -111,11 +112,32 @@ const STALE_MS = 5 * 60_000;
 const isStale = (m: MergeRun | undefined, alive: (pid: number) => boolean) =>
   m?.status === "running" && (m.pid === undefined || !alive(m.pid) || Date.now() - Date.parse(m.updatedAt) > STALE_MS);
 
-function runningMerge(mode: MergeMode, startedAt: string): MergeRun {
-  return { status: "running", mode, pid: process.pid, message: "starting", startedAt, updatedAt: new Date().toISOString() };
+function runningMerge(mode: MergeMode, repo: string, startedAt: string): MergeRun {
+  return { status: "running", mode, repo, pid: process.pid, message: "starting", startedAt, updatedAt: new Date().toISOString() };
 }
 
-export function startMerge(id: string, deps: Partial<MergeDeps> = {}, rawMode?: unknown): { state: State; done: Promise<void> } {
+// The repo whose stack to merge: optional with one repo, required with several.
+export function resolveMergeRepo(state: State, raw: unknown): Repo {
+  const { repos } = state;
+  if (raw === undefined || raw === null) {
+    if (repos.length === 1) return repos[0]!;
+    if (repos.length === 0) throw new MergeError("no open PR to merge", 400);
+    throw new MergeError(`repo is required: one of ${repos.map((r) => repoName(r.path)).join(", ")}`, 400);
+  }
+  if (typeof raw !== "string") throw new MergeError("unknown repo", 400);
+  try {
+    return lookupRepo(state, raw);
+  } catch (err) {
+    throw new MergeError(errorMessage(err), 400);
+  }
+}
+
+export function startMerge(
+  id: string,
+  deps: Partial<MergeDeps> = {},
+  rawMode?: unknown,
+  rawRepo?: unknown,
+): { state: State; done: Promise<void> } {
   let s: State;
   try {
     s = readState(id);
@@ -125,7 +147,8 @@ export function startMerge(id: string, deps: Partial<MergeDeps> = {}, rawMode?: 
   if (active.has(id) || (s.merge?.status === "running" && !isStale(s.merge, isAlive))) {
     throw new MergeError("a merge is already running", 409);
   }
-  const open = s.chunks.filter((c) => c.pr && c.status !== MERGED).length;
+  const repo = resolveMergeRepo(s, rawRepo);
+  const open = chunksOf(s, repo.path).filter((c) => c.pr && c.status !== MERGED).length;
   if (open === 0) throw new MergeError("no open PR to merge", 400);
   const mode = resolveMergeMode(rawMode, open);
   if (mode === "combine" && open < 2) throw new MergeError("only one open PR: use Merge", 400);
@@ -133,9 +156,9 @@ export function startMerge(id: string, deps: Partial<MergeDeps> = {}, rawMode?: 
 
   active.add(id);
   updateState(id, (x) => {
-    x.merge = runningMerge(mode, new Date().toISOString());
+    x.merge = runningMerge(mode, repo.path, new Date().toISOString());
   });
-  const done = mergeStack(id, deps, mode).finally(() => active.delete(id));
+  const done = mergeStack(id, deps, mode, repo.path).finally(() => active.delete(id));
   return { state: readState(id), done };
 }
 
@@ -293,7 +316,7 @@ async function combine(x: Ctx, chunks: Chunk[]): Promise<void> {
 
 // Base: squash-merge the single PR left into the base branch. No rebase, push or retarget:
 // combine already put the whole stack on this PR's branch.
-async function mergeIntoBase(x: Ctx, s: State, chunks: Chunk[]): Promise<void> {
+async function mergeIntoBase(x: Ctx, repo: Repo, chunks: Chunk[]): Promise<void> {
   const open = chunks.filter((c) => c.status !== MERGED);
   if (open.length !== 1) throw new Error(open.length ? "combine the PRs first" : "no open PR to merge");
   const c = open[0]!;
@@ -301,7 +324,7 @@ async function mergeIntoBase(x: Ctx, s: State, chunks: Chunk[]): Promise<void> {
   x.progress(c, `checking #${n}`);
   const v = await x.view(c.pr!);
   if (v.state === "CLOSED") throw new Error(`PR #${n} is closed`);
-  const base = s.base ?? v.baseRefName;
+  const base = repo.base ?? v.baseRefName;
   if (v.baseRefName !== base) throw new Error(`PR #${n} targets ${v.baseRefName}, not ${base}: retarget it or combine first`);
   if (v.state === "MERGED") upsertChunk(x.id, { name: c.name, status: MERGED });
   else {
@@ -311,8 +334,13 @@ async function mergeIntoBase(x: Ctx, s: State, chunks: Chunk[]): Promise<void> {
   x.finish(`merged #${n} into ${base}`);
 }
 
-// Never throws: every failure ends up in state.merge.
-export async function mergeStack(id: string, deps: Partial<MergeDeps> = {}, mode: MergeMode = "combine"): Promise<void> {
+// Never throws: every failure ends up in state.merge. `repo` is a path or a name.
+export async function mergeStack(
+  id: string,
+  deps: Partial<MergeDeps> = {},
+  mode: MergeMode = "combine",
+  repoRef?: string,
+): Promise<void> {
   const d: MergeDeps = {
     run: defaultRunner,
     sleep: (ms) => Bun.sleep(ms),
@@ -320,20 +348,25 @@ export async function mergeStack(id: string, deps: Partial<MergeDeps> = {}, mode
     limits: DEFAULT_LIMITS,
     ...deps,
   };
+  let repo: Repo | undefined;
   try {
     const s = readState(id);
+    repo = resolveMergeRepo(s, repoRef);
     const startedAt = s.merge?.status === "running" ? s.merge.startedAt : new Date().toISOString();
+    const found = repo;
     updateState(id, (x) => {
-      x.merge = runningMerge(mode, startedAt);
+      x.merge = runningMerge(mode, found.path, startedAt);
     });
-    const x = makeCtx(id, s.repo, d);
-    const chunks = s.chunks.filter((c) => c.pr);
-    await (mode === "combine" ? combine(x, chunks) : mergeIntoBase(x, s, chunks));
+    const x = makeCtx(id, found.path, d);
+    const chunks = chunksOf(s, found.path).filter((c) => c.pr);
+    await (mode === "combine" ? combine(x, chunks) : mergeIntoBase(x, found, chunks));
   } catch (err) {
     try {
       updateState(id, (s) => {
         const now = new Date().toISOString();
-        s.merge = { ...s.merge!, status: "failed", error: errorMessage(err), endedAt: now, updatedAt: now };
+        // Never reuse a run of another repo: an unresolved ref gets its own failed run.
+        const run = repo && s.merge?.repo === repo.path ? s.merge : runningMerge(mode, repo?.path ?? repoRef ?? "", now);
+        s.merge = { ...run, status: "failed", error: errorMessage(err), endedAt: now, updatedAt: now };
       });
     } catch {
       // The state file is gone (pipeline deleted): nothing left to report to.

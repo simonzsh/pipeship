@@ -1,4 +1,4 @@
-import { ChevronDown, FolderGit2, GitMerge, Zap } from "lucide-react";
+import { ChevronDown, FolderGit2, GitMerge, Loader2, Zap } from "lucide-react";
 import { useState, type KeyboardEvent } from "react";
 import type { DashboardState } from "../state.ts";
 import { ActionButton } from "./action-button";
@@ -11,7 +11,8 @@ import { StackTree } from "./stack-tree";
 import { statusConfig, StatusBadge } from "./status";
 import { Steps } from "./steps";
 import { TicketIcon } from "./ticket-icon";
-import { cn } from "./utils";
+import { cn, shortRepo } from "./utils";
+import { repoName, repoStacks } from "../repos.ts";
 
 function timeAgo(iso: string): string {
   const seconds = Math.round((Date.now() - new Date(iso).getTime()) / 1000);
@@ -24,9 +25,17 @@ function timeAgo(iso: string): string {
 export function PipelineCard({ p }: { p: DashboardState }) {
   // Collapsed by default: the test environment and the branches only show once the card is opened.
   const [open, setOpen] = useState(false);
-  const hasDetails = p.chunks.length > 0 || p.preview !== undefined;
-  const detailsLabel =
+  const stacks = repoStacks(p);
+  const multi = p.repos.length > 1;
+  const hasDetails = p.chunks.length > 0 || p.preview !== undefined || multi;
+  const branchLabel =
     p.chunks.length === 0 ? "Details" : p.chunks.length === 1 ? "1 branch" : `${p.chunks.length} branches`;
+  const detailsLabel = multi ? `${branchLabel} · ${p.repos.length} repos` : branchLabel;
+  // One merge runs per pipeline: the other repos' buttons hide meanwhile.
+  const busyFor = (path: string) => p.merge?.status === "running" && p.merge.repo !== path;
+  const repoLabel =
+    p.repos.length === 0 ? "" : multi ? stacks.map((st) => st.name).join(" + ") : shortRepo(p.repos[0]!.path);
+  const repoTitle = p.repos.map((r) => r.path).join("\n");
   const prChunks = p.chunks.filter((c) => c.pr);
   const allMerged = prChunks.length > 0 && prChunks.every((c) => c.status === "merged");
   const merging = p.merge?.status === "running";
@@ -116,18 +125,60 @@ export function PipelineCard({ p }: { p: DashboardState }) {
       {open && (
         <CardContent className="flex flex-col gap-4 border-t py-5">
           {p.preview && <PreviewPanel preview={p.preview} guide={p.testGuide} />}
-          {p.chunks.length > 0 && <StackTree base={p.base} chunks={p.chunks} merge={p.merge} />}
-          {p.merge && <CombinedNote merge={p.merge} chunks={p.chunks} />}
+          {multi ? (
+            stacks.map((st) => (
+              <div key={st.repo.path} className="flex flex-col gap-2">
+                <div className="flex items-center gap-2 text-sm">
+                  <FolderGit2 className="size-4 shrink-0 text-muted-foreground" />
+                  <span className="font-medium">{st.name}</span>
+                  <span className="truncate font-mono text-xs text-muted-foreground" title={st.repo.path}>
+                    {shortRepo(st.repo.path)}
+                  </span>
+                  <div className="ml-auto flex items-center gap-2">
+                    <MergeButton
+                      id={p.id} repo={st.repo.path} chunks={st.chunks} base={st.repo.base} merge={st.merge}
+                      busy={busyFor(st.repo.path)} finished={finished}
+                    />
+                  </div>
+                </div>
+                {st.chunks.length > 0 ? (
+                  <StackTree base={st.repo.base} chunks={st.chunks} merge={st.merge} />
+                ) : (
+                  <p className="text-xs text-muted-foreground">No branch yet</p>
+                )}
+                {st.merge && <CombinedNote merge={st.merge} chunks={st.chunks} />}
+              </div>
+            ))
+          ) : (
+            <>
+              {p.chunks.length > 0 && <StackTree base={p.repos[0]?.base} chunks={p.chunks} merge={p.merge} />}
+              {p.merge && <CombinedNote merge={p.merge} chunks={p.chunks} />}
+            </>
+          )}
         </CardContent>
       )}
 
       <CardFooter className="py-3 text-xs text-muted-foreground">
-        <FolderGit2 className="size-3.5 shrink-0" />
-        <span className="truncate font-mono" title={p.repo}>{p.repo.replace(/^\/home\/[^/]+/, "~")}</span>
-        <span>·</span>
+        {repoLabel && (
+          <>
+            <FolderGit2 className="size-3.5 shrink-0" />
+            <span className="truncate font-mono" title={repoTitle}>{repoLabel}</span>
+            <span>·</span>
+          </>
+        )}
         <span className="whitespace-nowrap">updated {timeAgo(p.updatedAt)}</span>
         <div className="ml-auto flex items-center gap-2">
-          <MergeButton id={p.id} chunks={p.chunks} base={p.base} merge={p.merge} finished={finished} />
+          {multi && merging && p.merge && (
+            <span className="flex items-center gap-1.5 text-muted-foreground">
+              <Loader2 className="size-3.5 animate-spin" /> Merging {repoName(p.merge.repo)}…
+            </span>
+          )}
+          {!multi && p.repos[0] && (
+            <MergeButton
+              id={p.id} repo={p.repos[0].path} chunks={p.chunks} base={p.repos[0].base} merge={p.merge}
+              busy={false} finished={finished}
+            />
+          )}
           {p.status === "ready" ? (
             p.preview && <ActionButton id={p.id} action="stopServer" />
           ) : p.status === "running" || p.status === "waiting_for_user" || (p.status === "failed" && p.preview) ? (
