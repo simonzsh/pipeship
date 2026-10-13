@@ -1,0 +1,46 @@
+import type { StepStatus } from "../state.ts";
+import { cn } from "./utils";
+
+// "waiting" is a running step whose pipeline waits for the user: amber like the "Waiting for you" badge.
+export type DotStatus = StepStatus | "waiting";
+
+const STEP_DOT: Record<DotStatus, string> = {
+  done: "bg-emerald-500",
+  running: "bg-blue-500 animate-pulse",
+  waiting: "bg-amber-500 animate-pulse",
+  failed: "bg-red-500",
+  pending: "bg-muted-foreground/25",
+  skipped: "border border-dashed border-muted-foreground/50",
+};
+
+export function Steps({ steps }: { steps: { name: string; status: DotStatus }[] }) {
+  // A link is green up to the furthest step reached, so skipped steps do not break the line.
+  const reached = steps.findLastIndex((s) => s.status !== "pending" && s.status !== "skipped");
+  return (
+    <div className="grid grid-cols-7">
+      {steps.map((step, i) => (
+        <div key={step.name} className="relative flex flex-col items-center gap-1.5" title={`${step.name}: ${step.status}`}>
+          {i < steps.length - 1 && (
+            // Runs from the edge of this dot to the edge of the next one, so it never shows through a dot.
+            <div
+              className={cn(
+                "absolute top-[5px] left-[calc(50%+10px)] h-0.5 w-[calc(100%-20px)] rounded-full",
+                i < reached ? "bg-emerald-500" : "bg-muted-foreground/15",
+              )}
+            />
+          )}
+          <div className={cn("size-3 rounded-full", STEP_DOT[step.status])} />
+          <span
+            className={cn(
+              "truncate text-[11px] text-muted-foreground capitalize",
+              (step.status === "running" || step.status === "waiting") && "font-medium text-foreground",
+              step.status === "skipped" && "line-through opacity-60",
+            )}
+          >
+            {step.name}
+          </span>
+        </div>
+      ))}
+    </div>
+  );
+}
