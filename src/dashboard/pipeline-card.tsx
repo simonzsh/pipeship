@@ -1,10 +1,11 @@
 import { ChevronDown, ExternalLink, FolderGit2, GitBranch, GitPullRequest, Globe } from "lucide-react";
 import { useState, type KeyboardEvent } from "react";
-import type { State } from "../state.ts";
+import type { PipelineView } from "../state.ts";
 import { ActionButton } from "./action-button";
 import { Badge } from "./components/ui/badge";
 import { Button } from "./components/ui/button";
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "./components/ui/card";
+import { SessionGoneBadge, SessionRow, isSessionGone } from "./session";
 import { ChunkStatusIcon, StatusBadge } from "./status";
 import { Steps } from "./steps";
 import { TicketIcon } from "./ticket-icon";
@@ -18,7 +19,7 @@ function timeAgo(iso: string): string {
   return `${Math.floor(seconds / 86400)} d ago`;
 }
 
-export function PipelineCard({ p }: { p: State }) {
+export function PipelineCard({ p }: { p: PipelineView }) {
   // Collapsed by default: the test environment and the branches only show once the card is opened.
   const [open, setOpen] = useState(false);
   const hasDetails = p.chunks.length > 0 || p.preview !== undefined;
@@ -76,6 +77,7 @@ export function PipelineCard({ p }: { p: State }) {
                   Quick
                 </Badge>
               )}
+              {isSessionGone(p) && <SessionGoneBadge />}
               <StatusBadge status={p.status} />
             </div>
             {hasDetails && (
@@ -134,6 +136,8 @@ export function PipelineCard({ p }: { p: State }) {
           )}
         </CardContent>
       )}
+
+      {p.session && <SessionRow session={p.session} state={p.sessionState} />}
 
       <CardFooter className="py-3 text-xs text-muted-foreground">
         <FolderGit2 className="size-3.5 shrink-0" />
