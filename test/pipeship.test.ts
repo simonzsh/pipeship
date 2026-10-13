@@ -1004,8 +1004,8 @@ test("combine: three PRs fold top-down into the bottom PR, and nothing else move
   expect(isAncestor(stack, before.c1, after.c1) && isAncestor(stack, before.c2, after.c1) && isAncestor(stack, before.c3, after.c1)).toBe(true);
   expect(isAncestor(stack, before.c2, after.c2)).toBe(true);
   expect(after.c3).toBe(before.c3);
-  // No git command at all: a rebase or a push would show up here.
-  expect(gh.gitCalls).toEqual([]);
+  // Only read-only ls-remote calls (the new tip of the branch below): a rebase or a push would show up here.
+  expect(gh.gitCalls.every((g) => g.startsWith("ls-remote origin"))).toBe(true);
   expect(gh.prs[1]!.body).toContain("Combines #2, #3");
   expect(gh.prs[1]!.body).toContain("https://github.com/o/r/pull/2");
   expect(gh.prs[1]!.body).toContain("https://github.com/o/r/pull/3");
@@ -1031,6 +1031,39 @@ test("combine: another merge failure does not fall back to --squash", async () =
     args[1] === "merge" ? { code: 1, stdout: "", stderr: "GraphQL: base branch was modified\n" } : run(cmd, args, opts);
   await mergeStack(stack.id, gh.deps, "combine");
   expect(readState(stack.id).merge).toMatchObject({ status: "failed", error: "gh pr merge #2 failed: GraphQL: base branch was modified" });
+});
+
+test("combine: waits for GitHub to show the new head of the PR below before merging it", async () => {
+  const stack = makeStack(3);
+  const gh = fakeGh(stack, 3);
+  const oldC2 = sh(stack.origin, "rev-parse", "c2");
+  // Views 1-2 are before the fold of #3; views 3-4 still show the old head; then the new head, checks pending once.
+  gh.prs[2]!.view = (n) =>
+    n <= 4 ? (n <= 2 ? {} : { headRefOid: oldC2 }) : n === 5 ? { statusCheckRollup: [{ name: "ci", status: "IN_PROGRESS" }] } : {};
+  await mergeStack(stack.id, gh.deps, "combine");
+  expect(readState(stack.id).merge).toMatchObject({ status: "done", message: "combined 3 PRs into #1" });
+  expect(gh.calls).toEqual(["merge 3 --merge", "merge 2 --merge", "patch 1 body"]);
+  expect(gh.prs[2]!.views).toBeGreaterThanOrEqual(6);
+  // The fake gh refuses a merge whose --match-head-commit is not the real tip, so the new sha was used.
+});
+
+test("combine: an exact URL match decides what is already listed, and other 'not allowed' errors do not squash", async () => {
+  const stack = makeStack(2);
+  const gh = fakeGh(stack, 2);
+  gh.prs[1]!.body = "see https://github.com/o/r/pull/22";
+  await mergeStack(stack.id, gh.deps, "combine");
+  expect(gh.calls).toEqual(["merge 2 --merge", "patch 1 body"]);
+  expect(gh.prs[1]!.body).toContain("- https://github.com/o/r/pull/2\n");
+
+  const other = makeStack(2);
+  const gh2 = fakeGh(other, 2);
+  const run = gh2.deps.run!;
+  let merges = 0;
+  gh2.deps.run = async (cmd, args, opts) =>
+    args[1] === "merge" ? (merges++, { code: 1, stdout: "", stderr: "You are not allowed to merge this pull request\n" }) : run(cmd, args, opts);
+  await mergeStack(other.id, gh2.deps, "combine");
+  expect(readState(other.id).merge?.status).toBe("failed");
+  expect(merges).toBe(1);
 });
 
 test("combine: one open PR is a 400, and a PR that targets the wrong branch fails", async () => {
@@ -1064,7 +1097,7 @@ test("combine: a resume after a failing check on #2 skips #3, which is already m
   await done;
   expect(gh.calls).toEqual(["merge 3 --merge", "merge 2 --merge", "patch 1 body"]);
   expect(readState(stack.id).merge).toMatchObject({ status: "done", message: "combined 3 PRs into #1" });
-  expect(gh.gitCalls).toEqual([]);
+  expect(gh.gitCalls.every((g) => g.startsWith("ls-remote origin"))).toBe(true);
 });
 
 test("combine: a failed description update keeps the merges and lists each PR once on resume", async () => {
@@ -1072,7 +1105,7 @@ test("combine: a failed description update keeps the merges and lists each PR on
   const gh = fakeGh(stack, 2);
   gh.prs[1]!.bodyFails = true;
   await mergeStack(stack.id, gh.deps, "combine");
-  expect(readState(stack.id).merge?.error).toBe("could not update the description of #1: HTTP 500");
+  expect(readState(stack.id).merge?.error).toBe("could not update the description of #1: HTTP 500. The PRs are combined; edit the description by hand.");
   expect(chunkStatuses(stack.id)).toEqual(["pr", "merged"]);
 
   gh.prs[1]!.bodyFails = false;

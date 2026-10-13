@@ -223,6 +223,8 @@ export async function mergeStack(id: string, deps: Partial<MergeDeps> = {}, mode
       if (!bottom) throw new Error("no open PR to combine");
       const bottomIdx = chunks.indexOf(bottom.c);
 
+      // Tip of the branch that the last fold went into: GitHub shows it on the next PR only after a delay.
+      let foldTip: string | undefined;
       for (let i = open.length - 1; i >= 1; i--) {
         const { c } = open[i]!;
         const below = open[i - 1]!.v;
@@ -231,18 +233,21 @@ export async function mergeStack(id: string, deps: Partial<MergeDeps> = {}, mode
         progress(c, n, `checking #${n}`);
         let v = await view(url);
         if (v.baseRefName !== below.headRefName) throw new Error(`PR #${n} targets ${v.baseRefName}, not ${below.headRefName}`);
-        v = await waitReady(c, url, n, v, false, v.headRefOid);
+        v = await waitReady(c, url, n, v, foldTip !== undefined, foldTip ?? v.headRefOid);
 
         // No -d: the remote branches stay.
         const args = (kind: string) => ["pr", "merge", url, kind, "--match-head-commit", v.headRefOid];
         let merge = await gh(args("--merge"));
         // Squash is the fallback only when the repo refuses merge commits, not for any other failure.
-        if (merge.code !== 0 && /merge commits are not allowed|not allowed to merge/i.test(merge.stderr)) {
+        if (merge.code !== 0 && /merge commits are not allowed/i.test(merge.stderr)) {
           merge = await gh(args("--squash"));
         }
         if (merge.code !== 0) throw new Error(`gh pr merge #${n} failed: ${firstLine(merge.stderr)}`);
         upsertChunk(id, { name: c.name, status: MERGED });
         progress(c, n, `combined #${n} into ${below.headRefName}`);
+        const tip = await d.run("git", ["ls-remote", "origin", `refs/heads/${below.headRefName}`], { cwd: s.repo });
+        foldTip = tip.stdout.split(/\s/)[0];
+        if (tip.code !== 0 || !foldTip) throw new Error(`could not read the new head of ${below.headRefName}: ${firstLine(tip.stderr)}`);
       }
 
       // Every PR above the bottom one is merged now, including those from an earlier run.
@@ -251,11 +256,13 @@ export async function mergeStack(id: string, deps: Partial<MergeDeps> = {}, mode
       const bn = parsePrUrl(bottomUrl);
       if (folded.length) {
         progress(bottom.c, bn.number, `updating the description of #${bn.number}`);
-        const fail = (why: string) => new Error(`could not update the description of #${bn.number}: ${why}`);
+        const fail = (why: string) =>
+          new Error(`could not update the description of #${bn.number}: ${why}. The PRs are combined; edit the description by hand.`);
         const got = await gh(["pr", "view", bottomUrl, "--json", "body"]);
         if (got.code !== 0) throw fail(firstLine(got.stderr));
         const body: string = (JSON.parse(got.stdout) as { body?: string }).body ?? "";
-        const todo = folded.filter((u) => !body.includes(u));
+        // Exact match: .../pull/1 must not count as listed because .../pull/12 is.
+        const todo = folded.filter((u) => !new RegExp(`${u.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?!\\d)`).test(body));
         if (todo.length) {
           const line = `Combines ${todo.map((u) => `#${parsePrUrl(u).number}`).join(", ")} (merged into this branch):\n${todo.map((u) => `- ${u}`).join("\n")}`;
           const patch = await gh(["api", "-X", "PATCH", `repos/${bn.owner}/${bn.repo}/pulls/${bn.number}`, "-f", `body=${body.trimEnd()}\n\n${line}\n`]);
