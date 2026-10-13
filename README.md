@@ -71,9 +71,11 @@ You do not configure anything: on the first pipeline in a repo, Claude reads the
 
 ## Dashboard
 
-`scripts/pipeship dashboard` starts it in the background on http://localhost:4400 (the skill does it for you). It lists pipelines live, with their steps, PRs and test URL. It can stop a pipeline or its test server, and delete a finished pipeline: its worktrees and files go, its branches and PRs stay. Light and dark themes follow your system, with a toggle.
+The dashboard on http://localhost:4400 lists pipelines live, with their steps, PRs and test URL. It can stop a pipeline or its test server, and delete a finished pipeline: its worktrees and files go, its branches and PRs stay. Light and dark themes follow your system, with a toggle.
 
-The page is React, Tailwind and [shadcn/ui](https://ui.shadcn.com) components (`src/dashboard/`). Bun builds it in memory when the dashboard starts: no Vite, no build step. Stop the dashboard with `scripts/pipeship dashboard stop`.
+The pipeline starts the dashboard for you. To start or stop it yourself, use `/pipeship:dashboard` and `/pipeship:dashboard stop` in Claude Code, or `$dashboard` and `$dashboard stop` in Codex (from a terminal: `scripts/pipeship dashboard [stop]`). Stopping it leaves the pipelines and their test servers running.
+
+The page is React, Tailwind and [shadcn/ui](https://ui.shadcn.com) components (`src/dashboard/`). Bun builds it in memory when the dashboard starts: no Vite, no build step.
 
 State lives in `~/.pipeship/pipelines/<id>/` (`state.json`, `ticket.md`, `map.md`, `plan.md`, worktrees, `preview.log`).
 
