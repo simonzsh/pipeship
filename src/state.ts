@@ -175,6 +175,16 @@ export function listStates(): State[] {
     .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
 }
 
+export type DashboardState = State & { testGuide?: string };
+
+// The guide is read for the API only: it never goes into state.json.
+export function listDashboardStates(): DashboardState[] {
+  return listStates().map((s) => {
+    const file = join(pipelineDir(s.id), "test.md");
+    return existsSync(file) ? { ...s, testGuide: readFileSync(file, "utf8") } : s;
+  });
+}
+
 export function setStep(id: string, name: StepName, status: StepStatus): State {
   if (!STEPS.includes(name)) throw new Error(`unknown step: ${name} (expected ${STEPS.join(", ")})`);
   return updateState(id, (s) => {

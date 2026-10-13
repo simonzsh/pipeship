@@ -1,6 +1,6 @@
 import { ChevronDown, FolderGit2, GitMerge } from "lucide-react";
 import { useState, type KeyboardEvent } from "react";
-import type { State } from "../state.ts";
+import type { DashboardState } from "../state.ts";
 import { ActionButton } from "./action-button";
 import { Badge } from "./components/ui/badge";
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "./components/ui/card";
@@ -21,7 +21,7 @@ function timeAgo(iso: string): string {
   return `${Math.floor(seconds / 86400)} d ago`;
 }
 
-export function PipelineCard({ p }: { p: State }) {
+export function PipelineCard({ p }: { p: DashboardState }) {
   // Collapsed by default: the test environment and the branches only show once the card is opened.
   const [open, setOpen] = useState(false);
   const hasDetails = p.chunks.length > 0 || p.preview !== undefined;
@@ -109,7 +109,7 @@ export function PipelineCard({ p }: { p: State }) {
 
       {open && (
         <CardContent className="flex flex-col gap-4 border-t py-5">
-          {p.preview && <PreviewPanel preview={p.preview} />}
+          {p.preview && <PreviewPanel preview={p.preview} guide={p.testGuide} />}
           {p.chunks.length > 0 && <StackTree base={p.base} chunks={p.chunks} merge={p.merge} />}
           {p.merge && <CombinedNote merge={p.merge} chunks={p.chunks} />}
         </CardContent>

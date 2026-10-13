@@ -1017,3 +1017,29 @@ test("merge mode: validation by open PR count, and an unknown mode is a 400", as
   await b.done;
   expect(gh2.calls).toEqual(["merge 2 --merge", "patch 1 body"]);
 });
+
+test("the API adds test.md as testGuide without writing it to state.json", async () => {
+  const withGuide = createPipeline({ repo, title: "Guide", source: "text" });
+  const without = createPipeline({ repo, title: "No guide", source: "text" });
+  const statePath = join(pipelineDir(withGuide.id), "state.json");
+  const before = readFileSync(statePath, "utf8");
+  writeFileSync(join(pipelineDir(withGuide.id), "test.md"), "# Test\n1. Open the page\n");
+
+  const server = await serve(0);
+  try {
+    const list = (await (await fetch(`http://localhost:${server.port}/api/pipelines`)).json()) as { id: string; testGuide?: string }[];
+    expect(list.find((p) => p.id === withGuide.id)?.testGuide).toBe("# Test\n1. Open the page\n");
+    expect(list.find((p) => p.id === without.id)).not.toHaveProperty("testGuide");
+
+    // The SSE stream carries it too.
+    const res = await fetch(`http://localhost:${server.port}/api/events`);
+    const reader = res.body!.getReader();
+    const first = new TextDecoder().decode((await reader.read()).value);
+    await reader.cancel();
+    expect(first).toContain('"testGuide":"# Test\\n1. Open the page\\n"');
+  } finally {
+    server.stop(true);
+  }
+  expect(readFileSync(statePath, "utf8")).toBe(before);
+  expect(readState(withGuide.id)).not.toHaveProperty("testGuide");
+});

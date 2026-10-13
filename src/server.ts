@@ -1,6 +1,6 @@
 import tailwind from "bun-plugin-tailwind";
 import { errorMessage, failStaleMerges, MergeError, startMerge } from "./merge.ts";
-import { listStates } from "./state.ts";
+import { listDashboardStates } from "./state.ts";
 import { deletePipeline, stopPipeline } from "./preview.ts";
 
 export const DEFAULT_PORT = 4400;
@@ -33,7 +33,7 @@ export async function serve(port = DEFAULT_PORT) {
     routes: {
       ...assets,
       "/api/health": () => Response.json({ app: "pipeship" }),
-      "/api/pipelines": () => Response.json(listStates()),
+      "/api/pipelines": () => Response.json(listDashboardStates()),
       "/api/pipelines/:id/stop": {
         POST: async (req) => {
           try {
@@ -71,7 +71,7 @@ export async function serve(port = DEFAULT_PORT) {
         const stream = new ReadableStream({
           start(controller) {
             const push = () => {
-              const data = JSON.stringify(listStates());
+              const data = JSON.stringify(listDashboardStates());
               if (data !== last) controller.enqueue(`data: ${data}\n\n`);
               last = data;
             };

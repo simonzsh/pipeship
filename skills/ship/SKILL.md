@@ -122,15 +122,24 @@ If the repo has no remote, skip this step and tell the user.
 
 Run the changed code, front end or back end. An API, MCP or engine change needs a running server as much as a UI change: unit tests do not show what a real client gets. Mark this step `skipped` only when nothing the change touches can run (a pure library with no server, a CLI you cannot start, a docs-only change), and say why in the final summary. "No UI" and "engine only" are not reasons to skip. Once every step is done or skipped, the pipeline becomes `ready` on its own.
 
-1. **Start.** Run `pipeship preview <id> <top worktree>`, with `--recipe <dir>/recipe.json` if step 1 wrote a draft. It copies local files, installs, starts each service of the recipe on its own free port (back ends first, then fronts), waits until each answers, and marks the pipeline `ready`. A draft recipe that works is saved, so later pipelines in this repo skip this work. Give the user the URLs it prints (the first is the main front). Services the app needs (a local database, a queue) belong in a `start` command of the recipe, so the dashboard's "Stop test servers" button stops them with the app (see "Test environment recipe"). One-off setup such as seeding test data is fine to run yourself.
+1. **Start.** Run `pipeship preview <id> <top worktree>`, with `--recipe <dir>/recipe.json` if step 1 wrote a draft. It copies local files, installs, starts each service of the recipe on its own free port (back ends first, then fronts), waits until each answers, and marks the pipeline `ready`. A draft recipe that works is saved, so later pipelines in this repo skip this work. Give the user the URLs it prints (the first is the main front). Services the app needs (a local database, a queue) belong in a `start` command of the recipe, so the dashboard's "Stop test servers" button stops them with the app (see "Test environment recipe"). Other one-off setup is fine to run yourself; test data follows the data rule of step 7.
 2. **Verify.** Use the changed behaviour the way its client does, and write what you called and what came back to `<dir>/verify.md`: a UI change in a browser (the preview tools of your harness), an HTTP API with `curl`, an MCP or other protocol with a real client. Cover the main path and one failure path. If you cannot exercise it (no test data, a missing service), say so in the summary. Never claim it works from unit tests alone.
 3. **Fix.** If verification fails, fix the code in the worktree of the chunk that owns it, commit, restack and re-run the checks. Push only if step 6 opened PRs.
+4. **Test guide.** After verify, write `<dir>/test.md` for the user, in the user's language. The dashboard shows it under the test URLs, so the user can test without leaving the dashboard. `verify.md` stays your evidence; `test.md` is the user's guide. Keep it short:
+   - the direct URL of the changed page, not only the root;
+   - how to log in if the app needs it (which local account), never a secret;
+   - 3 to 5 steps, each with its expected result;
+   - what you could not test, and why.
+
+   Rules:
+   - **Data.** Use the data already there. Create data only in a local database, and list it in the guide. If the database is not local, create nothing and say so in the guide.
+   - **No external effects.** Never send an SMS, an email or a payment, and never call a real third-party service. If the feature depends on one, mark it "to test by hand" in the guide and explain how.
 
 If the preview fails to start, it prints the log tail: diagnose, fix the recipe or the code, and retry up to twice before asking the user. To fix the recipe: if `pipeship recipe <repo>` points to a `.pipeship.json` in the repo, fix that file in the top worktree (it will be part of the PRs) and tell the user; otherwise write a fixed draft and pass it with `--recipe`.
 
 ## End
 
-Give the user a short summary: the test URL, the PRs in stack order, what the verification covered (or why it was skipped), and anything to check by hand. The test servers keep running on purpose; the user stops them with the dashboard's "Stop test servers" button.
+Give the user a short summary: the test URL, the PRs in stack order, what the verification covered (or why it was skipped), and anything to check by hand. Point to the test guide: the user finds it on the dashboard card, under the test URLs. The test servers keep running on purpose; the user stops them with the dashboard's "Stop test servers" button.
 
 ## Test environment recipe
 
