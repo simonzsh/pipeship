@@ -201,7 +201,7 @@ function RepoDiff({ data, all }: { data: DiffResponse; all: All }) {
   );
 }
 
-export function CodeTab({ p, target, onTarget }: CodeTabProps) {
+export function CodeTab({ p, target }: CodeTabProps) {
   const [manual, setManual] = useState(0);
   const [all, setAll] = useState<All>(null);
   const requests = useMemo(() => diffRequests(p, target), [p, target]);
@@ -227,11 +227,6 @@ export function CodeTab({ p, target, onTarget }: CodeTabProps) {
         {datas.length > 0 && <Counts additions={additions} deletions={deletions} />}
         {datas.length > 0 && <span className="text-xs text-muted-foreground">{datas.reduce((n, d) => n + d.files.length, 0)} files</span>}
         <span className="ml-auto flex items-center gap-2">
-          {chunk && (
-            <Button size="sm" variant="ghost" onClick={() => onTarget({})}>
-              Whole stack
-            </Button>
-          )}
           {datas.length > 0 && (
             <Button size="sm" variant="outline" onClick={() => setAll((a) => ({ open: !allOpen, n: (a?.n ?? 0) + 1 }))}>
               {allOpen ? <ChevronsDownUp /> : <ChevronsUpDown />} {allOpen ? "Collapse all" : "Expand all"}
