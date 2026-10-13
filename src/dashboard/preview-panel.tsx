@@ -38,7 +38,12 @@ export function PreviewPanel({ preview, guide }: { preview: PanelPreview; guide?
         <a href={preview.url} target="_blank" className="truncate font-mono text-sm hover:underline">
           {preview.url}
         </a>
-        <Button asChild size="sm" className="ml-auto">
+        <Button
+          asChild
+          size="sm"
+          variant="ghost"
+          className="ml-auto border border-emerald-500/50 text-emerald-600 hover:bg-emerald-500/10 hover:text-emerald-700 dark:text-emerald-400 dark:hover:bg-emerald-500/10 dark:hover:text-emerald-300"
+        >
           <a href={preview.url} target="_blank">
             Open <ExternalLink />
           </a>
