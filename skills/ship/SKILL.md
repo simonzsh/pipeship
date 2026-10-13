@@ -122,7 +122,7 @@ If the repo has no remote, skip this step and tell the user.
 
 Run the changed code, front end or back end. An API, MCP or engine change needs a running server as much as a UI change: unit tests do not show what a real client gets. Mark this step `skipped` only when nothing the change touches can run (a pure library with no server, a CLI you cannot start, a docs-only change), and say why in the final summary. "No UI" and "engine only" are not reasons to skip. Once every step is done or skipped, the pipeline becomes `ready` on its own.
 
-1. **Start.** Run `pipeship preview <id> <top worktree>`, with `--recipe <dir>/recipe.json` if step 1 wrote a draft. It copies local files, installs, starts the app on a free port, waits until it answers, and marks the pipeline `ready`. A draft recipe that works is saved, so later pipelines in this repo skip this work. Give the user the URL. Services the app needs (a local database, a queue) belong in the recipe's `start` command, so the dashboard's Stop button stops them with the app (see "Test environment recipe"). One-off setup such as seeding test data is fine to run yourself.
+1. **Start.** Run `pipeship preview <id> <top worktree>`, with `--recipe <dir>/recipe.json` if step 1 wrote a draft. It copies local files, installs, starts the app on a free port, waits until it answers, and marks the pipeline `ready`. A draft recipe that works is saved, so later pipelines in this repo skip this work. Give the user the URL. Services the app needs (a local database, a queue) belong in the recipe's `start` command, so the dashboard's "Stop test server" button stops them with the app (see "Test environment recipe"). One-off setup such as seeding test data is fine to run yourself.
 2. **Verify.** Use the changed behaviour the way its client does, and write what you called and what came back to `<dir>/verify.md`: a UI change in a browser (the preview tools of your harness), an HTTP API with `curl`, an MCP or other protocol with a real client. Cover the main path and one failure path. If you cannot exercise it (no test data, a missing service), say so in the summary. Never claim it works from unit tests alone.
 3. **Fix.** If verification fails, fix the code in the worktree of the chunk that owns it, commit, restack and re-run the checks. Push only if step 6 opened PRs.
 
@@ -130,7 +130,7 @@ If the preview fails to start, it prints the log tail: diagnose, fix the recipe 
 
 ## End
 
-Give the user a short summary: the test URL, the PRs in stack order, what the verification covered (or why it was skipped), and anything to check by hand. The test server keeps running on purpose; the user stops it with the dashboard's "Stop pipeline" button.
+Give the user a short summary: the test URL, the PRs in stack order, what the verification covered (or why it was skipped), and anything to check by hand. The test server keeps running on purpose; the user stops it with the dashboard's "Stop test server" button.
 
 ## Test environment recipe
 
