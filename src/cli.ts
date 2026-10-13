@@ -84,7 +84,7 @@ async function main() {
       const base = spawnSync("git", ["-C", repo, "branch", "--show-current"], { encoding: "utf8" }).stdout?.trim();
       const state = createPipeline({
         repo,
-        base: base || undefined,
+        base,
         title: need(values.title, "--title"),
         name: values.name,
         source: values.source,

@@ -7,7 +7,7 @@ import { ChunkStatusIcon } from "./status";
 export function StackTree({ base, chunks }: { base?: string; chunks: Chunk[] }) {
   const offset = base ? 1 : 0;
   return (
-    <ul className="flex flex-col divide-y rounded-lg border">
+    <ul className="flex flex-col rounded-lg border">
       {base && (
         <li className="flex items-center gap-3 px-3 py-2 text-sm">
           <GitBranch className="size-4 shrink-0 text-muted-foreground" />
@@ -19,9 +19,18 @@ export function StackTree({ base, chunks }: { base?: string; chunks: Chunk[] }) 
       {chunks.map((c, i) => {
         const depth = i + offset;
         return (
-          <li key={c.name} className="flex items-center gap-3 px-3 py-2 text-sm" style={{ paddingLeft: `calc(0.75rem + ${depth}rem)` }}>
-            {/* Elbow drawn with borders: a vertical line down to the middle, then a horizontal one. */}
-            {depth > 0 && <span aria-hidden className="-mt-3 h-3 w-3 shrink-0 self-center rounded-bl-sm border-b border-l border-muted-foreground/40" />}
+          <li key={c.name} className="flex items-center gap-3 px-3 py-2 text-sm" style={{ paddingLeft: depth > 0 ? `calc(0.75rem + ${depth - 1} * 1.75rem)` : undefined }}>
+            {/* The 1rem cell starts under the parent's icon (indent step 1.75rem = cell + gap) and spans the row (-my-2 undoes py-2).
+                The elbow rises into the row above, ends 0.25rem under the parent's icon, and runs to 0.25rem before ours. */}
+            {depth > 0 && (
+              <span className="relative -my-2 w-4 shrink-0 self-stretch">
+                <span
+                  aria-hidden
+                  className="absolute left-1/2 w-4 rounded-bl-md border-b border-l border-muted-foreground/40"
+                  style={{ top: "calc(-50% + 0.75rem)", height: "calc(100% - 0.75rem)" }}
+                />
+              </span>
+            )}
             <GitBranch className="size-4 shrink-0 text-muted-foreground" />
             <span className="shrink-0 whitespace-nowrap font-medium">{c.name}</span>
             {c.branch && (
