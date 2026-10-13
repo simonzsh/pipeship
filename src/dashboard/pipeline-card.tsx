@@ -4,7 +4,7 @@ import type { PipelineView } from "../state.ts";
 import { ActionButton } from "./action-button";
 import { Badge } from "./components/ui/badge";
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "./components/ui/card";
-import { MergeButton, MergeLine } from "./merge-button";
+import { MergeButton } from "./merge-button";
 import { PreviewPanel } from "./preview-panel";
 import { AgentLogo, isAgentStopped } from "./session";
 import { StackTree } from "./stack-tree";
@@ -104,7 +104,6 @@ export function PipelineCard({ p }: { p: PipelineView }) {
 
         <CardContent>
           <Steps steps={steps} />
-          {p.merge && <MergeLine merge={p.merge} />}
         </CardContent>
       </div>
 
@@ -121,7 +120,9 @@ export function PipelineCard({ p }: { p: PipelineView }) {
         <span>·</span>
         <span className="whitespace-nowrap">updated {timeAgo(p.updatedAt)}</span>
         <div className="ml-auto flex items-center gap-2">
-          {finished && prChunks.length > 0 && !allMerged && !merging && <MergeButton id={p.id} chunks={p.chunks} base={p.base} />}
+          {(merging || (finished && prChunks.length > 0 && !allMerged)) && (
+            <MergeButton id={p.id} chunks={p.chunks} base={p.base} merge={p.merge} />
+          )}
           {p.status === "ready" ? (
             p.preview && <ActionButton id={p.id} action="stopServer" />
           ) : p.status === "running" || p.status === "waiting_for_user" || (p.status === "failed" && p.preview) ? (
