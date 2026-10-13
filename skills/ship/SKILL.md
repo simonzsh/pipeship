@@ -63,6 +63,7 @@ Subagent (read-only, model `sonnet`; Claude Code: `Explore` type). Input: `ticke
 - how to start the app: run `pipeship recipe <repo>`. If it prints `none` and the repo has anything that serves requests (a web app, an API, an MCP server, a worker with a health route), write a draft recipe to `<dir>/recipe.json` (see "Test environment recipe"). Back-end only changes count: do not conclude "no preview needed" because the change has no UI. Say "nothing to run" only for a pure library, a CLI that cannot start, or a docs-only change. List what the app needs to run (database, env files, seed data, other services) and how to get test data locally.
 
 In `quick` mode, keep the map short: only the files to change.
+In `quick` mode, do the map yourself in the main session, not in a subagent: on a small ticket a subagent costs as much as the work. Still write `<dir>/map.md`, with only the files to change, the check commands and how to start the app (keep the recipe part).
 
 ## Step 2 — questions (human pause)
 
@@ -103,6 +104,8 @@ When all are done, **restack**: in stack order, rebase each chunk branch onto th
 2. **Cleanup per chunk** (one subagent per chunk, model `sonnet`): simplification, dead code, repo conventions, readability. Use the `simplify` and `code-review` skills if available.
 3. Fix each problem **in the worktree of the chunk that owns the code**, commit, then restack the later chunks.
 4. **Safety rule**: after every pass that changes code, re-run the checks. If a check fails, fix it or revert the pass.
+
+In `quick` mode, skip the global review. Run one cleanup pass (one subagent, model `sonnet`) on the whole diff: simplification, dead code, repo conventions. Then run the checks once. Quick mode uses no `opus` step: every subagent is `sonnet`.
 
 Write a short summary to `<dir>/review.md`.
 
