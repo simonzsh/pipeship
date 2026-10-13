@@ -8,7 +8,7 @@ import { PipelineDetail } from "./pipeline-detail";
 import { PipelineListItem } from "./pipeline-list-item";
 import { STATUS_ORDER, statusConfig } from "./status";
 import { ThemeToggle } from "./theme";
-import { buildSearch, parseUrl, pickSelected, type UrlState } from "./url";
+import { buildSearch, parseUrl, type UrlState } from "./url";
 import { cn, shortRepo } from "./utils";
 
 function EmptyState() {
@@ -31,7 +31,6 @@ const ALL = "__all__"; // Radix forbids "" as an item value.
 function App() {
   const [pipelines, setPipelines] = useState<DashboardState[]>();
   const [url, setUrl] = useState<UrlState>(() => parseUrl(location.search));
-  const repo = url.repo;
   const [live, setLive] = useState(false);
   const [, tick] = useState(0);
 
@@ -60,7 +59,7 @@ function App() {
     return [...counts].sort((a, b) => shortRepo(a[0]).localeCompare(shortRepo(b[0])));
   }, [pipelines]);
   // An unknown repo in the URL falls back to all repos; the URL is left as is.
-  const selected = repos.some(([r]) => r === repo) ? repo : null;
+  const selected = repos.some(([r]) => r === url.repo) ? url.repo : null;
   const shown = selected ? pipelines?.filter((p) => p.repos.some((r) => r.path === selected)) : pipelines;
   const groups = shown ? groupByStatus(shown, STATUS_ORDER) : [];
   // Only states that are present, stopped ones left out: "3 pipelines · 1 waiting for you · 2 running".
@@ -75,7 +74,7 @@ function App() {
 
   // The selection follows the displayed order: groups first, then each group's items.
   const ordered = groups.flatMap((g) => g.items);
-  const current = ordered.find((p) => p.id === pickSelected(ordered.map((p) => p.id), url.p));
+  const current = ordered.find((p) => p.id === url.p) ?? ordered[0];
   // On narrow screens a p in the URL shows the detail; without it, the list.
   const detailOnly = url.p !== null && current?.id === url.p;
 
@@ -162,7 +161,7 @@ function App() {
               })}
             </div>
           </aside>
-          <main className={cn("min-w-0 flex-1 overflow-y-auto", !detailOnly && "max-[899px]:hidden")}>
+          <main className={cn("flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden", !detailOnly && "max-[899px]:hidden")}>
             <PipelineDetail key={current.id} p={current} onBack={() => selectPipeline(null)} />
           </main>
         </div>

@@ -12,8 +12,3 @@ export function buildSearch(s: UrlState): string {
   const parts = [s.p && `p=${enc(s.p)}`, s.repo && `repo=${enc(s.repo)}`].filter(Boolean);
   return parts.length ? `?${parts.join("&")}` : "";
 }
-
-// An unknown or filtered-out p falls back to the first pipeline.
-export function pickSelected(ids: string[], p: string | null): string | undefined {
-  return p !== null && ids.includes(p) ? p : ids[0];
-}

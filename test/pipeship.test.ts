@@ -21,7 +21,7 @@ import { Database } from "bun:sqlite";
 import { detectSession, findT3Thread, type ReadProc } from "../src/session.ts";
 import { groupByStatus } from "../src/dashboard/groups.ts";
 import { t3ThreadLink } from "../src/dashboard/session.tsx";
-import { buildSearch, parseUrl, pickSelected } from "../src/dashboard/url.ts";
+import { buildSearch, parseUrl } from "../src/dashboard/url.ts";
 import { allMerged, displaySteps, finished, timeAgo } from "../src/dashboard/pipeline-info.ts";
 
 const root = mkdtempSync(join(tmpdir(), "pipeship-test-"));
@@ -1664,13 +1664,6 @@ test("parseUrl and buildSearch round-trip", () => {
   expect(buildSearch({ p: "a-1", repo: "/home/me/app" })).toBe("?p=a-1&repo=/home/me/app");
   expect(parseUrl(buildSearch({ p: "x y", repo: "/a&b" }))).toEqual({ p: "x y", repo: "/a&b" });
   expect(buildSearch({ p: "", repo: "r" })).toBe("?repo=r");
-});
-
-test("pickSelected falls back to the first pipeline", () => {
-  expect(pickSelected(["a", "b"], "b")).toBe("b");
-  expect(pickSelected(["a", "b"], "zzz")).toBe("a");
-  expect(pickSelected(["a", "b"], null)).toBe("a");
-  expect(pickSelected([], "a")).toBeUndefined();
 });
 
 test("timeAgo uses the given clock", () => {

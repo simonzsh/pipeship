@@ -15,7 +15,7 @@ const prLabel = (url: string) => {
 function clickable(pick: (() => void) | undefined, isSelected: boolean) {
   return {
     className: cn(
-      pick && "cursor-pointer outline-none transition-colors hover:bg-accent/60 focus-visible:bg-accent/60",
+      pick && "outline-none transition-colors hover:bg-accent/60 focus-visible:bg-accent/60",
       isSelected && "bg-accent",
     ),
     ...(pick && {

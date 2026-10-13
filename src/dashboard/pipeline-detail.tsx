@@ -1,5 +1,5 @@
 import { ArrowLeft, FolderGit2, GitMerge, Loader2, Zap } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { useState } from "react";
 import { repoName, repoStacks } from "../repos.ts";
 import type { DashboardState } from "../state.ts";
 import { ActionButton } from "./action-button";
@@ -31,16 +31,6 @@ export function PipelineDetail({ p, onBack }: { p: DashboardState; onBack: () =>
   const repoLabel =
     p.repos.length === 0 ? "" : multi ? stacks.map((st) => st.name).join(" + ") : shortRepo(p.repos[0]!.path);
   const showTicket = p.ticket.links.length > 0 || (p.ticket.source && p.ticket.source !== "text");
-  // The header sticks on scroll; its height goes to --detail-header so the file headers stick right below it.
-  const root = useRef<HTMLDivElement>(null);
-  const header = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    const h = header.current;
-    if (!h) return;
-    const ro = new ResizeObserver(() => root.current?.style.setProperty("--detail-header", `${h.offsetHeight}px`));
-    ro.observe(h);
-    return () => ro.disconnect();
-  }, []);
   const select = (t: DiffTarget) => {
     setTarget(t);
     setTab("code");
@@ -59,7 +49,7 @@ export function PipelineDetail({ p, onBack }: { p: DashboardState; onBack: () =>
   // Same layout for one repo or several: the repo row carries its merge button.
   const stack =
     stacks.length === 0 ? (
-      tree(undefined, [], undefined)
+      <p className="text-xs text-muted-foreground">No branch yet</p>
     ) : (
       stacks.map((st) => (
         <div key={st.repo.path} className="flex flex-col gap-2">
@@ -82,9 +72,9 @@ export function PipelineDetail({ p, onBack }: { p: DashboardState; onBack: () =>
     );
 
   return (
-    <div ref={root} className="flex flex-col">
+    <div className="flex h-full min-h-0 flex-col">
       {/* No status tint here: the list already carries the colour, the detail stays calm. */}
-      <div ref={header} className="sticky top-0 z-20 flex flex-col gap-4 border-b bg-background px-6 py-5">
+      <div className="flex flex-col gap-4 border-b bg-background px-6 py-5">
         <Button variant="ghost" size="sm" onClick={onBack} className="-ml-2 hidden w-fit max-[899px]:inline-flex">
           <ArrowLeft /> Pipelines
         </Button>
@@ -142,33 +132,35 @@ export function PipelineDetail({ p, onBack }: { p: DashboardState; onBack: () =>
         <Steps steps={displaySteps(p)} />
       </div>
 
-      <div className="flex flex-col gap-3 px-6 pt-5">
-        <div className="flex flex-wrap items-center gap-2">
-          <h3 className="mr-auto text-sm font-semibold">Pull request stack</h3>
-          {multi && merging && p.merge && (
-            <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
-              <Loader2 className="size-3.5 animate-spin" /> Merging {repoName(p.merge.repo)}…
-            </span>
-          )}
+      <div className="min-h-0 flex-1 overflow-y-auto">
+        <div className="flex flex-col gap-3 px-6 pt-5">
+          <div className="flex flex-wrap items-center gap-2">
+            <h3 className="mr-auto text-sm font-semibold">Pull request stack</h3>
+            {multi && p.merge?.status === "running" && (
+              <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                <Loader2 className="size-3.5 animate-spin" /> Merging {repoName(p.merge.repo)}…
+              </span>
+            )}
+          </div>
+          {stack}
         </div>
-        {stack}
-      </div>
 
-      <Tabs value={tab} onValueChange={setTab} className="px-6 py-5">
-        <TabsList>
-          <TabsTrigger value="test">Test</TabsTrigger>
-          <TabsTrigger value="code">Code</TabsTrigger>
-        </TabsList>
-        <TabsContent value="test" className="flex flex-col gap-4">
-          {p.preview && <PreviewPanel preview={p.preview} />}
-          {p.testGuide && <TestGuide guide={p.testGuide} />}
-          {!p.preview && !p.testGuide && <p className="text-sm text-muted-foreground">No test environment yet</p>}
-        </TabsContent>
-        {/* The diff spans the whole column; the code tab pads its own text rows. */}
-        <TabsContent value="code" className="-mx-6">
-          <CodeTab p={p} target={target} onTarget={setTarget} />
-        </TabsContent>
-      </Tabs>
+        <Tabs value={tab} onValueChange={setTab} className="py-5">
+          <TabsList className="mx-6">
+            <TabsTrigger value="test">Test</TabsTrigger>
+            <TabsTrigger value="code">Code</TabsTrigger>
+          </TabsList>
+          <TabsContent value="test" className="flex flex-col gap-4 px-6">
+            {p.preview && <PreviewPanel preview={p.preview} />}
+            {p.testGuide && <TestGuide guide={p.testGuide} />}
+            {!p.preview && !p.testGuide && <p className="text-sm text-muted-foreground">No test environment yet</p>}
+          </TabsContent>
+          {/* The code tab pads its own rows. */}
+          <TabsContent value="code">
+            <CodeTab p={p} target={target} onTarget={setTarget} />
+          </TabsContent>
+        </Tabs>
+      </div>
     </div>
   );
 }
