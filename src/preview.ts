@@ -1,7 +1,9 @@
 import { spawn, spawnSync } from "node:child_process";
 import { copyFileSync, existsSync, mkdirSync, openSync, readFileSync, readdirSync, rmSync, closeSync } from "node:fs";
 import { connect, createServer } from "node:net";
+import { createHash } from "node:crypto";
 import { dirname, join } from "node:path";
+import { findRepo, repoName, sharesRepo, topChunk } from "./repos.ts";
 import { home, listStates, pipelineDir, readState, updateState, type PreviewService, type State } from "./state.ts";
 
 export interface ServiceRecipe {
@@ -13,6 +15,9 @@ export interface ServiceRecipe {
   ready?: "http" | "tcp"; // "tcp": ready as soon as the port accepts a connection (databases, queues)
   env?: Record<string, string>; // values may hold ${<service>.port}
   fixedPort?: number;
+  repo?: string; // repo NAME (repoName of a pipeline repo)
+  install?: string; // run in this service's worktree, before any service starts
+  copyFiles?: string[]; // copied from this service's repo checkout into its worktree
 }
 
 export interface Recipe {
@@ -34,6 +39,9 @@ export interface Service {
   ready: "http" | "tcp";
   env: Record<string, string>;
   fixedPort?: number;
+  repo?: string;
+  install?: string;
+  copyFiles?: string[];
 }
 
 type Preview = NonNullable<State["preview"]>;
@@ -46,14 +54,24 @@ const PORT_SCAN = 1000;
 const READY_TIMEOUT_MS = 180_000; // per service
 const PORT_REF = /\$\{([A-Za-z0-9_-]+)\.port\}/g;
 
-export function savedRecipePath(repo: string): string {
-  return join(home(), "recipes", `${repo.replace(/^\/+/, "").replace(/[^a-zA-Z0-9.]+/g, "-")}.json`);
+export function savedRecipePath(repos: string | string[]): string {
+  const list = [repos].flat();
+  if (list.length === 1) {
+    return join(home(), "recipes", `${list[0]!.replace(/^\/+/, "").replace(/[^a-zA-Z0-9.]+/g, "-")}.json`);
+  }
+  // Sorted, so the same set of repos gives the same file in any order.
+  const sorted = [...list].sort();
+  const hash = createHash("sha256").update(sorted.join("\n")).digest("hex").slice(0, 8);
+  return join(home(), "recipes", `${sorted.map(repoName).join("+")}-${hash}.json`);
 }
 
 // A recipe shared in the repo wins over the one pipeship saved after a successful start.
-export function findRecipe(repo: string, worktree?: string): string | undefined {
-  const shared = [worktree, repo].filter((dir) => dir !== undefined).map((dir) => join(dir, ".pipeship.json"));
-  return [...shared, savedRecipePath(repo)].find(existsSync);
+// Several repos have no shared place: only the saved recipe counts.
+export function findRecipe(repos: string | string[], worktree?: string): string | undefined {
+  const list = [repos].flat();
+  if (list.length !== 1) return [savedRecipePath(list)].find(existsSync);
+  const shared = [worktree, list[0]].filter((dir) => dir !== undefined).map((dir) => join(dir, ".pipeship.json"));
+  return [...shared, savedRecipePath(list)].find(existsSync);
 }
 
 export function loadRecipe(path: string): Recipe {
@@ -62,7 +80,15 @@ export function loadRecipe(path: string): Recipe {
   return recipe;
 }
 
-export function normalizeRecipe(recipe: Recipe, source = "recipe"): Service[] {
+// `repos` are repo NAMES; when given, the repo rules of the pipeline apply.
+export function normalizeRecipe(recipe: Recipe, source = "recipe", repos?: string[]): Service[] {
+  const several = (repos?.length ?? 0) >= 2;
+  if (several && recipe.services === undefined && recipe.start) {
+    throw new Error(`${source}: a recipe for several repos needs "services", each with a "repo"`);
+  }
+  if (several && (recipe.install !== undefined || recipe.copyFiles !== undefined)) {
+    throw new Error(`${source}: top-level "install" and "copyFiles" need a single repo: set them on the services`);
+  }
   if (recipe.services === undefined) {
     if (!recipe.start) throw new Error(`${source}: "start" or "services" is required`);
     const { start, portEnv, readyPath } = recipe;
@@ -103,6 +129,19 @@ export function normalizeRecipe(recipe: Recipe, source = "recipe"): Service[] {
     if (raw.env !== undefined && (typeof raw.env !== "object" || raw.env === null || Array.isArray(raw.env))) {
       throw new Error(`${where}: "env" must be an object`);
     }
+    if (raw.repo !== undefined && !(typeof raw.repo === "string" && raw.repo)) {
+      throw new Error(`${where}: "repo" must be a repo name`);
+    }
+    if (raw.install !== undefined && typeof raw.install !== "string") throw new Error(`${where}: "install" must be a string`);
+    if (raw.copyFiles !== undefined && !(Array.isArray(raw.copyFiles) && raw.copyFiles.every((f) => typeof f === "string"))) {
+      throw new Error(`${where}: "copyFiles" must be a list of file paths`);
+    }
+    if (repos && several && raw.repo === undefined) {
+      throw new Error(`${where}: "repo" is required when the pipeline has several repos (${repos.join(", ")})`);
+    }
+    if (repos && raw.repo !== undefined && !repos.includes(raw.repo)) {
+      throw new Error(`${where}: unknown repo "${raw.repo}" (repos: ${repos.join(", ")})`);
+    }
     const other = fixedPort === undefined ? undefined : services.find((s) => s.fixedPort === fixedPort);
     if (other) throw new Error(`${where}: fixed port ${fixedPort} is already used by "${other.name}"`);
     for (const [key, value] of Object.entries(raw.env ?? {})) {
@@ -117,6 +156,9 @@ export function normalizeRecipe(recipe: Recipe, source = "recipe"): Service[] {
       ready: raw.ready ?? "http",
       env: raw.env ?? {},
       fixedPort,
+      ...(raw.repo !== undefined && { repo: raw.repo }),
+      ...(raw.install !== undefined && { install: raw.install }),
+      ...(raw.copyFiles !== undefined && { copyFiles: raw.copyFiles }),
     });
   });
 
@@ -210,7 +252,9 @@ function reservedPorts(id: string): Set<number> {
 
 export function previewLines(preview: Preview): string[] {
   const services = preview.services ?? [];
-  return [preview.url, ...(services.length > 1 ? services.map((s) => `${s.name} (${s.kind}): ${s.url}`) : [])];
+  const several = new Set(services.map((s) => s.repo)).size > 1;
+  const label = (s: PreviewService) => `${s.name} (${s.kind}${several ? `, ${repoName(s.repo)}` : ""})`;
+  return [preview.url, ...(services.length > 1 ? services.map((s) => `${label(s)}: ${s.url}`) : [])];
 }
 
 export function isAlive(pid: number): boolean {
@@ -269,26 +313,89 @@ async function waitReady(svc: Service, port: number, pid: number, log: string): 
   throw new Error(`service "${name}" not ready after ${READY_TIMEOUT_MS / 1000}s. Log tail:\n${tail(log)}`);
 }
 
-// `draft` is a recipe written by the agent; it is saved for the repo only once the app starts.
-export async function startPreview(id: string, worktree: string, draft?: string): Promise<State> {
+type Homes = Map<string, { repo: string; worktree: string }>;
+
+// Never overwrites a file the worktree already has.
+function copyFrom(repo: string, worktree: string, files: string[] = []): void {
+  for (const file of files) {
+    const from = join(repo, file);
+    const to = join(worktree, file);
+    if (existsSync(from) && !existsSync(to)) {
+      mkdirSync(dirname(to), { recursive: true });
+      copyFileSync(from, to);
+    }
+  }
+}
+
+function copyAll(recipe: Recipe, services: Service[], homes: Homes): void {
+  const first = homes.get(services[0]!.name)!;
+  copyFrom(first.repo, first.worktree, recipe.copyFiles); // top-level: one repo only
+  for (const svc of services) copyFrom(homes.get(svc.name)!.repo, homes.get(svc.name)!.worktree, svc.copyFiles);
+}
+
+// Top-level install first, then each service's, once per worktree and command.
+function runInstalls(recipe: Recipe, services: Service[], homes: Homes, log: string, several: boolean): void {
+  const first = homes.get(services[0]!.name)!;
+  const jobs = [
+    ...(recipe.install ? [{ cmd: recipe.install, ...first }] : []),
+    ...services.filter((s) => s.install).map((s) => ({ cmd: s.install!, ...homes.get(s.name)! })),
+  ];
+  const done = new Set<string>();
+  const fd = openSync(log, "w");
+  try {
+    for (const job of jobs) {
+      const key = `${job.worktree}\0${job.cmd}`;
+      if (done.has(key)) continue;
+      done.add(key);
+      const result = spawnSync("sh", ["-c", job.cmd], { cwd: job.worktree, stdio: ["ignore", fd, fd] });
+      if (result.status !== 0) {
+        throw new Error(`install failed (${job.cmd})${several ? ` in ${repoName(job.repo)}` : ""}. Log tail:\n${tail(log)}`);
+      }
+    }
+  } finally {
+    closeSync(fd);
+  }
+}
+
+// `draft` is a recipe written by the agent; it is saved for the repos only once the app starts.
+export async function startPreview(id: string, worktree?: string, draft?: string): Promise<State> {
   let state = readState(id);
   if (state.preview && previewAlive(state.preview)) await stopPreview(id);
   state = readState(id);
 
-  const recipePath = draft ?? findRecipe(state.repo, worktree);
-  if (!recipePath) throw new Error(`no recipe for ${state.repo}: write one and pass it with --recipe`);
+  const { repos } = state;
+  if (repos.length === 0) throw new Error(`pipeline ${id} has no repo: add one with pipeship repo ${id} <path>`);
+  if (worktree && repos.length > 1) {
+    throw new Error(`pipeline ${id} has several repos: drop ${worktree}, each repo's worktree comes from its chunks`);
+  }
+  const paths = repos.map((r) => r.path);
+  const trees = new Map(repos.map((r) => [r.path, (repos.length === 1 && worktree) || topChunk(state, r.path)?.worktree]));
+
+  const recipePath = draft ?? findRecipe(paths, repos.length === 1 ? trees.get(paths[0]!) : undefined);
+  if (!recipePath) throw new Error(`no recipe for ${paths.join(" + ")}: write one and pass it with --recipe`);
   const recipe = loadRecipe(recipePath);
-  const services = normalizeRecipe(recipe, recipePath);
+  const services = normalizeRecipe(recipe, recipePath, paths.map(repoName));
+
+  // Each service runs in the worktree of its repo.
+  const homes = new Map(services.map((svc) => {
+    const repo = svc.repo ? findRepo(state, svc.repo)! : repos[0]!;
+    const tree = trees.get(repo.path);
+    if (!tree) {
+      throw new Error(`service "${svc.name}": no worktree for repo ${repoName(repo.path)}: record one with pipeship chunk ${id} <chunk> --repo ${repoName(repo.path)} --worktree <path>`);
+    }
+    return [svc.name, { repo: repo.path, worktree: tree }];
+  }));
 
   // A fixed port can serve one pipeline at a time: a live or still-starting one blocks it.
   const fixed = services.find((s) => s.fixedPort !== undefined);
   if (fixed) {
     const other = listStates().find(
-      (s) => s.id !== id && s.repo === state.repo && s.preview && (previewAlive(s.preview) || previewStarting(s.preview)),
+      (s) => s.id !== id && sharesRepo(s, state) && s.preview && (previewAlive(s.preview) || previewStarting(s.preview)),
     );
     if (other) {
+      const shared = repoName(other.repos.find((r) => paths.includes(r.path))!.path);
       throw new Error(
-        `service "${fixed.name}" uses the fixed port ${fixed.fixedPort}, and pipeline ${other.id} of this repo has a live test environment: stop it first (pipeship stop ${other.id})`,
+        `service "${fixed.name}" uses the fixed port ${fixed.fixedPort}, and pipeline ${other.id} of the repo ${shared} has a live test environment: stop it first (pipeship stop ${other.id})`,
       );
     }
   }
@@ -305,9 +412,10 @@ export async function startPreview(id: string, worktree: string, draft?: string)
     port: ports[svc.name]!,
     url: `http://localhost:${ports[svc.name]}`,
     log: join(pipelineDir(id), `preview-${svc.name}.log`),
+    ...homes.get(svc.name)!,
   }));
   const preview = (mainPid?: number) =>
-    ({ url: mainUrl, port: ports[main.name]!, pid: mainPid, worktree, log: installLog, services: planned });
+    ({ url: mainUrl, port: ports[main.name]!, pid: mainPid, log: installLog, services: planned });
   updateState(id, (s) => {
     s.preview = preview();
   });
@@ -327,24 +435,8 @@ export async function startPreview(id: string, worktree: string, draft?: string)
   };
 
   try {
-    for (const file of recipe.copyFiles ?? []) {
-      const from = join(state.repo, file);
-      const to = join(worktree, file);
-      if (existsSync(from) && !existsSync(to)) {
-        mkdirSync(dirname(to), { recursive: true });
-        copyFileSync(from, to);
-      }
-    }
-
-    const installFd = openSync(installLog, "w");
-    try {
-      if (recipe.install) {
-        const result = spawnSync("sh", ["-c", recipe.install], { cwd: worktree, stdio: ["ignore", installFd, installFd] });
-        if (result.status !== 0) throw new Error(`install failed (${recipe.install}). Log tail:\n${tail(installLog)}`);
-      }
-    } finally {
-      closeSync(installFd);
-    }
+    copyAll(recipe, services, homes);
+    runInstalls(recipe, services, homes, installLog, repos.length > 1);
 
     for (const svc of order) {
       // A stop during a slow install or readiness wait must not leave a service behind.
@@ -353,7 +445,7 @@ export async function startPreview(id: string, worktree: string, draft?: string)
       const fd = openSync(plan.log, "w");
       try {
         const child = spawn("sh", ["-c", svc.start], {
-          cwd: worktree,
+          cwd: plan.worktree,
           detached: true,
           stdio: ["ignore", fd, fd],
           env: {
@@ -383,7 +475,7 @@ export async function startPreview(id: string, worktree: string, draft?: string)
   }
 
   if (draft) {
-    const saved = savedRecipePath(state.repo);
+    const saved = savedRecipePath(paths);
     mkdirSync(dirname(saved), { recursive: true });
     copyFileSync(draft, saved);
   }
@@ -445,9 +537,12 @@ export async function deletePipeline(id: string, opts: { force?: boolean } = {})
     const dirty = worktrees.filter((wt) => git(wt, "status", "--porcelain").stdout.trim() !== "");
     if (dirty.length) throw new Error(`uncommitted changes would be lost in: ${dirty.join(", ")}`);
   }
-  for (const wt of worktrees) git(state.repo, "worktree", "remove", "--force", wt);
+  // The worktree folders are flat: try each repo until one owns the worktree.
+  for (const wt of worktrees) {
+    for (const repo of state.repos) if (git(repo.path, "worktree", "remove", "--force", wt).status === 0) break;
+  }
   rmSync(pipelineDir(id), { recursive: true, force: true });
-  git(state.repo, "worktree", "prune");
+  for (const repo of state.repos) git(repo.path, "worktree", "prune");
 }
 
 export function git(cwd: string, ...args: string[]) {

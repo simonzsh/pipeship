@@ -2,14 +2,17 @@ import { afterAll, beforeEach, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync, existsSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { createPipeline, listStates, pipelineDir, readState, setMode, setStep, updateState, upsertChunk } from "../src/state.ts";
+import {
+  addRepo, createPipeline, listStates, pipelineDir, readState, setMode, setStep, updateState, upsertChunk,
+} from "../src/state.ts";
+import { chunksOf, repoName, repoStacks, sharesRepo, topChunk } from "../src/repos.ts";
 import {
   DASHBOARD_PORT, deletePipeline, findRecipe, isAlive, mainService, normalizeRecipe, pickPorts, previewLines, resolveEnv,
   savedRecipePath, startOrder, startPreview, stopPipeline, type Service,
 } from "../src/preview.ts";
 import { DEFAULT_PORT, serve } from "../src/server.ts";
 import {
-  classifyPr, defaultRunner, DEFAULT_LIMITS, failStaleMerges, mergeStack, MergeError, startMerge, type MergeDeps, type PrView, type Runner,
+  classifyPr, defaultRunner, DEFAULT_LIMITS, failStaleMerges, mergeStack, MergeError, resolveMergeRepo, startMerge, type MergeDeps, type PrView, type Runner,
 } from "../src/merge.ts";
 import { spawn, spawnSync } from "node:child_process";
 import { Database } from "bun:sqlite";
@@ -28,33 +31,33 @@ beforeEach(() => {
 });
 
 test("quick mode and --skip mark steps as skipped", () => {
-  const quick = createPipeline({ repo, title: "Add date filter", source: "text", mode: "quick" });
+  const quick = createPipeline({ repos: [{ path: repo }], title: "Add date filter", source: "text", mode: "quick" });
   expect(quick.steps.find((s) => s.name === "plan")!.status).toBe("skipped");
 
-  const custom = createPipeline({ repo, title: "x", source: "linear", links: [{ ref: "ABC-1" }], skip: ["questions", "stack"] });
+  const custom = createPipeline({ repos: [{ path: repo }], title: "x", source: "linear", links: [{ ref: "ABC-1" }], skip: ["questions", "stack"] });
   expect(custom.steps.filter((s) => s.status === "skipped").map((s) => s.name)).toEqual(["questions", "stack"]);
 });
 
 test("ids are unique for the same ticket", () => {
-  const a = createPipeline({ repo, title: "t", source: "linear", links: [{ ref: "ABC-2" }] });
-  const b = createPipeline({ repo, title: "t", source: "linear", links: [{ ref: "ABC-2" }] });
+  const a = createPipeline({ repos: [{ path: repo }], title: "t", source: "linear", links: [{ ref: "ABC-2" }] });
+  const b = createPipeline({ repos: [{ path: repo }], title: "t", source: "linear", links: [{ ref: "ABC-2" }] });
   expect(a.id).not.toBe(b.id);
   expect(listStates().map((s) => s.id)).toContain(b.id);
 });
 
 test("steps and chunks update the state", () => {
-  const { id } = createPipeline({ repo, title: "t", source: "text" });
+  const { id } = createPipeline({ repos: [{ path: repo }], title: "t", source: "text" });
   setStep(id, "questions", "running");
   upsertChunk(id, { name: "api", branch: "feat/api" });
   upsertChunk(id, { name: "api", pr: "https://example.com/pr/1" });
   const state = readState(id);
   expect(state.step).toBe("questions");
-  expect(state.chunks).toEqual([{ name: "api", branch: "feat/api", pr: "https://example.com/pr/1" }]);
+  expect(state.chunks).toEqual([{ name: "api", repo, branch: "feat/api", pr: "https://example.com/pr/1" }]);
   expect(() => setStep(id, "nope" as never, "done")).toThrow("unknown step");
 });
 
 test("the pipeline is ready once every step is done or skipped", () => {
-  const { id } = createPipeline({ repo, title: "t", source: "text", skip: ["preview"] });
+  const { id } = createPipeline({ repos: [{ path: repo }], title: "t", source: "text", skip: ["preview"] });
   for (const name of ["map", "questions", "plan", "implement", "review"] as const) setStep(id, name, "done");
   expect(readState(id).status).toBe("running");
   setStep(id, "stack", "done");
@@ -62,7 +65,7 @@ test("the pipeline is ready once every step is done or skipped", () => {
 });
 
 test("a failed pipeline stays failed when its last step ends", () => {
-  const { id } = createPipeline({ repo, title: "t", source: "text", mode: "quick" });
+  const { id } = createPipeline({ repos: [{ path: repo }], title: "t", source: "text", mode: "quick" });
   setStep(id, "review", "failed");
   for (const name of ["map", "questions", "implement", "review", "stack", "preview"] as const) setStep(id, name, "done");
   expect(readState(id).status).toBe("failed");
@@ -79,7 +82,7 @@ test("preview starts the app, copies local files, and stop kills it", async () =
       copyFiles: [".env.local"],
     }),
   );
-  const { id } = createPipeline({ repo, title: "Preview test", source: "text", links: [{ ref: "DEMO-7" }] });
+  const { id } = createPipeline({ repos: [{ path: repo }], title: "Preview test", source: "text", links: [{ ref: "DEMO-7" }] });
 
   const state = await startPreview(id, worktree);
   expect(state.status).toBe("ready");
@@ -88,7 +91,10 @@ test("preview starts the app, copies local files, and stop kills it", async () =
   expect(port).toBeGreaterThanOrEqual(3000);
   expect(port).toBeLessThan(4000);
   expect(state.preview!.services).toEqual([
-    { name: "app", kind: "front", port, url: `http://localhost:${port}`, pid: state.preview!.pid, log: join(pipelineDir(id), "preview-app.log") },
+    {
+      name: "app", kind: "front", port, url: `http://localhost:${port}`, pid: state.preview!.pid,
+      log: join(pipelineDir(id), "preview-app.log"), repo, worktree,
+    },
   ]);
   expect(previewLines(state.preview!)).toEqual([`http://localhost:${port}`]);
   expect(readFileSync(join(worktree, ".env.local"), "utf8")).toBe("SECRET=1");
@@ -109,7 +115,7 @@ test("preview starts the app, copies local files, and stop kills it", async () =
 
 test("preview fails clearly when the server crashes", async () => {
   writeFileSync(join(repo, ".pipeship.json"), JSON.stringify({ start: "echo boom; exit 1" }));
-  const { id } = createPipeline({ repo, title: "t", source: "text" });
+  const { id } = createPipeline({ repos: [{ path: repo }], title: "t", source: "text" });
   await expect(startPreview(id, repo)).rejects.toThrow("boom");
   expect(readState(id).preview).toBeUndefined();
   expect(existsSync(join(pipelineDir(id), "preview-app.log"))).toBe(true);
@@ -118,7 +124,7 @@ test("preview fails clearly when the server crashes", async () => {
 test("a draft recipe is saved for the repo only when the app starts", async () => {
   const draft = join(root, "draft.json");
   writeFileSync(draft, JSON.stringify({ start: "exit 1" }));
-  const first = createPipeline({ repo, title: "t", source: "text" });
+  const first = createPipeline({ repos: [{ path: repo }], title: "t", source: "text" });
   await expect(startPreview(first.id, repo, draft)).rejects.toThrow();
   expect(existsSync(savedRecipePath(repo))).toBe(false);
 
@@ -128,7 +134,7 @@ test("a draft recipe is saved for the repo only when the app starts", async () =
   expect(findRecipe(repo)).toBe(savedRecipePath(repo));
 
   // The next pipeline in the same repo reuses the saved recipe without a draft.
-  const second = createPipeline({ repo, title: "t", source: "text" });
+  const second = createPipeline({ repos: [{ path: repo }], title: "t", source: "text" });
   const state = await startPreview(second.id, repo);
   expect(state.status).toBe("ready");
   await stopPipeline(second.id);
@@ -136,7 +142,7 @@ test("a draft recipe is saved for the repo only when the app starts", async () =
 
 test("a pipeline keeps one link per ticket, and old state files are upgraded", () => {
   const { id } = createPipeline({
-    repo, title: "t", source: "linear",
+    repos: [{ path: repo }], title: "t", source: "linear",
     links: [{ ref: "ABC-3", url: "https://example.com/ABC-3" }, { ref: "ABC-4", url: "https://example.com/ABC-4" }],
   });
   expect(id).toEndWith("abc-3-abc-4");
@@ -153,7 +159,7 @@ test("delete removes the worktrees and files, keeps the branch, and protects unc
   const git = (cwd: string, ...args: string[]) => spawnSync("git", ["-C", cwd, ...args], { encoding: "utf8" });
   git(repo, "init", "-q", "-b", "main");
   git(repo, "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "--allow-empty", "-m", "init");
-  const { id } = createPipeline({ repo, title: "t", source: "text" });
+  const { id } = createPipeline({ repos: [{ path: repo }], title: "t", source: "text" });
   const wt = join(pipelineDir(id), "worktrees", "main");
   git(repo, "worktree", "add", "-q", "-b", "pipeship/test/main", wt);
 
@@ -179,18 +185,18 @@ test("package.json and both plugin manifests declare the same version", () => {
 });
 
 test("ids have no date: refs, --name, then the first 3 words of the title", () => {
-  const one = createPipeline({ repo, title: "t", source: "linear", links: [{ ref: "IDA-1" }] });
+  const one = createPipeline({ repos: [{ path: repo }], title: "t", source: "linear", links: [{ ref: "IDA-1" }] });
   expect(one.id).toBe("ida-1");
-  const two = createPipeline({ repo, title: "t", source: "linear", links: [{ ref: "IDB-1" }, { ref: "IDB-2" }] });
+  const two = createPipeline({ repos: [{ path: repo }], title: "t", source: "linear", links: [{ ref: "IDB-1" }, { ref: "IDB-2" }] });
   expect(two.id).toBe("idb-1-idb-2");
-  expect(createPipeline({ repo, title: "Link sessions", name: "session-link", source: "text" }).id).toBe("session-link");
-  expect(createPipeline({ repo, title: "t", name: "ignored-name", source: "linear", links: [{ ref: "IDC-1" }] }).id).toBe("idc-1");
-  expect(createPipeline({ repo, title: "Link each pipeline to its agent", source: "text" }).id).toBe("link-each-pipeline");
-  expect(createPipeline({ repo, title: "Créer un lien rapide", source: "text" }).id).toBe("creer-un-lien");
+  expect(createPipeline({ repos: [{ path: repo }], title: "Link sessions", name: "session-link", source: "text" }).id).toBe("session-link");
+  expect(createPipeline({ repos: [{ path: repo }], title: "t", name: "ignored-name", source: "linear", links: [{ ref: "IDC-1" }] }).id).toBe("idc-1");
+  expect(createPipeline({ repos: [{ path: repo }], title: "Link each pipeline to its agent", source: "text" }).id).toBe("link-each-pipeline");
+  expect(createPipeline({ repos: [{ path: repo }], title: "Créer un lien rapide", source: "text" }).id).toBe("creer-un-lien");
 });
 
 test("duplicate ids get -2 then -3", () => {
-  const ids = [1, 2, 3].map(() => createPipeline({ repo, title: "t", name: "dup-name", source: "text" }).id);
+  const ids = [1, 2, 3].map(() => createPipeline({ repos: [{ path: repo }], title: "t", name: "dup-name", source: "text" }).id);
   expect(ids).toEqual(["dup-name", "dup-name-2", "dup-name-3"]);
 });
 
@@ -251,10 +257,10 @@ test("claude is matched by CLAUDE_CODE_EXECPATH", () => {
 
 test("pipelines record their session, and old state files without one still load", () => {
   const session = { harness: "codex" as const, id: CODEX_ID, cwd: "/w" };
-  const withSession = createPipeline({ repo, title: "t", source: "text", session });
+  const withSession = createPipeline({ repos: [{ path: repo }], title: "t", source: "text", session });
   expect(readState(withSession.id).session).toEqual(session);
 
-  const plain = createPipeline({ repo, title: "t", source: "text" });
+  const plain = createPipeline({ repos: [{ path: repo }], title: "t", source: "text" });
   expect("session" in readState(plain.id)).toBe(false);
   const path = join(pipelineDir(plain.id), "state.json");
   const old = JSON.parse(readFileSync(path, "utf8"));
@@ -301,7 +307,7 @@ test("a session is matched to the T3 Code thread that runs it", () => {
 });
 
 test("step records the T3 Code thread once T3 Code knows the session", () => {
-  const state = createPipeline({ repo, title: "t", source: "text", session: { harness: "claude", id: CLAUDE_ID, cwd: "/w" } });
+  const state = createPipeline({ repos: [{ path: repo }], title: "t", source: "text", session: { harness: "claude", id: CLAUDE_ID, cwd: "/w" } });
   const step = (status: string) =>
     spawnSync("bun", [join(import.meta.dir, "../src/cli.ts"), "step", state.id, "map", status], { encoding: "utf8", env: process.env });
   step("running");
@@ -393,7 +399,7 @@ test("a multi-service recipe starts back ends first, wires ports, and stop kills
       ],
     }),
   );
-  const { id } = createPipeline({ repo, title: "t", source: "text" });
+  const { id } = createPipeline({ repos: [{ path: repo }], title: "t", source: "text" });
   const state = await startPreview(id, repo);
   const preview = state.preview!;
   const [first, second] = preview.services!;
@@ -425,7 +431,7 @@ test("a failed service stops the services already started", async () => {
       ],
     }),
   );
-  const { id } = createPipeline({ repo, title: "t", source: "text" });
+  const { id } = createPipeline({ repos: [{ path: repo }], title: "t", source: "text" });
   const error = await startPreview(id, repo).catch((e: Error) => e);
   expect((error as Error).message).toMatch(/service "web" exited.*api=http:\/\/localhost:\d+/s);
   const port = /api=http:\/\/localhost:(\d+)/.exec((error as Error).message)![1];
@@ -435,13 +441,13 @@ test("a failed service stops the services already started", async () => {
 
 function fakePreview(id: string, pid: number | undefined, extra: object = {}) {
   updateState(id, (s) => {
-    s.preview = { url: "http://localhost:3000", port: 3000, pid, worktree: repo, log: "x", ...extra };
+    s.preview = { url: "http://localhost:3000", port: 3000, pid, log: "x", ...extra };
   });
 }
 
 test("stop handles an old state without services", async () => {
   const sleeper = Bun.spawn(["sleep", "60"], { detached: true } as never);
-  const { id } = createPipeline({ repo, title: "t", source: "text" });
+  const { id } = createPipeline({ repos: [{ path: repo }], title: "t", source: "text" });
   fakePreview(id, sleeper.pid);
   try {
     await stopPipeline(id);
@@ -454,8 +460,8 @@ test("stop handles an old state without services", async () => {
 
 test("a fixed-port recipe refuses a second live pipeline of the same repo", async () => {
   const sleeper = Bun.spawn(["sleep", "60"], { detached: true } as never);
-  const a = createPipeline({ repo, title: "a", name: "fixed-a", source: "text" });
-  const b = createPipeline({ repo, title: "b", name: "fixed-b", source: "text" });
+  const a = createPipeline({ repos: [{ path: repo }], title: "a", name: "fixed-a", source: "text" });
+  const b = createPipeline({ repos: [{ path: repo }], title: "b", name: "fixed-b", source: "text" });
   fakePreview(a.id, sleeper.pid);
   writeFileSync(join(repo, ".pipeship.json"), JSON.stringify({ services: [{ name: "db", kind: "infra", start: "sleep 60", fixedPort: 4999 }] }));
   try {
@@ -474,16 +480,16 @@ test("pickPorts skips reserved ports, fixed ones included", async () => {
 });
 
 test("a pipeline still starting blocks a fixed-port recipe", async () => {
-  const a = createPipeline({ repo, title: "a", name: "starting-a", source: "text" });
-  const b = createPipeline({ repo, title: "b", name: "starting-b", source: "text" });
+  const a = createPipeline({ repos: [{ path: repo }], title: "a", name: "starting-a", source: "text" });
+  const b = createPipeline({ repos: [{ path: repo }], title: "b", name: "starting-b", source: "text" });
   fakePreview(a.id, undefined, { services: [{ name: "db", kind: "infra", port: 4999, url: "http://localhost:4999", log: "x" }] });
   writeFileSync(join(repo, ".pipeship.json"), JSON.stringify({ services: [{ name: "db", kind: "infra", start: "sleep 60", fixedPort: 4998 }] }));
   await expect(startPreview(b.id, repo)).rejects.toThrow("live test environment");
 });
 
 test("a start avoids the ports another pipeline has planned", async () => {
-  const a = createPipeline({ repo, title: "a", name: "reserve-a", source: "text" });
-  const b = createPipeline({ repo, title: "b", name: "reserve-b", source: "text" });
+  const a = createPipeline({ repos: [{ path: repo }], title: "a", name: "reserve-a", source: "text" });
+  const b = createPipeline({ repos: [{ path: repo }], title: "b", name: "reserve-b", source: "text" });
   fakePreview(a.id, undefined, { port: 3000, services: [{ name: "app", kind: "front", port: 3000, url: "http://localhost:3000", log: "x" }] });
   writeFileSync(
     join(repo, ".pipeship.json"),
@@ -503,7 +509,7 @@ test("a tcp service is ready once its port accepts connections", async () => {
     join(repo, ".pipeship.json"),
     JSON.stringify({ services: [{ name: "db", kind: "infra", start: `bun -e "${db}"`, portEnv: "DB_PORT", ready: "tcp", readyPath: "/ignored" }] }),
   );
-  const { id } = createPipeline({ repo, title: "t", source: "text" });
+  const { id } = createPipeline({ repos: [{ path: repo }], title: "t", source: "text" });
   try {
     const state = await startPreview(id, repo);
     expect(state.status).toBe("ready");
@@ -524,7 +530,7 @@ test("stop during a slow start leaves no service running", async () => {
       ],
     }),
   );
-  const { id } = createPipeline({ repo, title: "t", source: "text" });
+  const { id } = createPipeline({ repos: [{ path: repo }], title: "t", source: "text" });
   const pending = startPreview(id, repo).then(() => undefined, (e: Error) => e);
   await Bun.sleep(500);
   const during = readState(id).preview!.services!;
@@ -541,9 +547,9 @@ test("stop during a slow start leaves no service running", async () => {
 }, 30_000);
 
 test("a plain-text ticket has no source", () => {
-  const plain = createPipeline({ repo, title: "Fix the footer" });
+  const plain = createPipeline({ repos: [{ path: repo }], title: "Fix the footer" });
   expect(readState(plain.id).ticket).toEqual({ title: "Fix the footer", links: [] });
-  const linear = createPipeline({ repo, title: "t", source: "linear", links: [{ ref: "ABC-9" }] });
+  const linear = createPipeline({ repos: [{ path: repo }], title: "t", source: "linear", links: [{ ref: "ABC-9" }] });
   expect(readState(linear.id).ticket.source).toBe("linear");
 });
 
@@ -563,9 +569,9 @@ test("new records the base branch, and leaves it unset on a detached HEAD", () =
   };
   sh(repo, "init", "-q", "-b", "main");
   sh(repo, "commit", "-q", "--allow-empty", "-m", "init");
-  expect(created("on-branch").base).toBe("main");
+  expect(created("on-branch").repos).toEqual([{ path: repo, base: "main" }]);
   sh(repo, "checkout", "-q", "--detach");
-  expect(created("detached").base).toBeUndefined();
+  expect(created("detached").repos).toEqual([{ path: repo }]);
 });
 
 // Merge stack: real git (local bare remote, rebase and push really run) behind a fake gh.
@@ -575,10 +581,10 @@ const commitFile = (cwd: string, name: string, content: string, msg: string) => 
   sh(cwd, "commit", "-q", "-m", msg);
 };
 
-function makeStack(n: number, commits = 1) {
+function makeStack(n: number, commits = 1, name = "repo") {
   const dir = mkdtempSync(join(root, "stack-"));
   const origin = join(dir, "origin.git");
-  const clone = join(dir, "repo");
+  const clone = join(dir, name);
   sh(dir, "init", "-q", "--bare", "-b", "main", origin);
   sh(dir, "clone", "-q", origin, clone);
   commitFile(clone, "base.txt", "base\n", "initial");
@@ -596,7 +602,7 @@ function makeStack(n: number, commits = 1) {
   }
   sh(clone, "checkout", "-q", "main");
   worktrees.forEach((wt, i) => sh(clone, "worktree", "add", "-q", wt, `c${i + 1}`));
-  const { id } = createPipeline({ repo: clone, title: "stack", base: "main" });
+  const { id } = createPipeline({ repos: [{ path: clone, base: "main" }], title: "stack" });
   worktrees.forEach((worktree, i) =>
     upsertChunk(id, { name: `c${i + 1}`, branch: `c${i + 1}`, worktree, pr: `https://github.com/o/r/pull/${i + 1}`, status: "pr" }),
   );
@@ -808,16 +814,16 @@ test("merge: one job per pipeline, and nothing to merge is a 400", async () => {
     expect((err as MergeError).status).toBe(400);
   }
   expect(() => startMerge("nope-nope")).toThrow("unknown pipeline");
-  const none = createPipeline({ repo, title: "no pr" });
+  const none = createPipeline({ repos: [{ path: repo }], title: "no pr" });
   expect(() => startMerge(none.id)).toThrow("no open PR");
 });
 
 test("merge: stale runs are failed unless their process is alive; delete waits for a running merge", async () => {
-  const { id } = createPipeline({ repo, title: "stale" });
+  const { id } = createPipeline({ repos: [{ path: repo }], title: "stale" });
   const now = new Date().toISOString();
   updateState(id, (s) => {
     s.status = "stopped";
-    s.merge = { status: "running", mode: "base", pid: 999_999, startedAt: now, updatedAt: now };
+    s.merge = { status: "running", mode: "base", repo, pid: 999_999, startedAt: now, updatedAt: now };
   });
   failStaleMerges(() => true);
   expect(readState(id).merge?.status).toBe("running");
@@ -855,7 +861,7 @@ test("merge: a running merge is stale when its pid is dead or it stopped refresh
   const gh = fakeGh(stack, 1);
   const mark = (updatedAt: string) =>
     updateState(stack.id, (s) => {
-      s.merge = { status: "running", mode: "base", pid: process.pid, startedAt: updatedAt, updatedAt };
+      s.merge = { status: "running", mode: "base", repo: stack.clone, pid: process.pid, startedAt: updatedAt, updatedAt };
     });
   mark(new Date().toISOString());
   failStaleMerges(() => true);
@@ -1071,8 +1077,8 @@ test("merge mode: validation by open PR count, and an unknown mode is a 400", as
 });
 
 test("the API adds test.md as testGuide without writing it to state.json", async () => {
-  const withGuide = createPipeline({ repo, title: "Guide", source: "text" });
-  const without = createPipeline({ repo, title: "No guide", source: "text" });
+  const withGuide = createPipeline({ repos: [{ path: repo }], title: "Guide", source: "text" });
+  const without = createPipeline({ repos: [{ path: repo }], title: "No guide", source: "text" });
   const statePath = join(pipelineDir(withGuide.id), "state.json");
   const before = readFileSync(statePath, "utf8");
   writeFileSync(join(pipelineDir(withGuide.id), "test.md"), "# Test\n1. Open the page\n");
@@ -1097,7 +1103,7 @@ test("the API adds test.md as testGuide without writing it to state.json", async
 });
 
 test("setMode quick sets the mode and skips only pending quick steps; full only changes the mode", () => {
-  const p = createPipeline({ repo, title: "Switch mode", source: "text" });
+  const p = createPipeline({ repos: [{ path: repo }], title: "Switch mode", source: "text" });
   const plan = () => readState(p.id).steps.find((s) => s.name === "plan")!.status;
   setMode(p.id, "quick");
   expect(readState(p.id).mode).toBe("quick");
@@ -1106,7 +1112,7 @@ test("setMode quick sets the mode and skips only pending quick steps; full only 
   expect(readState(p.id).mode).toBe("full");
   expect(plan()).toBe("skipped");
 
-  const running = createPipeline({ repo, title: "Plan running", source: "text" });
+  const running = createPipeline({ repos: [{ path: repo }], title: "Plan running", source: "text" });
   setStep(running.id, "plan", "running");
   setMode(running.id, "quick");
   expect(readState(running.id).steps.find((s) => s.name === "plan")!.status).toBe("running");
@@ -1133,4 +1139,289 @@ test("groupByStatus orders groups, hides empty ones and keeps the order inside a
 test("groupByStatus puts an unknown status in the last group", () => {
   const groups = groupByStatus([{ status: "weird" }, { status: "ready" }, { status: "stopped" }], ["ready", "stopped"]);
   expect(groups.map((g) => [g.status, g.items.length])).toEqual([["ready", 1], ["stopped", 2]]);
+});
+
+// --- Several repos ---
+
+const gitRepo = (name: string, branch = "main") => {
+  const dir = join(mkdtempSync(join(root, "multi-")), name);
+  mkdirSync(dir);
+  sh(dir, "init", "-q", "-b", branch);
+  sh(dir, "commit", "-q", "--allow-empty", "-m", "init");
+  return dir;
+};
+
+const cli = (...args: string[]) => {
+  const r = spawnSync("bun", [join(import.meta.dir, "../src/cli.ts"), ...args], { encoding: "utf8", env: process.env });
+  return { code: r.status, out: r.stdout, err: r.stderr };
+};
+
+test("old state files get repos, and chunks, merge and services get their repo", () => {
+  const { id } = createPipeline({ title: "t", source: "text" });
+  const path = join(pipelineDir(id), "state.json");
+  const old = JSON.parse(readFileSync(path, "utf8"));
+  delete old.repos;
+  const now = new Date().toISOString();
+  Object.assign(old, {
+    repo: "/r/app",
+    base: "main",
+    chunks: [{ name: "c1" }],
+    merge: { status: "done", mode: "base", startedAt: now, updatedAt: now },
+    preview: {
+      url: "u", port: 3000, log: "l", worktree: "/r/wt",
+      services: [{ name: "app", kind: "front", port: 3000, url: "u", log: "l" }],
+    },
+  });
+  writeFileSync(path, JSON.stringify(old));
+  const state = readState(id);
+  expect(state.repos).toEqual([{ path: "/r/app", base: "main" }]);
+  expect(state).not.toHaveProperty("repo");
+  expect(state).not.toHaveProperty("base");
+  expect(state.chunks[0]!.repo).toBe("/r/app");
+  expect(state.merge!.repo).toBe("/r/app");
+  expect(state.preview!.services![0]).toMatchObject({ repo: "/r/app", worktree: "/r/wt" });
+  expect(state.preview).not.toHaveProperty("worktree");
+
+  delete old.repo;
+  writeFileSync(path, JSON.stringify(old));
+  expect(readState(id).repos).toEqual([]);
+});
+
+test("addRepo keeps a known path as it is, and refuses a name clash", () => {
+  const { id } = createPipeline({ repos: [{ path: "/x/app", base: "main" }], title: "t", source: "text" });
+  expect(addRepo(id, { path: "/x/app", base: "dev" })).toMatchObject({ added: false });
+  expect(readState(id).repos).toEqual([{ path: "/x/app", base: "main" }]);
+  expect(addRepo(id, { path: "/x/web" }).added).toBe(true);
+  expect(() => addRepo(id, { path: "/y/app" })).toThrow('repo name "app" is already used by /x/app');
+  expect(() => createPipeline({ repos: [{ path: "/x/app" }, { path: "/y/app" }], title: "t" })).toThrow("already used by");
+  expect(createPipeline({ repos: [{ path: "/x/app" }, { path: "/x/app" }], title: "dup" }).repos).toHaveLength(1);
+});
+
+test("cli: new takes several --repo or none, and repo adds one with its base", () => {
+  const a = gitRepo("front", "main");
+  const b = gitRepo("back", "develop");
+  const made = JSON.parse(cli("new", "--repo", a, "--repo", b, "--title", "t", "--name", "two-repos").out);
+  expect(made.repos).toEqual([
+    { path: a, name: "front", base: "main", dirty: false },
+    { path: b, name: "back", base: "develop", dirty: false },
+  ]);
+  expect(readState(made.id).repos).toEqual([{ path: a, base: "main" }, { path: b, base: "develop" }]);
+
+  const none = JSON.parse(cli("new", "--title", "t", "--name", "no-repo").out);
+  expect(none.repos).toEqual([]);
+  expect(readState(none.id).repos).toEqual([]);
+
+  writeFileSync(join(a, "untracked.txt"), "x");
+  const first = JSON.parse(cli("repo", none.id, a).out);
+  expect(first).toEqual({ path: a, name: "front", base: "main", dirty: true, added: true });
+  expect(JSON.parse(cli("repo", none.id, a).out)).toMatchObject({ base: "main", added: false });
+  expect(readState(none.id).repos).toEqual([{ path: a, base: "main" }]);
+});
+
+test("upsertChunk fills the repo for one repo, and asks for it with several", () => {
+  const one = createPipeline({ repos: [{ path: "/x/app" }], title: "t", name: "chunk-one" });
+  upsertChunk(one.id, { name: "c1" });
+  expect(readState(one.id).chunks[0]!.repo).toBe("/x/app");
+
+  const none = createPipeline({ title: "t", name: "chunk-none" });
+  expect(() => upsertChunk(none.id, { name: "c1" })).toThrow("has no repo");
+
+  const two = createPipeline({ repos: [{ path: "/x/app" }, { path: "/x/web" }], title: "t", name: "chunk-two" });
+  expect(() => upsertChunk(two.id, { name: "c1" })).toThrow('chunk "c1": --repo is required (repos: app, web)');
+  upsertChunk(two.id, { name: "c1", repo: "web" });
+  upsertChunk(two.id, { name: "c2", repo: "/x/app" });
+  expect(readState(two.id).chunks.map((c) => c.repo)).toEqual(["/x/web", "/x/app"]);
+  upsertChunk(two.id, { name: "c1", repo: "/x/web", status: "pr" });
+  expect(readState(two.id).chunks[0]).toMatchObject({ repo: "/x/web", status: "pr" });
+  expect(() => upsertChunk(two.id, { name: "c1", repo: "app" })).toThrow('chunk "c1" belongs to web');
+  expect(() => upsertChunk(two.id, { name: "c3", repo: "nope" })).toThrow("unknown repo: nope (repos: app, web)");
+
+  const a = gitRepo("front");
+  const b = gitRepo("back");
+  const { id } = JSON.parse(cli("new", "--repo", a, "--repo", b, "--title", "t", "--name", "chunk-cli").out);
+  expect(cli("chunk", id, "c1").err).toContain("--repo is required");
+  expect(cli("chunk", id, "c1", "--repo", "back").code).toBe(0);
+  expect(readState(id).chunks).toEqual([{ name: "c1", repo: b }]);
+});
+
+test("repo helpers", () => {
+  expect(repoName("/home/me/shop-api/")).toBe("shop-api");
+  const state = {
+    repos: [{ path: "/x/a" }, { path: "/x/b" }],
+    chunks: [
+      { name: "a1", repo: "/x/a", worktree: "/w/a1" },
+      { name: "b1", repo: "/x/b", worktree: "/w/b1" },
+      { name: "a2", repo: "/x/a", worktree: "/w/a2" },
+      { name: "a3", repo: "/x/a" },
+      { name: "lost", repo: "/x/zzz" },
+    ],
+    merge: { status: "running", mode: "base", repo: "/x/b", startedAt: "", updatedAt: "" } as const,
+  };
+  expect(chunksOf(state, "/x/a").map((c) => c.name)).toEqual(["a1", "a2", "a3"]);
+  expect(topChunk(state, "/x/a")!.name).toBe("a2");
+  expect(topChunk(state, "/x/none")).toBeUndefined();
+  expect(sharesRepo(state, { repos: [{ path: "/x/b" }] })).toBe(true);
+  expect(sharesRepo(state, { repos: [{ path: "/y/b" }] })).toBe(false);
+  const stacks = repoStacks(state);
+  expect(stacks.map((x) => [x.name, x.chunks.length, x.merge !== undefined])).toEqual([["a", 3, false], ["b", 1, true]]);
+});
+
+test("recipe validation for several repos", () => {
+  const bad = (recipe: object, repos?: string[]) => () => normalizeRecipe(recipe as never, "r.json", repos);
+  const svc = { name: "a", kind: "back", start: "x" };
+  const two = ["app", "web"];
+  expect(bad({ services: [{ ...svc, repo: "" }] })).toThrow('service "a": "repo" must be a repo name');
+  expect(bad({ services: [{ ...svc, install: 1 }] })).toThrow('service "a": "install" must be a string');
+  expect(bad({ services: [{ ...svc, copyFiles: [1] }] })).toThrow('service "a": "copyFiles" must be a list of file paths');
+  expect(bad({ start: "x" }, two)).toThrow('r.json: a recipe for several repos needs "services", each with a "repo"');
+  expect(bad({ install: "i", services: [{ ...svc, repo: "app" }] }, two)).toThrow('top-level "install" and "copyFiles" need a single repo');
+  expect(bad({ copyFiles: [".env"], services: [{ ...svc, repo: "app" }] }, two)).toThrow("need a single repo");
+  expect(bad({ services: [svc] }, two)).toThrow('service "a": "repo" is required when the pipeline has several repos (app, web)');
+  expect(bad({ services: [{ ...svc, repo: "nope" }] }, two)).toThrow('service "a": unknown repo "nope" (repos: app, web)');
+
+  expect(normalizeRecipe({ services: [{ ...svc, repo: "anything", install: "i", copyFiles: [".env"] }] })[0]).toMatchObject({
+    repo: "anything", install: "i", copyFiles: [".env"],
+  });
+  expect(normalizeRecipe({ services: [{ ...svc, repo: "app" }] }, "r.json", ["app"])[0]!.repo).toBe("app");
+  expect(normalizeRecipe({ services: [svc] }, "r.json", ["app"])[0]).not.toHaveProperty("repo");
+});
+
+test("a recipe saved for several repos does not depend on their order", () => {
+  expect(savedRecipePath(["/x/a", "/x/b"])).toBe(savedRecipePath(["/x/b", "/x/a"]));
+  expect(savedRecipePath(["/x/a", "/x/b"])).not.toBe(savedRecipePath(["/x/a", "/x/c"]));
+  expect(savedRecipePath(["/x/a"])).toBe(savedRecipePath("/x/a"));
+  expect(savedRecipePath("/x/a")).toBe(join(process.env.PIPESHIP_HOME!, "recipes", "x-a.json"));
+});
+
+test("a preview over two repos starts each service from its own worktree", async () => {
+  const A = join(root, "pv-api");
+  const B = join(root, "pv-web");
+  const wtA = join(root, "pv-api-wt");
+  const wtB = join(root, "pv-web-wt");
+  for (const dir of [A, B, wtA, wtB]) mkdirSync(dir, { recursive: true });
+  writeFileSync(join(A, ".env"), "SECRET=1");
+  const { id } = createPipeline({ repos: [{ path: A }, { path: B }], title: "t", name: "two-preview" });
+  upsertChunk(id, { name: "api-1", repo: "pv-api", worktree: wtA });
+  upsertChunk(id, { name: "web-1", repo: "pv-web", worktree: wtB });
+
+  const api = `Bun.serve({ port: Number(process.env.PORT), fetch: () => new Response('api') })`;
+  const web = `Bun.serve({ port: Number(process.env.PORT), fetch: () => new Response(process.cwd() + ' ' + process.env.API_URL) })`;
+  const draft = join(root, "pv-draft.json");
+  writeFileSync(
+    draft,
+    JSON.stringify({
+      services: [
+        { name: "web", kind: "front", repo: "pv-web", start: `bun -e "${web}"`, env: { API_URL: "http://localhost:${api.port}" } },
+        { name: "api", kind: "back", repo: "pv-api", start: `bun -e "${api}"`, install: "touch installed", copyFiles: [".env"] },
+      ],
+    }),
+  );
+  const state = await startPreview(id, undefined, draft);
+  try {
+    const services = state.preview!.services!;
+    const apiSvc = services.find((x) => x.name === "api")!;
+    const webSvc = services.find((x) => x.name === "web")!;
+    expect(await (await fetch(webSvc.url)).text()).toBe(`${wtB} ${apiSvc.url}`);
+    expect(existsSync(join(wtA, ".env")) && existsSync(join(wtA, "installed"))).toBe(true);
+    expect(existsSync(join(wtB, ".env")) || existsSync(join(wtB, "installed"))).toBe(false);
+    expect(apiSvc).toMatchObject({ repo: A, worktree: wtA });
+    expect(webSvc).toMatchObject({ repo: B, worktree: wtB });
+    expect(previewLines(state.preview!)).toEqual([
+      webSvc.url, `api (back, pv-api): ${apiSvc.url}`, `web (front, pv-web): ${webSvc.url}`,
+    ]);
+    expect(existsSync(savedRecipePath([B, A]))).toBe(true);
+  } finally {
+    await stopPipeline(id);
+  }
+
+  await expect(startPreview(id, wtA)).rejects.toThrow("several repos");
+  const partial = createPipeline({ repos: [{ path: A }, { path: B }], title: "t", name: "partial-preview" });
+  upsertChunk(partial.id, { name: "only-a", repo: "pv-api", worktree: wtA });
+  await expect(startPreview(partial.id)).rejects.toThrow('service "web": no worktree for repo pv-web');
+}, 30_000);
+
+test("a fixed port also blocks a pipeline that shares one repo", async () => {
+  const sleeper = Bun.spawn(["sleep", "60"], { detached: true } as never);
+  const x = createPipeline({ repos: [{ path: "/x/r1" }], title: "x", name: "shared-x" });
+  const y = createPipeline({ repos: [{ path: "/x/r1" }, { path: "/x/r2" }], title: "y", name: "shared-y" });
+  fakePreview(x.id, sleeper.pid);
+  upsertChunk(y.id, { name: "c1", repo: "r1", worktree: repo });
+  upsertChunk(y.id, { name: "c2", repo: "r2", worktree: repo });
+  const draft = join(root, "shared-draft.json");
+  writeFileSync(draft, JSON.stringify({ services: [{ name: "db", kind: "infra", repo: "r1", start: "sleep 60", fixedPort: 4997 }] }));
+  try {
+    await expect(startPreview(y.id, undefined, draft)).rejects.toThrow("of the repo r1 has a live test environment");
+  } finally {
+    await stopPipeline(x.id);
+    if (isAlive(sleeper.pid)) process.kill(sleeper.pid);
+  }
+}, 30_000);
+
+function twoRepoStack() {
+  const a = makeStack(1, 1, "merge-front");
+  const b = makeStack(1, 1, "merge-back");
+  const { id } = createPipeline({ repos: [{ path: a.clone, base: "main" }, { path: b.clone, base: "main" }], title: "two" });
+  const pr = "https://github.com/o/r/pull/1";
+  upsertChunk(id, { name: "a-c1", repo: "merge-front", branch: "c1", worktree: a.worktrees[0], pr, status: "pr" });
+  upsertChunk(id, { name: "b-c1", repo: "merge-back", branch: "c1", worktree: b.worktrees[0], pr, status: "pr" });
+  return { id, a, b };
+}
+
+test("a merge over two repos needs a repo, and merges only that repo's stack", async () => {
+  const { id, b } = twoRepoStack();
+  const status = (fn: () => unknown) => {
+    try {
+      fn();
+    } catch (err) {
+      return [(err as MergeError).status, (err as Error).message];
+    }
+  };
+  expect(status(() => startMerge(id, {}, "base"))).toEqual([400, "repo is required: one of merge-front, merge-back"]);
+  expect(status(() => startMerge(id, {}, "base", "nope"))?.[0]).toBe(400);
+  expect(status(() => startMerge(id, {}, "base", "nope"))?.[1]).toContain("unknown repo");
+  expect(() => resolveMergeRepo(readState(id), 5)).toThrow("unknown repo");
+
+  const ghB = fakeGh(b, 1);
+  let release!: () => void;
+  ghB.gate.wait = new Promise<void>((r) => (release = r));
+  const { state, done } = startMerge(id, ghB.deps, "base", "merge-back");
+  expect(state.merge).toMatchObject({ status: "running", repo: b.clone });
+  expect(status(() => startMerge(id, {}, "base", "merge-front"))).toEqual([409, "a merge is already running"]);
+  release();
+  await done;
+  const s = readState(id);
+  expect(s.merge).toMatchObject({ status: "done", repo: b.clone });
+  expect(s.chunks.map((c) => c.status)).toEqual(["pr", "merged"]);
+  expect(ghB.calls).toEqual(["merge 1"]);
+});
+
+test("the merge route asks for the repo of a pipeline with several", async () => {
+  const { id } = twoRepoStack();
+  const server = await serve(0);
+  try {
+    const res = await fetch(`http://localhost:${server.port}/api/pipelines/${id}/merge`, { method: "POST", body: JSON.stringify({ mode: "base" }) });
+    expect(res.status).toBe(400);
+    expect(((await res.json()) as { error: string }).error).toContain("repo is required");
+  } finally {
+    await server.stop(true);
+  }
+});
+
+test("delete removes the worktrees of every repo", async () => {
+  const a = gitRepo("del-front");
+  const b = gitRepo("del-back");
+  const { id } = createPipeline({ repos: [{ path: a }, { path: b }], title: "t", name: "two-delete" });
+  const wtA = join(pipelineDir(id), "worktrees", "a1");
+  const wtB = join(pipelineDir(id), "worktrees", "b1");
+  sh(a, "worktree", "add", "-q", "-b", "t/a1", wtA);
+  sh(b, "worktree", "add", "-q", "-b", "t/b1", wtB);
+  updateState(id, (s) => {
+    s.status = "stopped";
+  });
+  await deletePipeline(id);
+  expect(existsSync(pipelineDir(id))).toBe(false);
+  expect(sh(a, "worktree", "list")).not.toContain(wtA);
+  expect(sh(b, "worktree", "list")).not.toContain(wtB);
+  expect(sh(a, "branch", "--list", "t/a1")).toContain("t/a1");
+  expect(sh(b, "branch", "--list", "t/b1")).toContain("t/b1");
 });

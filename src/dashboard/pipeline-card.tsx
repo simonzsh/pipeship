@@ -29,6 +29,8 @@ export function PipelineCard({ p }: { p: DashboardState }) {
     p.chunks.length === 0 ? "Details" : p.chunks.length === 1 ? "1 branch" : `${p.chunks.length} branches`;
   const prChunks = p.chunks.filter((c) => c.pr);
   const allMerged = prChunks.length > 0 && prChunks.every((c) => c.status === "merged");
+  const paths = p.repos.map((r) => r.path).join(", ");
+  const base = p.repos.length === 1 ? p.repos[0]!.base : undefined;
   const merging = p.merge?.status === "running";
   const finished = p.status === "ready" || p.status === "failed" || p.status === "stopped";
   const steps = p.steps.map((s) => ({
@@ -116,18 +118,18 @@ export function PipelineCard({ p }: { p: DashboardState }) {
       {open && (
         <CardContent className="flex flex-col gap-4 border-t py-5">
           {p.preview && <PreviewPanel preview={p.preview} guide={p.testGuide} />}
-          {p.chunks.length > 0 && <StackTree base={p.base} chunks={p.chunks} merge={p.merge} />}
+          {p.chunks.length > 0 && <StackTree base={base} chunks={p.chunks} merge={p.merge} />}
           {p.merge && <CombinedNote merge={p.merge} chunks={p.chunks} />}
         </CardContent>
       )}
 
       <CardFooter className="py-3 text-xs text-muted-foreground">
         <FolderGit2 className="size-3.5 shrink-0" />
-        <span className="truncate font-mono" title={p.repo}>{p.repo.replace(/^\/home\/[^/]+/, "~")}</span>
+        <span className="truncate font-mono" title={paths}>{paths.replace(/^\/home\/[^/]+/, "~")}</span>
         <span>·</span>
         <span className="whitespace-nowrap">updated {timeAgo(p.updatedAt)}</span>
         <div className="ml-auto flex items-center gap-2">
-          <MergeButton id={p.id} chunks={p.chunks} base={p.base} merge={p.merge} finished={finished} />
+          <MergeButton id={p.id} chunks={p.chunks} base={base} merge={p.merge} finished={finished} />
           {p.status === "ready" ? (
             p.preview && <ActionButton id={p.id} action="stopServer" />
           ) : p.status === "running" || p.status === "waiting_for_user" || (p.status === "failed" && p.preview) ? (

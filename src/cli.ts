@@ -4,17 +4,19 @@ import { existsSync, mkdirSync, openSync, readFileSync, rmSync, writeFileSync } 
 import { join, resolve } from "node:path";
 import { parseArgs } from "node:util";
 import { deletePipeline, findRecipe, git, isAlive, killGroup, loadRecipe, previewLines, startPreview, stopPipeline } from "./preview.ts";
+import { repoName } from "./repos.ts";
 import { detectSession, findT3Thread } from "./session.ts";
 import { DEFAULT_PORT, isDashboardUp, serve } from "./server.ts";
 import {
-  STEPS, createPipeline, home, listStates, pipelineDir, readState, setMode, setStep, updateState, upsertChunk,
-  type Chunk, type Mode, type Status, type StepName, type StepStatus,
+  STEPS, addRepo, createPipeline, home, listStates, pipelineDir, readState, setMode, setStep, updateState, upsertChunk,
+  type ChunkInput, type Mode, type Status, type StepName, type StepStatus,
 } from "./state.ts";
 
 const USAGE = `pipeship — state, test environments and dashboard for the /pipeship skill
 
-  new --repo <path> --title <text> [--source <name>] [--ref <id> [--url <url>]]... [--name <words>] [--mode full|quick] [--skip a,b]
-                               records the calling agent session (harness, id, cwd) when one is found, and the base branch
+  new [--repo <path>]... --title <text> [--source <name>] [--ref <id> [--url <url>]]... [--name <words>] [--mode full|quick] [--skip a,b]
+                               records the calling agent session (harness, id, cwd) when one is found, and each repo with its base branch
+                               repeat --repo for each repo the ticket touches; none is fine: add them later with "repo"
                                repeat --ref/--url for each ticket; the nth --url belongs to the nth --ref
                                --name: a 2 or 3 word id for a plain-text ticket; refs win
   get <id>                     print the state (JSON)
@@ -22,9 +24,12 @@ const USAGE = `pipeship — state, test environments and dashboard for the /pipe
   step <id> <step> <status>    steps: ${STEPS.join(", ")}; status: pending, running, done, skipped, failed
   mode <id> quick|full         switch the mode; quick also skips the pending steps quick skips
   status <id> <status>         running, waiting_for_user, ready, failed, stopped
-  chunk <id> <name> [--worktree p] [--branch b] [--status s] [--pr url]
-  recipe <repo>                print the recipe used to start the app, or "none"
-  preview <id> <worktree> [--recipe file]   start the test environment (every service), print its URLs; a --recipe that works is saved for the repo
+  repo <id> <path>             add a repo and record its base (its current branch); does nothing if it is already there
+  chunk <id> <name> [--repo r] [--worktree p] [--branch b] [--status s] [--pr url]
+                               --repo (name or path) is required for a new chunk when the pipeline has several repos
+  recipe <repo>...             print the recipe used to start the app for these repos, or "none"
+  preview <id> [<worktree>] [--recipe file]   start the test environment: each service runs from the top worktree of its repo;
+                               <worktree> overrides it for a one-repo pipeline; a --recipe that works is saved for the pipeline's repos
   stop <id>                    stop the pipeline and its test servers
   delete <id> [--force]        delete its worktrees and files (branches and PRs stay); --force drops uncommitted changes
   dashboard [start|stop] [--port n]   start the dashboard in the background (default) or stop it
@@ -33,7 +38,7 @@ const USAGE = `pipeship — state, test environments and dashboard for the /pipe
 const { positionals, values } = parseArgs({
   allowPositionals: true,
   options: {
-    repo: { type: "string" }, title: { type: "string" }, name: { type: "string" }, source: { type: "string" },
+    repo: { type: "string", multiple: true }, title: { type: "string" }, name: { type: "string" }, source: { type: "string" },
     ref: { type: "string", multiple: true }, url: { type: "string", multiple: true }, mode: { type: "string" }, skip: { type: "string" },
     worktree: { type: "string" }, branch: { type: "string" }, status: { type: "string" }, pr: { type: "string" },
     port: { type: "string" }, recipe: { type: "string" }, force: { type: "boolean" }, help: { type: "boolean", short: "h" },
@@ -47,6 +52,15 @@ function need(value: string | undefined, name: string): string {
   if (!value) throw new Error(`missing ${name}\n\n${USAGE}`);
   return value;
 }
+
+// Base is empty on a detached HEAD or outside git; dirty means `git status` printed something.
+function repoInfo(path: string): { base?: string; dirty: boolean } {
+  const base = git(path, "branch", "--show-current").stdout.trim();
+  const status = git(path, "status", "--porcelain");
+  return { ...(base && { base }), dirty: status.status === 0 && status.stdout.trim() !== "" };
+}
+
+const repoReport = (path: string, base?: string, dirty = false) => ({ path, name: repoName(path), base: base ?? null, dirty });
 
 async function startDashboard(): Promise<string> {
   const url = `http://localhost:${port}`;
@@ -80,12 +94,10 @@ async function stopDashboard(): Promise<string> {
 async function main() {
   switch (command) {
     case "new": {
-      const repo = resolve(need(values.repo, "--repo"));
-      // Empty on a detached HEAD or outside a git repo: base stays unset.
-      const base = git(repo, "branch", "--show-current").stdout.trim();
+      const paths = [...new Set((values.repo ?? []).map((p) => resolve(p)))];
+      const infos = paths.map(repoInfo);
       const state = createPipeline({
-        repo,
-        base,
+        repos: paths.map((path, i) => ({ path, ...(infos[i]!.base && { base: infos[i]!.base }) })),
         title: need(values.title, "--title"),
         name: values.name,
         source: values.source,
@@ -94,7 +106,15 @@ async function main() {
         skip: values.skip?.split(",").map((s) => s.trim()) as StepName[] | undefined,
         session: detectSession(),
       });
-      return print({ id: state.id, dir: pipelineDir(state.id), steps: state.steps.map((s) => `${s.name}:${s.status}`), session: state.session ?? null });
+      const repos = paths.map((path, i) => repoReport(path, infos[i]!.base, infos[i]!.dirty));
+      return print({ id: state.id, dir: pipelineDir(state.id), steps: state.steps.map((s) => `${s.name}:${s.status}`), session: state.session ?? null, repos });
+    }
+    case "repo": {
+      const path = resolve(need(args[1], "<path>"));
+      const info = repoInfo(path);
+      const { state, added } = addRepo(need(args[0], "<id>"), { path, ...(info.base && { base: info.base }) });
+      const stored = state.repos.find((r) => r.path === path)!;
+      return print({ ...repoReport(path, stored.base, info.dirty), added });
     }
     case "get":
       return print(readState(need(args[0], "<id>")));
@@ -116,7 +136,9 @@ async function main() {
       });
       return print("ok");
     case "chunk": {
-      const chunk: Chunk = { name: need(args[1], "<name>") };
+      if ((values.repo?.length ?? 0) > 1) throw new Error("chunk takes one --repo");
+      const chunk: ChunkInput = { name: need(args[1], "<name>") };
+      if (values.repo) chunk.repo = values.repo[0];
       if (values.worktree) chunk.worktree = resolve(values.worktree);
       if (values.branch) chunk.branch = values.branch;
       if (values.status) chunk.status = values.status;
@@ -125,13 +147,14 @@ async function main() {
       return print("ok");
     }
     case "recipe": {
-      const repo = resolve(need(args[0], "<repo>"));
-      const path = findRecipe(repo);
+      if (args.length === 0) need(undefined, "<repo>");
+      const repos = args.map((p) => resolve(p));
+      const path = findRecipe(repos);
       return print(path ? { path, recipe: loadRecipe(path) } : "none");
     }
     case "preview": {
       const draft = values.recipe ? resolve(values.recipe) : undefined;
-      const state = await startPreview(need(args[0], "<id>"), resolve(need(args[1], "<worktree>")), draft);
+      const state = await startPreview(need(args[0], "<id>"), args[1] ? resolve(args[1]) : undefined, draft);
       return print(previewLines(state.preview!).join("\n"));
     }
     case "stop":
