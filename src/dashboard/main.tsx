@@ -4,7 +4,9 @@ import { createRoot } from "react-dom/client";
 import type { DashboardState, Status } from "../state.ts";
 import { Card, CardDescription, CardTitle } from "./components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "./components/ui/select";
+import { groupByStatus } from "./groups";
 import { PipelineCard } from "./pipeline-card";
+import { STATUS_ORDER, statusConfig } from "./status";
 import { ThemeToggle } from "./theme";
 import { cn } from "./utils";
 
@@ -121,7 +123,20 @@ function App() {
       </header>
 
       {pipelines?.length === 0 && <EmptyState />}
-      {shown?.map((p) => <PipelineCard key={p.id} p={p} />)}
+      {shown &&
+        groupByStatus(shown, STATUS_ORDER).map((g) => {
+          const { group, dot, text } = statusConfig(g.status);
+          return (
+            <section key={g.status} className="flex flex-col gap-6">
+              <div className="flex items-center gap-3">
+                <span className={cn("size-2 rounded-full", dot)} />
+                <h2 className={cn("text-sm font-medium", text)}>{group} · {g.items.length}</h2>
+                <div className="h-px flex-1 bg-border" />
+              </div>
+              {g.items.map((p) => <PipelineCard key={p.id} p={p} />)}
+            </section>
+          );
+        })}
       {!pipelines && (
         <div className="flex justify-center py-14 text-muted-foreground">
           <CircleDashed className="size-5 animate-spin" />

@@ -8,7 +8,7 @@ import { CombinedNote, MergeButton } from "./merge-button";
 import { PreviewPanel } from "./preview-panel";
 import { AgentLogo } from "./session";
 import { StackTree } from "./stack-tree";
-import { StatusBadge } from "./status";
+import { statusConfig, StatusBadge } from "./status";
 import { Steps } from "./steps";
 import { TicketIcon } from "./ticket-icon";
 import { cn } from "./utils";
@@ -47,7 +47,7 @@ export function PipelineCard({ p }: { p: DashboardState }) {
     },
   };
   return (
-    <Card className="gap-0 overflow-hidden py-0">
+    <Card className={cn("gap-0 overflow-hidden py-0", statusConfig(p.status).halo)}>
       {/* The header and the steps toggle the card. */}
       <div
         className={cn("flex flex-col gap-5 py-5", hasDetails && "cursor-pointer transition-colors hover:bg-accent")}
