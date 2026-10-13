@@ -46,28 +46,30 @@ export function PipelineDetail({ p, onBack }: { p: DashboardState; onBack: () =>
       {merge && <CombinedNote merge={merge} chunks={chunks} />}
     </>
   );
-  const stack = multi ? (
-    stacks.map((st) => (
-      <div key={st.repo.path} className="flex flex-col gap-2">
-        <div className="flex items-center gap-2 text-sm">
-          <FolderGit2 className="size-4 shrink-0 text-muted-foreground" />
-          <span className="font-medium">{st.name}</span>
-          <span className="truncate font-mono text-xs text-muted-foreground" title={st.repo.path}>
-            {shortRepo(st.repo.path)}
-          </span>
-          <div className="ml-auto flex items-center gap-2">
-            <MergeButton
-              id={p.id} repo={st.repo.path} chunks={st.chunks} base={st.repo.base} merge={st.merge}
-              busy={busyFor(st.repo.path)} finished={done}
-            />
+  // Same layout for one repo or several: the repo row carries its merge button.
+  const stack =
+    stacks.length === 0 ? (
+      tree(undefined, [], undefined)
+    ) : (
+      stacks.map((st) => (
+        <div key={st.repo.path} className="flex flex-col gap-2">
+          <div className="flex items-center gap-2 text-sm">
+            <FolderGit2 className="size-4 shrink-0 text-muted-foreground" />
+            <span className="font-medium">{st.name}</span>
+            <span className="truncate font-mono text-xs text-muted-foreground" title={st.repo.path}>
+              {shortRepo(st.repo.path)}
+            </span>
+            <div className="ml-auto flex items-center gap-2">
+              <MergeButton
+                id={p.id} repo={st.repo.path} chunks={st.chunks} base={st.repo.base} merge={st.merge}
+                busy={busyFor(st.repo.path)} finished={done}
+              />
+            </div>
           </div>
+          {tree(st.repo.base, st.chunks, st.merge)}
         </div>
-        {tree(st.repo.base, st.chunks, st.merge)}
-      </div>
-    ))
-  ) : (
-    tree(p.repos[0]?.base, p.chunks, p.merge)
-  );
+      ))
+    );
 
   return (
     <div className="flex flex-col">
@@ -143,12 +145,6 @@ export function PipelineDetail({ p, onBack }: { p: DashboardState; onBack: () =>
             <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
               <Loader2 className="size-3.5 animate-spin" /> Merging {repoName(p.merge.repo)}…
             </span>
-          )}
-          {!multi && p.repos[0] && (
-            <MergeButton
-              id={p.id} repo={p.repos[0].path} chunks={p.chunks} base={p.repos[0].base} merge={p.merge}
-              busy={false} finished={done}
-            />
           )}
         </div>
         {stack}
