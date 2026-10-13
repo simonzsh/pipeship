@@ -1803,6 +1803,9 @@ test("preview/start answers 409 when not ready or already starting", async () =>
     expect(await post("nope")).toBe(404);
     expect(await post(slow)).toBe(202);
     expect(await post(slow)).toBe(409);
+    const listed = (await (await fetch(`http://localhost:${server.port}/api/pipelines`)).json()) as { id: string; previewStarting?: boolean }[];
+    expect(listed.find((p) => p.id === slow)?.previewStarting).toBe(true);
+    expect(listed.find((p) => p.id === idle)?.previewStarting).toBeUndefined();
   } finally {
     server.stop(true);
     await stopPreviewQuiet(slow);

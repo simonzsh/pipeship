@@ -525,6 +525,8 @@ const startsInFlight = new Set<string>();
 const stoppedMidStart = new Set<string>();
 
 // The dashboard cannot wait minutes for a start: failures go to state.previewError instead.
+export const isPreviewStarting = (id: string) => startsInFlight.has(id);
+
 export function requestPreviewStart(id: string): { state: State; done: Promise<void> } {
   let state: State;
   try {
@@ -534,11 +536,12 @@ export function requestPreviewStart(id: string): { state: State; done: Promise<v
   }
   if (state.status !== "ready") throw new PreviewError("the pipeline is not ready: no preview to start", 409);
   if (startsInFlight.has(id)) throw new PreviewError("a preview is already starting", 409);
-  startsInFlight.add(id);
-  stoppedMidStart.delete(id);
+  // Before the guard is set: a throw here must not leave the id marked in flight.
   const cleared = updateState(id, (s) => {
     delete s.previewError;
   });
+  startsInFlight.add(id);
+  stoppedMidStart.delete(id);
   const done = startPreview(id)
     .then(() => undefined)
     .catch((err: unknown) => {

@@ -28,8 +28,8 @@ export function PipelineDetail({ p, onBack }: { p: DashboardState; onBack: () =>
   const busyFor = (path: string) => p.merge?.status === "running" && p.merge.repo !== path;
   const merging = p.merge?.status === "running";
   const done = finished(p);
-  // Services get a pid when they spawn; a preview with some still unset is mid-start.
-  const starting = p.preview?.services?.some((s) => s.pid === undefined) ?? false;
+  // The server knows a dashboard start is in flight; a CLI start only shows as services still without a pid.
+  const starting = p.previewStarting || (p.preview?.services?.some((s) => s.pid === undefined) ?? false);
   const repoLabel =
     p.repos.length === 0 ? "" : multi ? stacks.map((st) => st.name).join(" + ") : shortRepo(p.repos[0]!.path);
   const showTicket = p.ticket.links.length > 0 || (p.ticket.source && p.ticket.source !== "text");
