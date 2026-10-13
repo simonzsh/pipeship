@@ -1,5 +1,5 @@
 import { spawn, spawnSync } from "node:child_process";
-import { copyFileSync, existsSync, mkdirSync, openSync, readFileSync, closeSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, openSync, readFileSync, readdirSync, rmSync, closeSync } from "node:fs";
 import { createServer } from "node:net";
 import { dirname, join } from "node:path";
 import { home, pipelineDir, readState, updateState, type State } from "./state.ts";
@@ -184,4 +184,28 @@ export async function stopPipeline(id: string): Promise<State> {
   return updateState(id, (s) => {
     s.status = "stopped";
   });
+}
+
+// Deletes the worktrees and the pipeline's files. Branches and PRs stay: they live in the repo.
+export async function deletePipeline(id: string, opts: { force?: boolean } = {}): Promise<void> {
+  const state = readState(id);
+  if (state.status === "running" || state.status === "waiting_for_user") {
+    throw new Error("stop the pipeline before deleting it");
+  }
+  await stopPreview(id);
+
+  const dir = join(pipelineDir(id), "worktrees");
+  const worktrees = existsSync(dir) ? readdirSync(dir).map((name) => join(dir, name)) : [];
+  if (!opts.force) {
+    const dirty = worktrees.filter((wt) => git(wt, "status", "--porcelain").stdout.trim() !== "");
+    if (dirty.length) throw new Error(`uncommitted changes would be lost in: ${dirty.join(", ")}`);
+  }
+  for (const wt of worktrees) git(state.repo, "worktree", "remove", "--force", wt);
+  rmSync(pipelineDir(id), { recursive: true, force: true });
+  git(state.repo, "worktree", "prune");
+}
+
+function git(cwd: string, ...args: string[]) {
+  const result = spawnSync("git", ["-C", cwd, ...args], { encoding: "utf8" });
+  return { status: result.status, stdout: result.stdout ?? "" };
 }

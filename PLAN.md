@@ -219,7 +219,7 @@ Chaque jalon est utilisable seul.
 2. **Source du ticket.** Tranché le 2026-10-12 : toute source. Voir « Source du ticket » (section 3).
 3. **Lancement du serveur du dashboard.** Tranché le 2026-10-12 : le skill lance `pipeship dashboard` au début de chaque pipeline. La commande ne fait rien si le dashboard tourne déjà.
 4. **Distribution publique.** Plugin Claude Code (skill + serveur) ? Package npm pour le serveur ?
-5. **Nettoyage.** Quand supprimer les worktrees et les fichiers d'état d'un pipeline arrêté ou mergé ?
+5. **Nettoyage.** Tranché le 2026-10-13 : un bouton « Delete » dans le dashboard (et `pipeship delete <id>`). Il supprime les worktrees et le dossier du pipeline, et garde les branches et les PR. Il refuse si un worktree contient des modifications non commitées. Pas d'archivage.
 
 ## 9. Prochaine session
 

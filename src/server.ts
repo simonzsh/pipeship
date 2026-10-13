@@ -1,6 +1,6 @@
 import tailwind from "bun-plugin-tailwind";
 import { listStates } from "./state.ts";
-import { stopPipeline } from "./preview.ts";
+import { deletePipeline, stopPipeline } from "./preview.ts";
 
 export const DEFAULT_PORT = 4400;
 
@@ -39,6 +39,16 @@ export async function serve(port = DEFAULT_PORT) {
             return Response.json(await stopPipeline(req.params.id));
           } catch (err) {
             return Response.json({ error: String(err) }, { status: 500 });
+          }
+        },
+      },
+      "/api/pipelines/:id/delete": {
+        POST: async (req) => {
+          try {
+            await deletePipeline(req.params.id);
+            return Response.json({ deleted: req.params.id });
+          } catch (err) {
+            return Response.json({ error: err instanceof Error ? err.message : String(err) }, { status: 500 });
           }
         },
       },

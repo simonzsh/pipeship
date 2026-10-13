@@ -40,7 +40,7 @@ You do not configure anything: on the first pipeline in a repo, Claude reads the
 
 ## Dashboard
 
-`bun src/cli.ts dashboard` starts it in the background on http://localhost:4400 (the skill does it for you). It lists pipelines live, with their steps, PRs and test URL, and a "Stop pipeline" button. Light and dark themes follow your system, with a toggle.
+`bun src/cli.ts dashboard` starts it in the background on http://localhost:4400 (the skill does it for you). It lists pipelines live, with their steps, PRs and test URL. It can stop a pipeline or its test server, and delete a finished pipeline: its worktrees and files go, its branches and PRs stay. Light and dark themes follow your system, with a toggle.
 
 The page is React, Tailwind and [shadcn/ui](https://ui.shadcn.com) components (`src/dashboard/`). Bun builds it in memory when the dashboard starts: no Vite, no build step. Stop the dashboard with `bun src/cli.ts dashboard stop`.
 

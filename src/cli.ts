@@ -3,7 +3,7 @@ import { spawn } from "node:child_process";
 import { existsSync, mkdirSync, openSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { parseArgs } from "node:util";
-import { findRecipe, isAlive, killGroup, loadRecipe, startPreview, stopPipeline } from "./preview.ts";
+import { deletePipeline, findRecipe, isAlive, killGroup, loadRecipe, startPreview, stopPipeline } from "./preview.ts";
 import { DEFAULT_PORT, isDashboardUp, serve } from "./server.ts";
 import {
   STEPS, createPipeline, home, listStates, pipelineDir, readState, setStep, updateState, upsertChunk,
@@ -22,6 +22,7 @@ const USAGE = `pipeship — state, test environments and dashboard for the /pipe
   recipe <repo>                print the recipe used to start the app, or "none"
   preview <id> <worktree> [--recipe file]   start the test environment; a --recipe that works is saved for the repo
   stop <id>                    stop the pipeline and its test server
+  delete <id> [--force]        delete its worktrees and files (branches and PRs stay); --force drops uncommitted changes
   dashboard [start|stop] [--port n]   start the dashboard in the background (default) or stop it
   serve [--port n]             run the dashboard in the foreground`;
 
@@ -31,7 +32,7 @@ const { positionals, values } = parseArgs({
     repo: { type: "string" }, title: { type: "string" }, source: { type: "string" },
     ref: { type: "string", multiple: true }, url: { type: "string", multiple: true }, mode: { type: "string" }, skip: { type: "string" },
     worktree: { type: "string" }, branch: { type: "string" }, status: { type: "string" }, pr: { type: "string" },
-    port: { type: "string" }, recipe: { type: "string" }, help: { type: "boolean", short: "h" },
+    port: { type: "string" }, recipe: { type: "string" }, force: { type: "boolean" }, help: { type: "boolean", short: "h" },
   },
 });
 const [command, ...args] = positionals;
@@ -119,6 +120,9 @@ async function main() {
     case "stop":
       await stopPipeline(need(args[0], "<id>"));
       return print("stopped");
+    case "delete":
+      await deletePipeline(need(args[0], "<id>"), { force: values.force });
+      return print("deleted");
     case "dashboard":
       return print(args[0] === "stop" ? await stopDashboard() : await startDashboard());
     case "serve":

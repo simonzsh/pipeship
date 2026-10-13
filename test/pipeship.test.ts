@@ -2,8 +2,9 @@ import { afterAll, beforeEach, expect, test } from "bun:test";
 import { mkdtempSync, rmSync, writeFileSync, existsSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { createPipeline, listStates, readState, setStep, upsertChunk } from "../src/state.ts";
-import { findRecipe, isAlive, savedRecipePath, startPreview, stopPipeline } from "../src/preview.ts";
+import { createPipeline, listStates, pipelineDir, readState, setStep, updateState, upsertChunk } from "../src/state.ts";
+import { deletePipeline, findRecipe, isAlive, savedRecipePath, startPreview, stopPipeline } from "../src/preview.ts";
+import { spawnSync } from "node:child_process";
 
 const root = mkdtempSync(join(tmpdir(), "pipeship-test-"));
 process.env.PIPESHIP_HOME = join(root, "home");
@@ -130,4 +131,26 @@ test("a pipeline keeps one link per ticket, and old state files are upgraded", (
   old.ticket = { source: "linear", title: "t", ref: "ABC-3,ABC-4", url: "https://example.com/ABC-3" };
   writeFileSync(path, JSON.stringify(old));
   expect(readState(id).ticket.links).toEqual([{ ref: "ABC-3", url: "https://example.com/ABC-3" }, { ref: "ABC-4" }]);
+});
+
+test("delete removes the worktrees and files, keeps the branch, and protects uncommitted work", async () => {
+  const git = (cwd: string, ...args: string[]) => spawnSync("git", ["-C", cwd, ...args], { encoding: "utf8" });
+  git(repo, "init", "-q", "-b", "main");
+  git(repo, "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "--allow-empty", "-m", "init");
+  const { id } = createPipeline({ repo, title: "t", source: "text" });
+  const wt = join(pipelineDir(id), "worktrees", "main");
+  git(repo, "worktree", "add", "-q", "-b", "pipeship/test/main", wt);
+
+  await expect(deletePipeline(id)).rejects.toThrow("stop the pipeline");
+  updateState(id, (s) => {
+    s.status = "ready";
+  });
+  writeFileSync(join(wt, "draft.ts"), "work in progress");
+  await expect(deletePipeline(id)).rejects.toThrow("uncommitted changes");
+  expect(existsSync(wt)).toBe(true);
+
+  await deletePipeline(id, { force: true });
+  expect(existsSync(pipelineDir(id))).toBe(false);
+  expect(git(repo, "worktree", "list").stdout).not.toContain(wt);
+  expect(git(repo, "branch", "--list", "pipeship/test/main").stdout).toContain("pipeship/test/main");
 });

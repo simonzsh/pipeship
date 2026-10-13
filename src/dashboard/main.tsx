@@ -1,6 +1,6 @@
 import {
   CheckCircle2, CircleDashed, ExternalLink, FolderGit2, GitBranch, GitPullRequest, Globe, Loader2,
-  MessageCircleQuestion, Square, Terminal, XCircle, type LucideIcon,
+  MessageCircleQuestion, Square, Terminal, Trash2, XCircle, type LucideIcon,
 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
@@ -93,6 +93,15 @@ const ACTIONS = {
     title: "Stop the test server?",
     description: "The test server stops. The code, branches and PRs stay in place.",
     confirm: "Stop",
+  },
+  delete: {
+    endpoint: "delete",
+    icon: Trash2,
+    button: "Delete",
+    title: "Delete this pipeline?",
+    description:
+      "The test server stops, and the worktrees and pipeline files are deleted. Branches and PRs stay. Uncommitted changes block the deletion.",
+    confirm: "Delete",
   },
 };
 
@@ -200,6 +209,7 @@ function PipelineCard({ p }: { p: State }) {
           ) : p.status === "running" || p.status === "waiting_for_user" || (p.status === "failed" && p.preview) ? (
             <ActionButton id={p.id} action="stopPipeline" />
           ) : null}
+          {(p.status === "ready" || p.status === "failed" || p.status === "stopped") && <ActionButton id={p.id} action="delete" />}
         </div>
       </CardFooter>
     </Card>
