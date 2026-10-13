@@ -4,7 +4,7 @@ import { existsSync, mkdirSync, openSync, readFileSync, rmSync, writeFileSync } 
 import { join, resolve } from "node:path";
 import { parseArgs } from "node:util";
 import { deletePipeline, findRecipe, git, isAlive, killGroup, loadRecipe, previewLines, startPreview, stopPipeline } from "./preview.ts";
-import { detectSession } from "./session.ts";
+import { detectSession, findT3Thread } from "./session.ts";
 import { DEFAULT_PORT, isDashboardUp, serve } from "./server.ts";
 import {
   STEPS, createPipeline, home, listStates, pipelineDir, readState, setMode, setStep, updateState, upsertChunk,
@@ -100,9 +100,13 @@ async function main() {
       return print(readState(need(args[0], "<id>")));
     case "list":
       return print(listStates().map((s) => `${s.id}\t${s.status}\t${s.step}\t${s.ticket.title}`).join("\n") || "no pipelines");
-    case "step":
-      setStep(need(args[0], "<id>"), need(args[1], "<step>") as StepName, need(args[2], "<status>") as StepStatus);
+    case "step": {
+      const { session } = setStep(need(args[0], "<id>"), need(args[1], "<step>") as StepName, need(args[2], "<status>") as StepStatus);
+      // T3 Code may record the session after `pipeship new`: look again at each step until found.
+      const t3Thread = session && !session.t3Thread && findT3Thread(session);
+      if (t3Thread) updateState(args[0], (s) => void (s.session!.t3Thread = t3Thread));
       return print("ok");
+    }
     case "mode":
       setMode(need(args[0], "<id>"), need(args[1], "<mode>") as Mode);
       return print("ok");

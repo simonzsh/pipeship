@@ -2,13 +2,16 @@ import { Check } from "lucide-react";
 import { useEffect, useState } from "react";
 import { siClaude } from "simple-icons";
 import { Tooltip, TooltipContent, TooltipTrigger } from "./components/ui/tooltip";
-import type { Session, State } from "../state.ts";
+import type { Session, State, T3Thread } from "../state.ts";
 import { cn } from "./utils";
 
 export function resumeCommand(s: Session): string {
   const cwd = /^[\w./~-]+$/.test(s.cwd) ? s.cwd : `'${s.cwd.replace(/'/g, `'\\''`)}'`;
   return s.harness === "claude" ? `cd ${cwd} && claude --resume ${s.id}` : `cd ${cwd} && codex resume ${s.id}`;
 }
+
+// The two header buttons share their box, so they stay the same size side by side.
+const ICON_BUTTON = "flex size-6 items-center justify-center rounded-md";
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -63,7 +66,7 @@ export function AgentLogo({ p }: { p: State }) {
           aria-label={canResume ? `Copy the command to resume the ${name} session` : `${name} session`}
           aria-disabled={!canResume}
           className={cn(
-            "flex size-6 items-center justify-center rounded-md",
+            ICON_BUTTON,
             canResume ? "cursor-pointer hover:bg-accent" : "cursor-default",
           )}
           onClick={async (e) => {
@@ -86,6 +89,35 @@ export function AgentLogo({ p }: { p: State }) {
       <TooltipContent onClick={(e) => e.stopPropagation()}>
         {!canResume ? `${name} session` : copied ? "Copied" : "Copy resume command"}
       </TooltipContent>
+    </Tooltip>
+  );
+}
+
+// The T3 Code mark, from apps/mobile/assets/widget/T3Mark.svg in pingdotgg/t3code (MIT).
+const T3_MARK = "M33.4509 93V47.56H15.5309V37H64.3309V47.56H46.4109V93H33.4509ZM86.7253 93.96C82.832 93.96 78.9653 93.4533 75.1253 92.44C71.2853 91.3733 68.032 89.88 65.3653 87.96L70.4053 78.04C72.5386 79.5867 75.0186 80.8133 77.8453 81.72C80.672 82.6267 83.5253 83.08 86.4053 83.08C89.6586 83.08 92.2186 82.44 94.0853 81.16C95.952 79.88 96.8853 78.12 96.8853 75.88C96.8853 73.7467 96.0586 72.0667 94.4053 70.84C92.752 69.6133 90.0853 69 86.4053 69H80.4853V60.44L96.0853 42.76L97.5253 47.4H68.1653V37H107.365V45.4L91.8453 63.08L85.2853 59.32H89.0453C95.9253 59.32 101.125 60.8667 104.645 63.96C108.165 67.0533 109.925 71.0267 109.925 75.88C109.925 79.0267 109.099 81.9867 107.445 84.76C105.792 87.48 103.259 89.6933 99.8453 91.4C96.432 93.1067 92.0586 93.96 86.7253 93.96Z";
+
+export function t3ThreadLink(t: T3Thread): string {
+  return `t3code://threads/${encodeURIComponent(t.environmentId)}/${encodeURIComponent(t.threadId)}`;
+}
+
+// The T3 Code desktop app opens this link on the thread that runs the pipeline (T3 Code 0.0.46 or later).
+export function T3ThreadButton({ thread }: { thread: T3Thread }) {
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <a
+          href={t3ThreadLink(thread)}
+          aria-label="Open the thread in T3 Code"
+          className={cn(ICON_BUTTON, "text-foreground hover:bg-accent")}
+          onClick={(e) => e.stopPropagation()}
+        >
+          {/* The mark is black in T3 Code: follow the text colour, like the ChatGPT logo. */}
+          <svg viewBox="7 29 111 74" fill="currentColor" className="h-3 w-auto">
+            <path d={T3_MARK} />
+          </svg>
+        </a>
+      </TooltipTrigger>
+      <TooltipContent>Open in T3 Code</TooltipContent>
     </Tooltip>
   );
 }

@@ -6,7 +6,7 @@ import { Badge } from "./components/ui/badge";
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "./components/ui/card";
 import { CombinedNote, MergeButton } from "./merge-button";
 import { PreviewPanel } from "./preview-panel";
-import { AgentLogo } from "./session";
+import { AgentLogo, T3ThreadButton } from "./session";
 import { StackTree } from "./stack-tree";
 import { statusConfig, StatusBadge } from "./status";
 import { Steps } from "./steps";
@@ -85,6 +85,7 @@ export function PipelineCard({ p }: { p: DashboardState }) {
           </div>
           <div className="flex shrink-0 flex-col items-end gap-2">
             <div className="flex items-center gap-1.5">
+              {p.session?.t3Thread && <T3ThreadButton thread={p.session.t3Thread} />}
               <AgentLogo p={p} />
               {p.mode === "quick" && (
                 <Badge variant="secondary" className="bg-pink-500/15 text-pink-700 dark:text-pink-400">

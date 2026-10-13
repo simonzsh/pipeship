@@ -45,6 +45,12 @@ export interface Session {
   harness: Harness;
   id: string;
   cwd: string;
+  t3Thread?: T3Thread; // the T3 Code thread that runs the session, when there is one
+}
+
+export interface T3Thread {
+  environmentId: string;
+  threadId: string;
 }
 
 export interface State {

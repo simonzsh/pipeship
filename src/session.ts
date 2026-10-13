@@ -3,10 +3,10 @@ import { spawnSync } from "node:child_process";
 import { existsSync, readdirSync, readFileSync, readlinkSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, join } from "node:path";
-import type { Harness, Session } from "./state.ts";
+import type { Harness, Session, T3Thread } from "./state.ts";
 
 export type Env = Record<string, string | undefined>;
-export interface Homes { claude: string; codex: string }
+export interface Homes { claude: string; codex: string; t3: string }
 export interface ProcInfo { ppid: number; argv0: string; comm: string; exe?: string }
 export type ReadProc = (pid: number) => ProcInfo | undefined;
 
@@ -14,7 +14,11 @@ const ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const linux = process.platform === "linux";
 
 export function harnessHomes(env: Env = process.env): Homes {
-  return { claude: env.CLAUDE_CONFIG_DIR ?? join(homedir(), ".claude"), codex: env.CODEX_HOME ?? join(homedir(), ".codex") };
+  return {
+    claude: env.CLAUDE_CONFIG_DIR ?? join(homedir(), ".claude"),
+    codex: env.CODEX_HOME ?? join(homedir(), ".codex"),
+    t3: env.T3CODE_HOME ?? join(homedir(), ".t3"),
+  };
 }
 
 // comm may contain spaces and parentheses: split on the last ")".
@@ -65,20 +69,23 @@ function claudeCwd(claudeHome: string, id: string): string | undefined {
   return undefined;
 }
 
-function codexCwd(codexHome: string, id: string): string | undefined {
-  const path = join(codexHome, "state_5.sqlite");
+// Another tool's database, read-only: a missing file or another schema gives undefined.
+function queryOne<T>(path: string, sql: string, ...params: string[]): T | undefined {
   if (!existsSync(path)) return undefined;
   try {
     const db = new Database(path, { readonly: true });
     try {
-      const row = db.query("SELECT cwd FROM threads WHERE id = ?").get(id) as { cwd?: string } | null;
-      return row?.cwd ?? undefined;
+      return (db.query(sql).get(...params) as T | null) ?? undefined;
     } finally {
       db.close();
     }
   } catch {
     return undefined;
   }
+}
+
+function codexCwd(codexHome: string, id: string): string | undefined {
+  return queryOne<{ cwd?: string }>(join(codexHome, "state_5.sqlite"), "SELECT cwd FROM threads WHERE id = ?", id)?.cwd;
 }
 
 function classify(info: ProcInfo, env: Env): Harness | undefined {
@@ -108,5 +115,28 @@ export function detectSession(opts: { env?: Env; startPid?: number; readProc?: R
   const id = harness === "claude" ? env.CLAUDE_CODE_SESSION_ID : (env.CODEX_THREAD_ID ?? env.CODEX_SESSION_ID);
   if (!id || !ID_RE.test(id)) return undefined;
   const found = harness === "claude" ? claudeCwd(homes.claude, id) : codexCwd(homes.codex, id);
-  return { harness, id, cwd: found ?? opts.cwd ?? process.cwd() };
+  const session: Session = { harness, id, cwd: found ?? opts.cwd ?? process.cwd() };
+  const t3Thread = findT3Thread(session, homes.t3);
+  return t3Thread ? { ...session, t3Thread } : session;
+}
+
+// T3 Code gives the agent no thread id: find the thread whose provider cursor resumes this session.
+export function findT3Thread(session: Session, t3Home = harnessHomes().t3): T3Thread | undefined {
+  const dir = join(t3Home, "userdata");
+  let environmentId: string;
+  try {
+    environmentId = readFileSync(join(dir, "environment-id"), "utf8").trim();
+  } catch {
+    return undefined;
+  }
+  const field = session.harness === "claude" ? "$.resume" : "$.threadId";
+  const threadId = queryOne<{ threadId: string }>(
+    join(dir, "state.sqlite"),
+    `SELECT r.thread_id AS threadId FROM provider_session_runtime r
+     JOIN projection_threads t ON t.thread_id = r.thread_id
+     WHERE json_extract(r.resume_cursor_json, ?) = ? AND t.deleted_at IS NULL LIMIT 1`,
+    field,
+    session.id,
+  )?.threadId;
+  return ID_RE.test(environmentId) && threadId && ID_RE.test(threadId) ? { environmentId, threadId } : undefined;
 }
