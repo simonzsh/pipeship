@@ -5,11 +5,13 @@ import { join } from "node:path";
 import {
   addRepo, createPipeline, listStates, pipelineDir, readState, setMode, setStep, updateState, upsertChunk,
 } from "../src/state.ts";
-import { chunksOf, repoName, repoStacks, sharesRepo, topChunk } from "../src/repos.ts";
+import { chunksOf, diffRange, repoName, repoStacks, sharesRepo, topChunk } from "../src/repos.ts";
 import {
   DASHBOARD_PORT, deletePipeline, findRecipe, isAlive, mainService, normalizeRecipe, pickPorts, previewLines, resolveEnv,
   savedRecipePath, startOrder, startPreview, stopPipeline, type Service,
 } from "../src/preview.ts";
+import { diffTotals, parseDiff } from "../src/diff.ts";
+import { DiffError, gitDiff, pipelineDiff, resolveRef } from "../src/diff-git.ts";
 import { DEFAULT_PORT, serve } from "../src/server.ts";
 import {
   classifyPr, defaultRunner, DEFAULT_LIMITS, failStaleMerges, mergeStack, MergeError, resolveMergeRepo, startMerge, type MergeDeps, type PrView, type Runner,
@@ -1439,4 +1441,209 @@ test("delete removes the worktrees of every repo", async () => {
   expect(sh(b, "worktree", "list")).not.toContain(wtB);
   expect(sh(a, "branch", "--list", "t/a1")).toContain("t/a1");
   expect(sh(b, "branch", "--list", "t/b1")).toContain("t/b1");
+});
+
+// Diff API: parser, range helper, real git, route.
+test("parseDiff reads modified files with exact line numbers and counts", () => {
+  const [f, ...rest] = parseDiff(
+    [
+      "diff --git a/src/a.ts b/src/a.ts",
+      "index 111..222 100644",
+      "--- a/src/a.ts",
+      "+++ b/src/a.ts",
+      "@@ -1,3 +1,3 @@ function one()",
+      " keep",
+      "-old",
+      "+new",
+      " tail",
+      "@@ -10 +10,2 @@",
+      " x",
+      "+y",
+      "",
+    ].join("\n"),
+  );
+  expect(rest).toEqual([]);
+  expect(f).toMatchObject({ path: "src/a.ts", oldPath: "src/a.ts", newPath: "src/a.ts", status: "modified", additions: 2, deletions: 1, binary: false });
+  expect(f!.hunks[0]).toMatchObject({ oldStart: 1, oldLines: 3, newStart: 1, newLines: 3, section: "function one()" });
+  expect(f!.hunks[0]!.lines).toEqual([
+    { kind: "context", text: "keep", oldNo: 1, newNo: 1 },
+    { kind: "del", text: "old", oldNo: 2 },
+    { kind: "add", text: "new", newNo: 2 },
+    { kind: "context", text: "tail", oldNo: 3, newNo: 3 },
+  ]);
+  expect(f!.hunks[1]).toMatchObject({ oldStart: 10, oldLines: 1, newStart: 10, newLines: 2 });
+  expect(f!.hunks[1]).not.toHaveProperty("section");
+  expect(f!.hunks[1]!.lines[1]).toEqual({ kind: "add", text: "y", newNo: 11 });
+  expect(diffTotals([f!])).toEqual({ files: 1, additions: 2, deletions: 1 });
+});
+
+test("parseDiff handles added, deleted, renamed, binary and mode-only files", () => {
+  const files = parseDiff(
+    [
+      "diff --git a/new.txt b/new.txt",
+      "new file mode 100644",
+      "--- /dev/null",
+      "+++ b/new.txt",
+      "@@ -0,0 +1,2 @@",
+      "+a",
+      "+b",
+      "diff --git a/gone.txt b/gone.txt",
+      "deleted file mode 100644",
+      "--- a/gone.txt",
+      "+++ /dev/null",
+      "@@ -1 +0,0 @@",
+      "-bye",
+      "diff --git a/p.txt b/q.txt",
+      "similarity index 100%",
+      "rename from p.txt",
+      "rename to q.txt",
+      "diff --git a/r.txt b/s.txt",
+      "similarity index 80%",
+      "rename from r.txt",
+      "rename to s.txt",
+      "--- a/r.txt",
+      "+++ b/s.txt",
+      "@@ -1 +1 @@",
+      "-1",
+      "+2",
+      "diff --git a/img.png b/img.png",
+      "new file mode 100644",
+      "Binary files /dev/null and b/img.png differ",
+      "diff --git a/img2.png b/img2.png",
+      "index 1..2 100644",
+      "Binary files a/img2.png and b/img2.png differ",
+      "diff --git a/run.sh b/run.sh",
+      "old mode 100644",
+      "new mode 100755",
+      "",
+    ].join("\n"),
+  );
+  const by = Object.fromEntries(files.map((f) => [f.newPath || f.oldPath, f]));
+  expect(by["new.txt"]).toMatchObject({ status: "added", oldPath: "", path: "new.txt", additions: 2 });
+  expect(by["gone.txt"]).toMatchObject({ status: "deleted", newPath: "", path: "gone.txt", deletions: 1 });
+  expect(by["q.txt"]).toMatchObject({ status: "renamed", oldPath: "p.txt", path: "q.txt", similarity: 100, hunks: [] });
+  expect(by["s.txt"]).toMatchObject({ status: "renamed", oldPath: "r.txt", similarity: 80, additions: 1, deletions: 1 });
+  expect(by["img.png"]).toMatchObject({ status: "added", binary: true, oldPath: "" });
+  expect(by["img2.png"]).toMatchObject({ status: "modified", binary: true });
+  expect(by["run.sh"]).toMatchObject({ status: "modified", oldMode: "100644", newMode: "100755", hunks: [], binary: false });
+});
+
+test("parseDiff handles no-newline markers, quoted and spaced paths, truncation, and garbage", () => {
+  const [a] = parseDiff(
+    ["diff --git a/f b/f", "--- a/f", "+++ b/f", "@@ -1 +1 @@", "-x", "\\ No newline at end of file", "+y", "\\ No newline at end of file", ""].join("\n"),
+  );
+  expect(a!.hunks[0]!.lines.map((l) => l.noNewline)).toEqual([true, true]);
+
+  const [q] = parseDiff(['diff --git "a/t\\303\\251st.txt" "b/t\\303\\251st.txt"', "new file mode 100644", "--- /dev/null", '+++ "b/t\\303\\251st.txt"', "@@ -0,0 +1 @@", "+x", ""].join("\n"));
+  expect(q!.path).toBe("tést.txt");
+  const [sp] = parseDiff(["diff --git a/my file.txt b/my file.txt", "--- a/my file.txt\t", "+++ b/my file.txt\t", "@@ -1 +1 @@", "-a", "+b", ""].join("\n"));
+  expect(sp).toMatchObject({ path: "my file.txt", oldPath: "my file.txt" });
+  const [mode] = parseDiff(["diff --git a/my file.sh b/my file.sh", "old mode 100644", "new mode 100755", ""].join("\n"));
+  expect(mode!.path).toBe("my file.sh");
+
+  const big = ["diff --git a/big b/big", "--- a/big", "+++ b/big", "@@ -0,0 +1,5 @@", ..."abcde".split("").map((c) => `+${c}`), ""].join("\n");
+  const [t] = parseDiff(big, { maxLinesPerFile: 3 });
+  expect(t).toMatchObject({ truncated: true, hunks: [], additions: 5, deletions: 0 });
+
+  expect(parseDiff("")).toEqual([]);
+  expect(() => parseDiff("@@ nonsense\n+++\n\0\ndiff --git\n@@ -x\n \\ \n")).not.toThrow();
+});
+
+test("diffRange picks the previous branched chunk, or the base", () => {
+  const repos = [{ path: "/r/a", base: "main" }, { path: "/r/b", base: "dev" }];
+  const chunks = [
+    { name: "c1", repo: "/r/a", branch: "b1" },
+    { name: "c2", repo: "/r/a" },
+    { name: "c3", repo: "/r/a", branch: "b3" },
+    { name: "d1", repo: "/r/b", branch: "e1" },
+    { name: "d2", repo: "/r/b" },
+  ];
+  const s = { repos, chunks };
+  expect(diffRange(s, repos[0]!, "c1")).toEqual({ from: "main", to: "b1" });
+  expect(diffRange(s, repos[0]!, "c3")).toEqual({ from: "b1", to: "b3" }); // c2 has no branch
+  expect(diffRange(s, repos[0]!)).toEqual({ from: "main", to: "b3" });
+  expect(diffRange(s, repos[1]!)).toEqual({ from: "dev", to: "e1" });
+  expect(diffRange(s, repos[0]!, "c2")).toMatchObject({ code: "no_branch" });
+  expect(diffRange(s, repos[0]!, "nope")).toMatchObject({ code: "not_found" });
+  expect(diffRange(s, repos[0]!, "d1")).toMatchObject({ code: "not_found" }); // other repo
+  expect(diffRange(s, repos[1]!, "c1")).toMatchObject({ code: "not_found" });
+  expect(diffRange({ repos: [{ path: "/r/a" }], chunks }, { path: "/r/a" }, "c1")).toMatchObject({ code: "no_base" });
+  expect(diffRange({ repos: [{ path: "/r/a" }], chunks }, { path: "/r/a" })).toMatchObject({ code: "no_base" });
+  expect(diffRange({ repos: [{ path: "/r/a", base: "main" }], chunks: [{ name: "x", repo: "/r/a" }] }, { path: "/r/a", base: "main" })).toMatchObject({ code: "no_branch" });
+  expect(diffRange({ repos: [{ path: "/r/a" }], chunks }, { path: "/r/a" }, "c3")).toEqual({ from: "b1", to: "b3" });
+});
+
+test("pipelineDiff runs real git per chunk and for the whole stack", async () => {
+  const stack = makeStack(3);
+  const names = async (chunk: string | null) => (await pipelineDiff(stack.id, null, chunk)).files.map((f) => f.path);
+  expect(await names("c1")).toEqual(["f1.txt"]);
+  expect(await names("c2")).toEqual(["f2.txt"]);
+  const all = await pipelineDiff(stack.id, stack.clone, null);
+  expect(all.files.map((f) => f.path)).toEqual(["f1.txt", "f2.txt", "f3.txt"]);
+  expect(all).toMatchObject({ chunk: null, from: "main", to: "c3", range: "main...c3", additions: 3, deletions: 0, truncated: false, name: "repo" });
+
+  // Three dots: a commit on main after the fork stays out.
+  commitFile(stack.clone, "later.txt", "later\n", "later on main");
+  expect((await names(null)).includes("later.txt")).toBe(false);
+
+  // Local branch deleted, origin copy kept: falls back to origin/c1.
+  sh(stack.clone, "worktree", "remove", "--force", stack.worktrees[0]!);
+  sh(stack.clone, "branch", "-D", "c1");
+  expect(await resolveRef(stack.clone, "c1")).toBe("origin/c1");
+  expect(await resolveRef(stack.clone, "nope")).toBeUndefined();
+  const viaOrigin = await pipelineDiff(stack.id, null, "c1");
+  expect(viaOrigin.range).toBe("main...origin/c1");
+  expect(viaOrigin.files.map((f) => f.path)).toEqual(["f1.txt"]);
+
+  // A branch that exists nowhere.
+  upsertChunk(stack.id, { name: "ghost", branch: "feat/ghost", status: "pr" });
+  const err = await pipelineDiff(stack.id, null, "ghost").catch((e) => e);
+  expect(err).toBeInstanceOf(DiffError);
+  expect(err).toMatchObject({ status: 409, code: "missing_ref", message: 'branch "feat/ghost" not found in repo' });
+});
+
+test("gitDiff caps the output and cuts on a file boundary", async () => {
+  const stack = makeStack(3);
+  const full = await gitDiff(stack.clone, "main", "c3");
+  expect(full.truncated).toBe(false);
+  const cut = await gitDiff(stack.clone, "main", "c3", { maxBytes: 300, maxLinesPerFile: 3000, timeoutMs: 15_000 });
+  expect(cut.truncated).toBe(true);
+  expect(cut.text.length).toBeLessThan(full.text.length);
+  expect(full.text.startsWith(cut.text)).toBe(true);
+  const files = parseDiff(cut.text);
+  expect(files.length).toBeGreaterThan(0);
+  expect(files.length).toBeLessThan(3);
+  for (const f of files) expect(f).toMatchObject({ additions: 1, deletions: 0 });
+  const res = await pipelineDiff(stack.id, null, null, { maxBytes: 300, maxLinesPerFile: 3000, timeoutMs: 15_000 });
+  expect(res.truncated).toBe(true);
+});
+
+test("the diff route answers 200, 404, 400 and 409", async () => {
+  const stack = makeStack(2);
+  const other = makeStack(1, 1, "other");
+  const multi = createPipeline({ repos: [{ path: stack.clone, base: "main" }, { path: other.clone, base: "main" }], title: "multi" });
+  upsertChunk(multi.id, { name: "m1", repo: other.clone, branch: "c1", status: "pr" });
+  const server = await serve(0);
+  try {
+    const get = async (path: string) => {
+      const res = await fetch(`http://localhost:${server.port}/api/pipelines/${path}`);
+      return { status: res.status, body: (await res.json()) as any };
+    };
+    const ok = await get(`${stack.id}/diff?chunk=c2`);
+    expect(ok.status).toBe(200);
+    expect(ok.body).toMatchObject({ chunk: "c2", from: "c1", to: "c2", range: "c1...c2", additions: 1, truncated: false });
+    expect(ok.body.files[0]).toMatchObject({ path: "f2.txt", status: "added" });
+    expect((await get(`${stack.id}/diff`)).body.files).toHaveLength(2);
+
+    expect(await get("nope/diff")).toEqual({ status: 404, body: { error: "unknown pipeline: nope", code: "not_found" } });
+    expect((await get(`${stack.id}/diff?chunk=zzz`)).status).toBe(404);
+    expect(await get(`${multi.id}/diff`)).toMatchObject({ status: 400, body: { code: "bad_request" } });
+    expect(await get(`${multi.id}/diff?repo=nope`)).toMatchObject({ status: 400 });
+    expect((await get(`${multi.id}/diff?repo=other`)).body.files.map((f: { path: string }) => f.path)).toEqual(["f1.txt"]);
+
+    upsertChunk(stack.id, { name: "ghost", branch: "feat/ghost", status: "pr" });
+    expect(await get(`${stack.id}/diff?chunk=ghost`)).toMatchObject({ status: 409, body: { code: "missing_ref" } });
+  } finally {
+    server.stop(true);
+  }
 });

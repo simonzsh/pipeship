@@ -49,3 +49,31 @@ export function repoStacks(state: Pick<State, "repos" | "chunks" | "merge">): Re
     merge: mergeOf(state, repo.path),
   }));
 }
+
+export type DiffRange =
+  | { from: string; to: string }
+  | { error: string; code: "not_found" | "no_branch" | "no_base" };
+
+// chunk undefined = whole stack: base...<last chunk with a branch>.
+// chunk = name: <nearest previous chunk of the same repo with a branch | repo.base>...<chunk.branch>.
+export function diffRange(state: Pick<State, "repos" | "chunks">, repo: Repo, chunk?: string): DiffRange {
+  const chunks = chunksOf(state, repo.path);
+  const name = repoName(repo.path);
+  let target: Chunk | undefined;
+  let before: Chunk[];
+  if (chunk === undefined) {
+    target = chunks.findLast((c) => c.branch);
+    if (!target) return { error: `no chunk of ${name} has a branch yet`, code: "no_branch" };
+    before = [];
+  } else {
+    const i = chunks.findIndex((c) => c.name === chunk);
+    if (i < 0) return { error: `unknown chunk: ${chunk}`, code: "not_found" };
+    target = chunks[i]!;
+    if (!target.branch) return { error: `chunk ${chunk} has no branch yet`, code: "no_branch" };
+    before = chunks.slice(0, i);
+  }
+  const prev = before.findLast((c) => c.branch);
+  const from = prev?.branch ?? repo.base;
+  if (!from) return { error: `${name} has no base branch`, code: "no_base" };
+  return { from, to: target.branch! };
+}

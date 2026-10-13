@@ -1,5 +1,7 @@
 import tailwind from "bun-plugin-tailwind";
 import { errorMessage, failStaleMerges, MergeError, startMerge } from "./merge.ts";
+import { DiffError, pipelineDiff } from "./diff-git.ts";
+import type { DiffErrorBody } from "./diff.ts";
 import { listDashboardStates } from "./state.ts";
 import { deletePipeline, stopPipeline } from "./preview.ts";
 
@@ -34,6 +36,22 @@ export async function serve(port = DEFAULT_PORT) {
       ...assets,
       "/api/health": () => Response.json({ app: "pipeship" }),
       "/api/pipelines": () => Response.json(listDashboardStates()),
+      "/api/pipelines/:id/diff": async (req) => {
+        const q = new URL(req.url).searchParams;
+        try {
+          return Response.json(await pipelineDiff(req.params.id, q.get("repo"), q.get("chunk")), {
+            headers: { "Cache-Control": "no-store" },
+          });
+        } catch (err) {
+          const msg = errorMessage(err);
+          const body: DiffErrorBody =
+            err instanceof DiffError
+              ? { error: msg, code: err.code }
+              : { error: msg, code: msg.startsWith("unknown pipeline:") ? "not_found" : "git_failed" };
+          const status = err instanceof DiffError ? err.status : body.code === "not_found" ? 404 : 500;
+          return Response.json(body, { status });
+        }
+      },
       "/api/pipelines/:id/stop": {
         POST: async (req) => {
           try {
