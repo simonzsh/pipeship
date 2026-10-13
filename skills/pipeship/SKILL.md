@@ -12,7 +12,7 @@ You are the orchestrator. Run each heavy step in a subagent with a clean context
 
 ## Helper
 
-`pipeship` below means `bun "$(realpath <this skill's base directory>)/../../src/cli.ts"` (`realpath` matters when the skill is a symlink). It owns the state file `~/.pipeship/pipelines/<id>/state.json`, which the dashboard displays. Call it at every transition — the user follows the pipeline in the dashboard.
+`pipeship` below means `"$(realpath <this skill's base directory>)/../../scripts/pipeship"` (`realpath` matters when the skill is a symlink). On first use it installs its dependencies, which takes a few seconds. It owns the state file `~/.pipeship/pipelines/<id>/state.json`, which the dashboard displays. Call it at every transition — the user follows the pipeline in the dashboard.
 
 ```
 pipeship new --repo <path> --title <t> --source <s> [--ref <r> --url <u>]... [--mode quick] [--skip a,b]

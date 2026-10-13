@@ -1,0 +1,10 @@
+#!/bin/sh
+# Entry point for the skill. A plugin is copied into Claude Code's cache without
+# node_modules, so install the dependencies on first use.
+set -e
+root="$(cd "$(dirname "$(realpath "$0")")/.." && pwd)"
+if [ ! -d "$root/node_modules" ]; then
+  echo "pipeship: installing dependencies (first run)..." >&2
+  (cd "$root" && bun install --frozen-lockfile --production >&2)
+fi
+exec bun "$root/src/cli.ts" "$@"

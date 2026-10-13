@@ -1,0 +1,12 @@
+{
+  "name": "pipeship",
+  "description": "pipeship: from a ticket to stacked PRs and a running test environment.",
+  "owner": { "name": "simonzsh" },
+  "plugins": [
+    {
+      "name": "pipeship",
+      "source": "./",
+      "description": "Feature pipeline: ticket → questions → plan → parallel implementation → cleanup → stacked PRs → running test environment."
+    }
+  ]
+}

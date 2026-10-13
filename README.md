@@ -17,16 +17,17 @@ Modes: `full` (default, all 7 steps) and `quick` (one chunk, blocking questions 
 
 ## Install
 
-Requires [Bun](https://bun.sh), git and `gh`. From the repo root, install the dependencies and link the skill into your Claude Code skills:
+Requires [Bun](https://bun.sh), git and `gh`. In Claude Code:
 
-```sh
-bun install
-ln -s "$PWD/skills/pipeship" ~/.claude/skills/pipeship
+```
+/plugin install pipeship --marketplace simonzsh/pipeship
 ```
 
-There is no build step: the skill runs `src/cli.ts` from this repo, so changes apply at once.
+Or from your shell: `claude plugin marketplace add simonzsh/pipeship`, then `claude plugin install pipeship@pipeship`. The first run installs the dependencies, which takes a few seconds. Updates arrive with `claude plugin update pipeship@pipeship`, or automatically once you turn on auto-update for the marketplace in `/plugin`.
 
-The skill runs when you type `/pipeship`, or when you explicitly ask Claude to use pipeship ("ship ABC-123 with pipeship"). Claude does not start it for ordinary feature requests.
+To work on pipeship itself, clone the repo, run `bun install`, and link the skill instead: `ln -s "$PWD/skills/pipeship" ~/.claude/skills/pipeship`. Changes then apply at once.
+
+The skill runs when you type `/pipeship:pipeship` (or `/pipeship` with the dev link), or when you explicitly ask Claude to use pipeship ("ship ABC-123 with pipeship"). Claude does not start it for ordinary feature requests.
 
 ## Test environment
 
@@ -40,9 +41,9 @@ You do not configure anything: on the first pipeline in a repo, Claude reads the
 
 ## Dashboard
 
-`bun src/cli.ts dashboard` starts it in the background on http://localhost:4400 (the skill does it for you). It lists pipelines live, with their steps, PRs and test URL. It can stop a pipeline or its test server, and delete a finished pipeline: its worktrees and files go, its branches and PRs stay. Light and dark themes follow your system, with a toggle.
+`scripts/pipeship dashboard` starts it in the background on http://localhost:4400 (the skill does it for you). It lists pipelines live, with their steps, PRs and test URL. It can stop a pipeline or its test server, and delete a finished pipeline: its worktrees and files go, its branches and PRs stay. Light and dark themes follow your system, with a toggle.
 
-The page is React, Tailwind and [shadcn/ui](https://ui.shadcn.com) components (`src/dashboard/`). Bun builds it in memory when the dashboard starts: no Vite, no build step. Stop the dashboard with `bun src/cli.ts dashboard stop`.
+The page is React, Tailwind and [shadcn/ui](https://ui.shadcn.com) components (`src/dashboard/`). Bun builds it in memory when the dashboard starts: no Vite, no build step. Stop the dashboard with `scripts/pipeship dashboard stop`.
 
 State lives in `~/.pipeship/pipelines/<id>/` (`state.json`, `ticket.md`, `map.md`, `plan.md`, worktrees, `preview.log`).
 
