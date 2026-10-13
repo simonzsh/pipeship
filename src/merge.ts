@@ -1,4 +1,3 @@
-import { existsSync } from "node:fs";
 import { isAlive } from "./preview.ts";
 import { listStates, MERGED, readState, updateState, upsertChunk, type Chunk, type MergeMode, type MergeRun, type State } from "./state.ts";
 
@@ -22,7 +21,7 @@ export interface MergeDeps {
 
 export const DEFAULT_LIMITS: MergeLimits = { mergeableMs: 120_000, checksMs: 900_000, pollMs: 10_000 };
 
-// Async on purpose: a sync spawn would freeze the dashboard's SSE stream during a rebase or push.
+// Async on purpose: a sync spawn would freeze the dashboard's SSE stream during a slow gh call.
 export const defaultRunner: Runner = async (cmd, args, { cwd }) => {
   const proc = Bun.spawn([cmd, ...args], {
     cwd,
@@ -95,9 +94,12 @@ export function classifyPr(v: PrView): Verdict {
   return { kind: "ready" };
 }
 
-// Anything but an explicit "base" gets the safe default: combine never touches the base branch.
-export const parseMergeMode = (body: unknown): MergeMode =>
-  (body as { mode?: unknown } | null)?.mode === "base" ? "base" : "combine";
+// No mode picks by open PR count; any other value is a client bug, not a default.
+export function resolveMergeMode(raw: unknown, open: number): MergeMode {
+  if (raw === undefined || raw === null) return open >= 2 ? "combine" : "base";
+  if (raw === "combine" || raw === "base") return raw;
+  throw new MergeError("unknown merge mode", 400);
+}
 
 export const errorMessage = (err: unknown) => (err instanceof Error ? err.message : String(err));
 
@@ -109,11 +111,11 @@ const STALE_MS = 5 * 60_000;
 const isStale = (m: MergeRun | undefined, alive: (pid: number) => boolean) =>
   m?.status === "running" && (m.pid === undefined || !alive(m.pid) || Date.now() - Date.parse(m.updatedAt) > STALE_MS);
 
-function runningMerge(mode: MergeMode, startedAt: string, oldTips: MergeRun["oldTips"]): MergeRun {
-  return { status: "running", mode, pid: process.pid, message: "starting", startedAt, updatedAt: new Date().toISOString(), oldTips };
+function runningMerge(mode: MergeMode, startedAt: string): MergeRun {
+  return { status: "running", mode, pid: process.pid, message: "starting", startedAt, updatedAt: new Date().toISOString() };
 }
 
-export function startMerge(id: string, deps: Partial<MergeDeps> = {}, mode: MergeMode = "combine"): { state: State; done: Promise<void> } {
+export function startMerge(id: string, deps: Partial<MergeDeps> = {}, rawMode?: unknown): { state: State; done: Promise<void> } {
   let s: State;
   try {
     s = readState(id);
@@ -125,11 +127,13 @@ export function startMerge(id: string, deps: Partial<MergeDeps> = {}, mode: Merg
   }
   const open = s.chunks.filter((c) => c.pr && c.status !== MERGED).length;
   if (open === 0) throw new MergeError("no open PR to merge", 400);
-  if (mode === "combine" && open < 2) throw new MergeError("only one open PR: nothing to combine", 400);
+  const mode = resolveMergeMode(rawMode, open);
+  if (mode === "combine" && open < 2) throw new MergeError("only one open PR: use Merge", 400);
+  if (mode === "base" && open > 1) throw new MergeError("combine the PRs first", 400);
 
   active.add(id);
   updateState(id, (x) => {
-    x.merge = runningMerge(mode, new Date().toISOString(), s.merge?.oldTips);
+    x.merge = runningMerge(mode, new Date().toISOString());
   });
   const done = mergeStack(id, deps, mode).finally(() => active.delete(id));
   return { state: readState(id), done };
@@ -175,7 +179,7 @@ function makeCtx(id: string, repo: string, d: MergeDeps): Ctx {
       s.merge = { ...s.merge!, ...fields, updatedAt: iso() };
     });
   const progress = (c: Chunk, message: string) => write({ current: c.name, message });
-  const finish = (message: string) => write({ status: "done", current: undefined, oldTips: undefined, message, endedAt: iso() });
+  const finish = (message: string) => write({ status: "done", current: undefined, message, endedAt: iso() });
   const gh = (args: string[]) => d.run("gh", args, { cwd: repo });
   const view = async (url: string): Promise<PrView> => {
     const fields = "number,url,state,baseRefName,headRefName,headRefOid,isDraft,mergeable,mergeStateStatus,reviewDecision,statusCheckRollup";
@@ -197,8 +201,8 @@ function makeCtx(id: string, repo: string, d: MergeDeps): Ctx {
     progress(c, message);
   };
 
-  // Just after a push, CI has not queued yet: "no checks" and "blocked" are not final answers.
-  // `first` is reused for the first poll unless the PR changed since it was read (push, fold, retarget).
+  // Just after a fold, CI has not queued yet: "no checks" and "blocked" are not final answers.
+  // `first` is reused for the first poll unless the PR changed since it was read (a fold).
   const waitReady: Ctx["waitReady"] = async (c, first, expectedHead, pushed, reuseFirst) => {
     const url = c.pr!;
     const n = parsePrUrl(url).number;
@@ -287,88 +291,24 @@ async function combine(x: Ctx, chunks: Chunk[]): Promise<void> {
   x.finish(`combined ${folded.length + 1} PRs into #${parsePrUrl(chunks[bottom]!.pr!).number}`);
 }
 
-// Base: merge each PR into the base branch bottom-up, rebasing and retargeting the next one.
+// Base: squash-merge the single PR left into the base branch. No rebase, push or retarget:
+// combine already put the whole stack on this PR's branch.
 async function mergeIntoBase(x: Ctx, s: State, chunks: Chunk[]): Promise<void> {
-  const { id, d } = x;
-  let base = s.base;
-  if (!base) base = (await x.view(chunks[0]!.pr!)).baseRefName;
-  // The PR below, once merged. GitHub reports its rebased head, but the next branch still sits on
-  // the head it had before the rebase, so the next rebase needs that old tip (kept in state.merge.oldTips).
-  let prev: { headRefName: string; oldTip: string } | undefined;
-  const tipOf = (c: Chunk, v: PrView) => readState(id).merge?.oldTips?.[c.name] ?? v.headRefOid;
-  let count = 0;
-
-  for (const c of chunks) {
-    const url = c.pr!;
-    const { owner, repo, number: n } = parsePrUrl(url);
-    x.progress(c, `checking #${n}`);
-    const v = await x.view(url);
-
-    if (v.state === "MERGED") {
-      upsertChunk(id, { name: c.name, status: MERGED });
-      prev = { headRefName: v.headRefName, oldTip: tipOf(c, v) };
-      continue;
-    }
-    if (v.state === "CLOSED") throw new Error(`PR #${n} is closed`);
-
-    let expectedHead = v.headRefOid;
-    let pushed = false;
-    let retargeted = false;
-    if (v.baseRefName !== base) {
-      if (!prev || prev.headRefName !== v.baseRefName) {
-        throw new Error(`PR #${n} targets ${v.baseRefName}, not ${base}, and the PR below is not merged`);
-      }
-      const wt = c.worktree;
-      if (!wt || !existsSync(wt)) {
-        throw new Error(`worktree of ${c.name} is missing (${wt}): rebase PR #${n} by hand or recreate it`);
-      }
-      const branch = v.headRefName;
-      const git = (...args: string[]) => d.run("git", args, { cwd: wt });
-      const dirty = await git("status", "--porcelain");
-      if (dirty.stdout.trim() !== "") throw new Error(`uncommitted changes in ${wt}`);
-      const head = await git("rev-parse", "--abbrev-ref", "HEAD");
-      if (head.stdout.trim() !== branch) throw new Error(`${wt} is not on ${branch}`);
-
-      const fetched = await git("fetch", "origin");
-      if (fetched.code !== 0) throw new Error(`git fetch failed: ${firstLine(fetched.stderr)}`);
-      // The force push would delete any commit that GitHub has and the worktree lacks.
-      if ((await git("rev-parse", "HEAD")).stdout.trim() !== v.headRefOid) {
-        throw new Error(`${branch} on GitHub has commits that are not in ${wt}: pull them first`);
-      }
-      // After an interrupted run the branch is already rebased: only the retarget is left.
-      const rebased = (await git("merge-base", "--is-ancestor", `origin/${base}`, "HEAD")).code === 0;
-      if (!rebased) {
-        x.progress(c, `rebasing ${branch} onto ${base}`);
-        updateState(id, (st) => {
-          st.merge!.oldTips = { ...st.merge!.oldTips, [c.name]: v.headRefOid };
-        });
-        const rebase = await git("rebase", "--onto", `origin/${base}`, prev.oldTip, branch);
-        if (rebase.code !== 0) {
-          await git("rebase", "--abort");
-          const conflict = (rebase.stdout + rebase.stderr).split("\n").find((l) => l.includes("CONFLICT")) ?? firstLine(rebase.stderr);
-          throw new Error(`rebase of ${branch} onto ${base} conflicts: ${conflict}`);
-        }
-        // Explicit lease: the fetch above moved the remote-tracking ref.
-        const push = await git("push", `--force-with-lease=${branch}:${v.headRefOid}`, "origin", branch);
-        if (push.code !== 0) throw new Error(`git push failed: ${firstLine(push.stderr)}`);
-        expectedHead = (await git("rev-parse", "HEAD")).stdout.trim();
-        pushed = true;
-      }
-      // `gh pr edit` fails on this setup, so retarget through the API.
-      const patch = await x.gh(["api", "-X", "PATCH", `repos/${owner}/${repo}/pulls/${n}`, "-f", `base=${base}`]);
-      if (patch.code !== 0) throw new Error(`retarget of #${n} failed: ${firstLine(patch.stderr)}`);
-      retargeted = true;
-      x.progress(c, `${pushed ? `rebased ${branch} and ` : ""}retargeted #${n} to ${base}`);
-    }
-
-    // After a retarget the view is stale (base and mergeability changed), so read it again.
-    const ready = await x.waitReady(c, v, expectedHead, pushed, !retargeted);
-    await x.mergePr(c, expectedHead, "squash", `merged #${n}`);
-    count++;
-    prev = { headRefName: ready.headRefName, oldTip: tipOf(c, ready) };
+  const open = chunks.filter((c) => c.status !== MERGED);
+  if (open.length !== 1) throw new Error(open.length ? "combine the PRs first" : "no open PR to merge");
+  const c = open[0]!;
+  const n = parsePrUrl(c.pr!).number;
+  x.progress(c, `checking #${n}`);
+  const v = await x.view(c.pr!);
+  if (v.state === "CLOSED") throw new Error(`PR #${n} is closed`);
+  const base = s.base ?? v.baseRefName;
+  if (v.baseRefName !== base) throw new Error(`PR #${n} targets ${v.baseRefName}, not ${base}: retarget it or combine first`);
+  if (v.state === "MERGED") upsertChunk(x.id, { name: c.name, status: MERGED });
+  else {
+    await x.waitReady(c, v, v.headRefOid, false, true);
+    await x.mergePr(c, v.headRefOid, "squash", `merged #${n}`);
   }
-
-  x.finish(`merged ${count} PR${count === 1 ? "" : "s"}`);
+  x.finish(`merged #${n} into ${base}`);
 }
 
 // Never throws: every failure ends up in state.merge.
@@ -384,7 +324,7 @@ export async function mergeStack(id: string, deps: Partial<MergeDeps> = {}, mode
     const s = readState(id);
     const startedAt = s.merge?.status === "running" ? s.merge.startedAt : new Date().toISOString();
     updateState(id, (x) => {
-      x.merge = runningMerge(mode, startedAt, x.merge?.oldTips);
+      x.merge = runningMerge(mode, startedAt);
     });
     const x = makeCtx(id, s.repo, d);
     const chunks = s.chunks.filter((c) => c.pr);

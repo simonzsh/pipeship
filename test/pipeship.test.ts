@@ -9,7 +9,7 @@ import {
 } from "../src/preview.ts";
 import { DEFAULT_PORT, serve } from "../src/server.ts";
 import {
-  classifyPr, defaultRunner, DEFAULT_LIMITS, failStaleMerges, mergeStack, MergeError, parseMergeMode, startMerge, type MergeDeps, type PrView, type Runner,
+  classifyPr, defaultRunner, DEFAULT_LIMITS, failStaleMerges, mergeStack, MergeError, startMerge, type MergeDeps, type PrView, type Runner,
 } from "../src/merge.ts";
 import { spawn, spawnSync } from "node:child_process";
 import { Database } from "bun:sqlite";
@@ -722,19 +722,72 @@ function fakeGh(stack: ReturnType<typeof makeStack>, count: number) {
 
 const chunkStatuses = (id: string) => readState(id).chunks.map((c) => c.status);
 
-test("merge: three PRs merge bottom-up, each rebased and retargeted", async () => {
-  const stack = makeStack(3);
-  const gh = fakeGh(stack, 3);
+const noWrites = (gh: ReturnType<typeof fakeGh>) => {
+  // base mode must never rebase, push, fetch or retarget.
+  expect(gh.gitCalls).toEqual([]);
+  expect(gh.calls.filter((c) => c.startsWith("patch") && !c.endsWith(" body"))).toEqual([]);
+};
+
+test("base: one PR is squash-merged into main with a single gh call and no git writes", async () => {
+  const stack = makeStack(1);
+  const gh = fakeGh(stack, 1);
+  const before = sh(stack.origin, "rev-parse", "c1");
   await mergeStack(stack.id, gh.deps, "base");
   const s = readState(stack.id);
-  expect(gh.calls).toEqual(["merge 1", "patch 2 main", "merge 2", "patch 3 main", "merge 3"]);
-  expect(s.merge?.status).toBe("done");
-  expect(s.merge?.message).toBe("merged 3 PRs");
-  expect(chunkStatuses(stack.id)).toEqual(["merged", "merged", "merged"]);
-  expect(sh(stack.origin, "ls-tree", "--name-only", "main").split("\n")).toEqual(["base.txt", "f1.txt", "f2.txt", "f3.txt"]);
-  expect(sh(stack.origin, "rev-list", "--count", "main")).toBe("4");
-  expect(() => sh(stack.origin, "merge-base", "--is-ancestor", gh.squash[1]!, "c2")).not.toThrow();
-  expect(s.status).toBe("running");
+  expect(gh.calls).toEqual(["merge 1"]);
+  noWrites(gh);
+  expect(s.merge).toMatchObject({ status: "done", mode: "base", message: "merged #1 into main" });
+  expect(chunkStatuses(stack.id)).toEqual(["merged"]);
+  expect(sh(stack.origin, "ls-tree", "--name-only", "main").split("\n")).toEqual(["base.txt", "f1.txt"]);
+  expect(sh(stack.origin, "rev-list", "--count", "main")).toBe("2");
+  expect(sh(stack.origin, "rev-parse", "c1")).toBe(before);
+});
+
+test("base: a failing check stops the merge, and a new run merges once it passes", async () => {
+  const stack = makeStack(1);
+  const gh = fakeGh(stack, 1);
+  gh.prs[1]!.checks = [{ name: "lint", status: "COMPLETED", conclusion: "FAILURE" }];
+  await mergeStack(stack.id, gh.deps, "base");
+  expect(readState(stack.id).merge).toMatchObject({ status: "failed", current: "c1" });
+  expect(readState(stack.id).merge?.error).toContain("lint");
+  expect(gh.calls).toEqual([]);
+  expect(sh(stack.origin, "rev-list", "--count", "main")).toBe("1");
+
+  gh.prs[1]!.checks = [];
+  await mergeStack(stack.id, gh.deps, "base");
+  expect(readState(stack.id).merge?.status).toBe("done");
+  expect(gh.calls).toEqual(["merge 1"]);
+  noWrites(gh);
+});
+
+test("base: checks that stay pending stop the merge after 15 min", async () => {
+  const stack = makeStack(1);
+  const gh = fakeGh(stack, 1);
+  gh.prs[1]!.checks = [{ name: "ci", status: "IN_PROGRESS" }];
+  await mergeStack(stack.id, gh.deps, "base");
+  expect(readState(stack.id).merge?.error).toBe("checks still running on #1 after 15 min");
+  expect(gh.calls).toEqual([]);
+});
+
+test("base: a PR that targets another branch than the pipeline base fails", async () => {
+  const stack = makeStack(1);
+  const gh = fakeGh(stack, 1);
+  gh.prs[1]!.base = "develop";
+  await mergeStack(stack.id, gh.deps, "base");
+  expect(readState(stack.id).merge?.error).toBe("PR #1 targets develop, not main: retarget it or combine first");
+  expect(gh.calls).toEqual([]);
+});
+
+test("base: after a combine, the bottom PR is the only open one and merges into main", async () => {
+  const stack = makeStack(2);
+  const gh = fakeGh(stack, 2);
+  await mergeStack(stack.id, gh.deps, "combine");
+  gh.gitCalls.length = 0;
+  await startMerge(stack.id, gh.deps).done;
+  expect(gh.calls).toEqual(["merge 2 --merge", "patch 1 body", "merge 1"]);
+  expect(readState(stack.id).merge).toMatchObject({ status: "done", mode: "base", message: "merged #1 into main" });
+  noWrites(gh);
+  expect(sh(stack.origin, "ls-tree", "--name-only", "main").split("\n")).toEqual(["base.txt", "f1.txt", "f2.txt"]);
 });
 
 test("merge: waits until GitHub computes mergeable, and gives up after 2 min", async () => {
@@ -750,58 +803,6 @@ test("merge: waits until GitHub computes mergeable, and gives up after 2 min", a
   await mergeStack(stuck.id, ghStuck.deps, "base");
   expect(readState(stuck.id).merge?.error).toContain("after 2 min");
   expect(ghStuck.calls).toEqual([]);
-});
-
-test("merge: a failing check stops the merge, and a new run resumes from that PR", async () => {
-  const stack = makeStack(3);
-  const gh = fakeGh(stack, 3);
-  gh.prs[2]!.checks = [{ name: "lint", status: "COMPLETED", conclusion: "FAILURE" }];
-  await mergeStack(stack.id, gh.deps, "base");
-  let s = readState(stack.id);
-  expect(s.merge).toMatchObject({ status: "failed", current: "c2" });
-  expect(s.merge?.error).toContain("lint");
-  expect(gh.calls).toEqual(["merge 1", "patch 2 main"]);
-  expect(chunkStatuses(stack.id)).toEqual(["merged", "pr", "pr"]);
-
-  gh.prs[2]!.checks = [{ name: "lint", status: "COMPLETED", conclusion: "SUCCESS" }];
-  await mergeStack(stack.id, gh.deps, "base");
-  s = readState(stack.id);
-  // #1 is skipped, and #2 is already retargeted so it merges without a second rebase.
-  expect(gh.calls).toEqual(["merge 1", "patch 2 main", "merge 2", "patch 3 main", "merge 3"]);
-  expect(s.merge?.status).toBe("done");
-  expect(s.merge?.error).toBeUndefined();
-  expect(chunkStatuses(stack.id)).toEqual(["merged", "merged", "merged"]);
-});
-
-test("merge: checks that stay pending stop the merge after 15 min", async () => {
-  const stack = makeStack(2);
-  const gh = fakeGh(stack, 2);
-  gh.prs[2]!.checks = [{ name: "ci", status: "IN_PROGRESS" }];
-  await mergeStack(stack.id, gh.deps, "base");
-  expect(readState(stack.id).merge?.error).toBe("checks still running on #2 after 15 min");
-  expect(gh.calls).toEqual(["merge 1", "patch 2 main"]);
-});
-
-test("merge: a rebase conflict is aborted and nothing is pushed", async () => {
-  const stack = makeStack(2);
-  const gh = fakeGh(stack, 2);
-  // main gets its own f2.txt: rebasing c2 onto it is an add/add conflict.
-  commitFile(stack.clone, "f2.txt", "other\n", "main f2");
-  sh(stack.clone, "push", "-q", "origin", "main");
-  const before = sh(stack.origin, "rev-parse", "c2");
-  await mergeStack(stack.id, gh.deps, "base");
-  expect(readState(stack.id).merge?.error).toMatch(/conflicts/);
-  expect(() => sh(stack.worktrees[1]!, "rev-parse", "-q", "--verify", "REBASE_HEAD")).toThrow();
-  expect(sh(stack.origin, "rev-parse", "c2")).toBe(before);
-  expect(gh.calls).toEqual(["merge 1"]);
-});
-
-test("merge: a missing worktree stops the merge with a clear reason", async () => {
-  const stack = makeStack(2);
-  const gh = fakeGh(stack, 2);
-  rmSync(stack.worktrees[1]!, { recursive: true, force: true });
-  await mergeStack(stack.id, gh.deps, "base");
-  expect(readState(stack.id).merge?.error).toMatch(/worktree of c2 is missing/);
 });
 
 test("merge: one job per pipeline, and nothing to merge is a 400", async () => {
@@ -860,78 +861,6 @@ test("classifyPr: failed checks beat pending ones, BLOCKED waits for pending che
   expect(classifyPr(pr({ reviewDecision: "CHANGES_REQUESTED" }))).toEqual({ kind: "blocked", reason: "changes requested on #5" });
   expect(classifyPr(pr({ statusCheckRollup: [{ context: "x", state: "PENDING" }] })).kind).toBe("wait");
   expect(classifyPr(pr({ statusCheckRollup: [{ name: "a", status: "COMPLETED", conclusion: "SKIPPED" }] })).kind).toBe("ready");
-});
-
-function expectReplayFree(stack: ReturnType<typeof makeStack>) {
-  const files = sh(stack.origin, "ls-tree", "--name-only", "main").split("\n");
-  expect(files).toEqual(["base.txt", "f1.txt", "f2.txt", "f3.txt"]);
-  for (const f of files.slice(1)) expect(sh(stack.origin, "show", `main:${f}`)).toBe("b");
-  expect(sh(stack.origin, "rev-list", "--count", "main")).toBe("4");
-  // The rebased c3 holds only its own two commits above main, not the old c1/c2 ones.
-  expect(sh(stack.origin, "rev-list", "--count", "main..c3")).toBe("2");
-}
-
-test("merge: 2 commits per chunk keep the pre-rebase tip, so nothing is replayed", async () => {
-  const stack = makeStack(3, 2);
-  const gh = fakeGh(stack, 3);
-  await mergeStack(stack.id, gh.deps, "base");
-  expect(readState(stack.id).merge).toMatchObject({ status: "done" });
-  expect(readState(stack.id).merge?.oldTips).toBeUndefined();
-  expect(gh.calls).toEqual(["merge 1", "patch 2 main", "merge 2", "patch 3 main", "merge 3"]);
-  expectReplayFree(stack);
-});
-
-test("merge: a resume after #2 merged still rebases #3 from the pre-rebase tip of #2", async () => {
-  const stack = makeStack(3, 2);
-  const gh = fakeGh(stack, 3);
-  gh.prs[3]!.viewFails = true;
-  await mergeStack(stack.id, gh.deps, "base");
-  
-  expect(readState(stack.id).merge).toMatchObject({ status: "failed", current: "c3" });
-  expect(chunkStatuses(stack.id)).toEqual(["merged", "merged", "pr"]);
-
-  gh.prs[3]!.viewFails = false;
-  await mergeStack(stack.id, gh.deps, "base");
-  expect(readState(stack.id).merge?.status).toBe("done");
-  expect(gh.calls).toEqual(["merge 1", "patch 2 main", "merge 2", "patch 3 main", "merge 3"]);
-  expectReplayFree(stack);
-});
-
-test("merge: commits on GitHub that the worktree lacks stop the rebase before any push", async () => {
-  const stack = makeStack(2);
-  const gh = fakeGh(stack, 2);
-  const other = join(stack.dir, "other");
-  sh(stack.dir, "clone", "-q", "-b", "c2", stack.origin, other);
-  commitFile(other, "suggestion.txt", "x\n", "suggestion");
-  sh(other, "push", "-q", "origin", "c2");
-  const before = sh(stack.origin, "rev-parse", "c2");
-  await mergeStack(stack.id, gh.deps, "base");
-  expect(readState(stack.id).merge?.error).toMatch(/c2 on GitHub has commits that are not in .*wt-2: pull them first/);
-  expect(sh(stack.origin, "rev-parse", "c2")).toBe(before);
-  expect(gh.calls).toEqual(["merge 1"]);
-});
-
-test("merge: after a rebase, empty checks and BLOCKED are waited out until CI reports", async () => {
-  const stack = makeStack(2);
-  const gh = fakeGh(stack, 2);
-  const ci = (status: string, conclusion?: string) => [{ name: "ci", status, conclusion }];
-  gh.prs[2]!.checks = ci("COMPLETED", "SUCCESS");
-  gh.prs[2]!.view = (n) =>
-    n === 2 ? { statusCheckRollup: [], mergeStateStatus: "BLOCKED" } : n === 3 ? { statusCheckRollup: ci("IN_PROGRESS"), mergeStateStatus: "BLOCKED" } : {};
-  await mergeStack(stack.id, gh.deps, "base");
-  expect(readState(stack.id).merge?.status).toBe("done");
-  expect(gh.calls).toEqual(["merge 1", "patch 2 main", "merge 2"]);
-  expect(gh.prs[2]!.views).toBe(4);
-});
-
-test("merge: after a rebase, BLOCKED with no checks fails once the wait limit passes", async () => {
-  const stack = makeStack(2);
-  const gh = fakeGh(stack, 2);
-  gh.prs[2]!.view = (n) => (n >= 2 ? { statusCheckRollup: [], mergeStateStatus: "BLOCKED" } : {});
-  await mergeStack(stack.id, gh.deps, "base");
-  expect(readState(stack.id).merge?.error).toBe("merge blocked by branch protection on #2");
-  expect(gh.prs[2]!.views).toBeGreaterThan(10);
-  expect(gh.calls).toEqual(["merge 1", "patch 2 main"]);
 });
 
 test("merge: a STALE check run is not a failure", () => {
@@ -1075,7 +1004,7 @@ test("combine: one open PR is a 400, and a PR that targets the wrong branch fail
     throw new Error("expected a 400");
   } catch (err) {
     expect((err as MergeError).status).toBe(400);
-    expect((err as MergeError).message).toBe("only one open PR: nothing to combine");
+    expect((err as MergeError).message).toBe("only one open PR: use Merge");
   }
   const bad = makeStack(2);
   const gh = fakeGh(bad, 2);
@@ -1118,30 +1047,45 @@ test("combine: a failed description update keeps the merges and lists each PR on
   expect(readState(stack.id).merge?.status).toBe("done");
 });
 
-test("merge mode: missing or invalid body means combine, only an explicit base merges into main", async () => {
-  expect(parseMergeMode(null)).toBe("combine");
-  expect(parseMergeMode({})).toBe("combine");
-  expect(parseMergeMode({ mode: "nope" })).toBe("combine");
-  expect(parseMergeMode({ mode: "combine" })).toBe("combine");
-  expect(parseMergeMode({ mode: "base" })).toBe("base");
+test("merge mode: validation by open PR count, and an unknown mode is a 400", async () => {
+  const one = makeStack(1);
+  const two = makeStack(2);
+  const err = (id: string, mode?: unknown) => {
+    try {
+      startMerge(id, {}, mode);
+    } catch (e) {
+      return [(e as MergeError).status, (e as MergeError).message];
+    }
+    throw new Error("expected a throw");
+  };
+  expect(err(two.id, "base")).toEqual([400, "combine the PRs first"]);
+  expect(err(one.id, "combine")).toEqual([400, "only one open PR: use Merge"]);
+  expect(err(one.id, "nope")).toEqual([400, "unknown merge mode"]);
+  expect(err(two.id, "nope")).toEqual([400, "unknown merge mode"]);
 
-  // Through the route: with no body, a one-PR pipeline is refused as a combine (400 happens before any gh call).
-  const stack = makeStack(1);
+  // Through the route: the 400s happen before any gh call.
   const server = await serve(0);
   try {
-    const url = `http://localhost:${server.port}/api/pipelines/${stack.id}/merge`;
-    for (const init of [{}, { body: "not json" }, { body: JSON.stringify({ mode: "x" }) }]) {
-      const res = await fetch(url, { method: "POST", ...init });
-      expect(res.status).toBe(400);
-      expect(((await res.json()) as { error: string }).error).toBe("only one open PR: nothing to combine");
-    }
+    const post = async (id: string, body: string) => {
+      const res = await fetch(`http://localhost:${server.port}/api/pipelines/${id}/merge`, { method: "POST", body });
+      return [res.status, ((await res.json()) as { error?: string }).error];
+    };
+    expect(await post(two.id, JSON.stringify({ mode: "base" }))).toEqual([400, "combine the PRs first"]);
+    expect(await post(one.id, JSON.stringify({ mode: "combine" }))).toEqual([400, "only one open PR: use Merge"]);
+    expect(await post(one.id, JSON.stringify({ mode: "x" }))).toEqual([400, "unknown merge mode"]);
   } finally {
     server.stop(true);
   }
-  // The base default is gone from startMerge: base mode is explicit.
-  const gh = fakeGh(stack, 1);
-  const { state, done } = startMerge(stack.id, gh.deps, "base");
-  expect(state.merge?.mode).toBe("base");
-  await done;
-  expect(gh.calls).toEqual(["merge 1"]);
+
+  // No mode: one PR picks base, two PRs pick combine.
+  const gh1 = fakeGh(one, 1);
+  const a = startMerge(one.id, gh1.deps);
+  expect(a.state.merge?.mode).toBe("base");
+  await a.done;
+  expect(gh1.calls).toEqual(["merge 1"]);
+  const gh2 = fakeGh(two, 2);
+  const b = startMerge(two.id, gh2.deps, undefined);
+  expect(b.state.merge?.mode).toBe("combine");
+  await b.done;
+  expect(gh2.calls).toEqual(["merge 2 --merge", "patch 1 body"]);
 });
