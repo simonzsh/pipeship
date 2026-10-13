@@ -1,8 +1,8 @@
 import {
-  CheckCircle2, CircleDashed, ExternalLink, FolderGit2, GitBranch, GitPullRequest, Globe, Loader2,
+  CheckCircle2, ChevronDown, CircleDashed, ExternalLink, FolderGit2, GitBranch, GitPullRequest, Globe, Loader2,
   MessageCircleQuestion, Square, Terminal, Trash2, XCircle, type LucideIcon,
 } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useState, type KeyboardEvent } from "react";
 import { createRoot } from "react-dom/client";
 import type { State, Status, StepStatus } from "../state.ts";
 import {
@@ -23,12 +23,16 @@ const STATUS: Record<Status, { label: string; icon: LucideIcon; className: strin
   stopped: { label: "Stopped", icon: Square, className: "bg-muted text-muted-foreground" },
 };
 
-const STEP_BAR: Record<StepStatus, string> = {
+// "waiting" is a running step whose pipeline waits for the user: amber like the "Waiting for you" badge.
+type DotStatus = StepStatus | "waiting";
+
+const STEP_DOT: Record<DotStatus, string> = {
   done: "bg-emerald-500",
   running: "bg-blue-500 animate-pulse",
+  waiting: "bg-amber-500 animate-pulse",
   failed: "bg-red-500",
-  pending: "bg-muted",
-  skipped: "bg-[repeating-linear-gradient(45deg,var(--muted),var(--muted)_3px,transparent_3px,transparent_6px)]",
+  pending: "bg-muted-foreground/25",
+  skipped: "border border-dashed border-muted-foreground/50",
 };
 
 function timeAgo(iso: string): string {
@@ -55,16 +59,27 @@ function StatusBadge({ status }: { status: Status }) {
   );
 }
 
-function Steps({ steps }: { steps: State["steps"] }) {
+function Steps({ steps }: { steps: { name: string; status: DotStatus }[] }) {
+  // A link is green up to the furthest step reached, so skipped steps do not break the line.
+  const reached = steps.findLastIndex((s) => s.status !== "pending" && s.status !== "skipped");
   return (
-    <div className="grid grid-cols-7 gap-1.5">
-      {steps.map((step) => (
-        <div key={step.name} className="flex flex-col gap-1.5" title={`${step.name}: ${step.status}`}>
-          <div className={cn("h-1.5 rounded-full", STEP_BAR[step.status])} />
+    <div className="grid grid-cols-7">
+      {steps.map((step, i) => (
+        <div key={step.name} className="relative flex flex-col items-center gap-1.5" title={`${step.name}: ${step.status}`}>
+          {i < steps.length - 1 && (
+            // Runs from the edge of this dot to the edge of the next one, so it never shows through a dot.
+            <div
+              className={cn(
+                "absolute top-[5px] left-[calc(50%+10px)] h-0.5 w-[calc(100%-20px)] rounded-full",
+                i < reached ? "bg-emerald-500" : "bg-muted-foreground/15",
+              )}
+            />
+          )}
+          <div className={cn("size-3 rounded-full", STEP_DOT[step.status])} />
           <span
             className={cn(
-              "truncate text-[11px] text-muted-foreground",
-              step.status === "running" && "font-medium text-foreground",
+              "truncate text-[11px] text-muted-foreground capitalize",
+              (step.status === "running" || step.status === "waiting") && "font-medium text-foreground",
               step.status === "skipped" && "line-through opacity-60",
             )}
           >
@@ -117,7 +132,7 @@ function ActionButton({ id, action }: { id: string; action: keyof typeof ACTIONS
     <AlertDialog>
       {error && <span className="text-xs text-destructive">{error}</span>}
       <AlertDialogTrigger asChild>
-        <Button variant="outline" size="sm">
+        <Button variant="outline" size="xs">
           <Icon /> {button}
         </Button>
       </AlertDialogTrigger>
@@ -136,69 +151,116 @@ function ActionButton({ id, action }: { id: string; action: keyof typeof ACTIONS
 }
 
 function PipelineCard({ p }: { p: State }) {
+  // Collapsed by default: the test environment and the branches only show once the card is opened.
+  const [open, setOpen] = useState(false);
+  const hasDetails = p.chunks.length > 0 || p.preview !== undefined;
+  const detailsLabel =
+    p.chunks.length === 0 ? "Details" : p.chunks.length === 1 ? "1 branch" : `${p.chunks.length} branches`;
+  const steps = p.steps.map((s) => ({
+    name: s.name,
+    status: s.status === "running" && p.status === "waiting_for_user" ? ("waiting" as const) : s.status,
+  }));
+  const toggle = {
+    role: "button",
+    tabIndex: 0,
+    "aria-expanded": open,
+    onClick: () => setOpen(!open),
+    onKeyDown: (e: KeyboardEvent) => {
+      if (e.key !== "Enter" && e.key !== " ") return;
+      e.preventDefault();
+      setOpen(!open);
+    },
+  };
   return (
-    <Card>
-      <CardHeader>
-        <div className="flex min-w-0 flex-col gap-1.5">
-          <CardTitle className="truncate">{p.ticket.title}</CardTitle>
-          <CardDescription className="flex flex-wrap items-center gap-x-2 gap-y-1">
-            {p.ticket.links.map((link) =>
-              link.url ? (
-                <a key={link.ref} href={link.url} target="_blank" className="font-medium text-foreground underline-offset-4 hover:underline">
-                  {link.ref}
-                </a>
-              ) : (
-                <span key={link.ref} className="font-medium text-foreground">{link.ref}</span>
-              ),
-            )}
-            <span>{p.ticket.source}</span>
-            <Badge variant="outline" className="text-muted-foreground">{p.mode}</Badge>
-          </CardDescription>
-        </div>
-        <StatusBadge status={p.status} />
-      </CardHeader>
-
-      <CardContent className="flex flex-col gap-4">
-        <Steps steps={p.steps} />
-
-        {p.preview && (
-          <div className="flex items-center gap-3 rounded-lg border border-emerald-500/30 bg-emerald-500/5 px-3 py-2.5">
-            <Globe className="size-4 shrink-0 text-emerald-600 dark:text-emerald-400" />
-            <a href={p.preview.url} target="_blank" className="truncate font-mono text-sm hover:underline">
-              {p.preview.url}
-            </a>
-            <Button asChild size="sm" className="ml-auto">
-              <a href={p.preview.url} target="_blank">
-                Open <ExternalLink />
-              </a>
-            </Button>
+    <Card className="gap-0 overflow-hidden py-0">
+      {/* The header and the steps toggle the card. */}
+      <div
+        className={cn("flex flex-col gap-5 py-5", hasDetails && "cursor-pointer transition-colors hover:bg-accent")}
+        {...(hasDetails && toggle)}
+      >
+        <CardHeader>
+          <div className="flex min-w-0 flex-col gap-1.5">
+            <CardTitle className="truncate">{p.ticket.title}</CardTitle>
+            <CardDescription className="flex flex-wrap items-center gap-x-2 gap-y-1">
+              {p.ticket.links.map((link) =>
+                link.url ? (
+                  <a
+                    key={link.ref}
+                    href={link.url}
+                    target="_blank"
+                    onClick={(e) => e.stopPropagation()}
+                    className="font-medium text-foreground underline-offset-4 hover:underline"
+                  >
+                    {link.ref}
+                  </a>
+                ) : (
+                  <span key={link.ref} className="font-medium text-foreground">{link.ref}</span>
+                ),
+              )}
+              <span>{p.ticket.source}</span>
+              <Badge variant="outline" className="text-muted-foreground">{p.mode}</Badge>
+            </CardDescription>
           </div>
-        )}
+          <div className="flex shrink-0 flex-col items-end gap-2">
+            <StatusBadge status={p.status} />
+            {hasDetails && (
+              <span className="flex items-center gap-1 text-xs text-muted-foreground">
+                {detailsLabel}
+                <ChevronDown className={cn("size-4 transition-transform", open && "rotate-180")} />
+              </span>
+            )}
+          </div>
+        </CardHeader>
 
-        {p.chunks.length > 0 && (
-          <ul className="flex flex-col divide-y rounded-lg border">
-            {p.chunks.map((c) => (
-              <li key={c.name} className="flex items-center gap-3 px-3 py-2 text-sm">
-                <GitBranch className="size-4 shrink-0 text-muted-foreground" />
-                <span className="font-medium">{c.name}</span>
-                {c.branch && <code className="truncate rounded bg-muted px-1.5 py-0.5 text-xs text-muted-foreground">{c.branch}</code>}
-                <span className="ml-auto flex items-center gap-2">
-                  {c.status && <ChunkStatusIcon status={c.status} />}
-                  {c.pr && (
-                    <Button asChild variant="ghost" size="sm">
-                      <a href={c.pr} target="_blank">
-                        <GitPullRequest /> PR
-                      </a>
-                    </Button>
+        <CardContent>
+          <Steps steps={steps} />
+        </CardContent>
+      </div>
+
+      {open && (
+        <CardContent className="flex flex-col gap-4 border-t py-5">
+          {p.preview && (
+            <div className="flex items-center gap-3 rounded-lg border border-emerald-500/30 bg-emerald-500/5 px-3 py-2.5">
+              <Globe className="size-4 shrink-0 text-emerald-600 dark:text-emerald-400" />
+              <a href={p.preview.url} target="_blank" className="truncate font-mono text-sm hover:underline">
+                {p.preview.url}
+              </a>
+              <Button asChild size="sm" className="ml-auto">
+                <a href={p.preview.url} target="_blank">
+                  Open <ExternalLink />
+                </a>
+              </Button>
+            </div>
+          )}
+          {p.chunks.length > 0 && (
+            <ul className="flex flex-col divide-y rounded-lg border">
+              {p.chunks.map((c) => (
+                <li key={c.name} className="flex items-center gap-3 px-3 py-2 text-sm">
+                  <GitBranch className="size-4 shrink-0 text-muted-foreground" />
+                  <span className="shrink-0 whitespace-nowrap font-medium">{c.name}</span>
+                  {c.branch && (
+                    <code className="min-w-0 truncate rounded bg-muted px-1.5 py-0.5 text-xs text-muted-foreground" title={c.branch}>
+                      {c.branch}
+                    </code>
                   )}
-                </span>
-              </li>
-            ))}
-          </ul>
-        )}
-      </CardContent>
+                  <span className="ml-auto flex shrink-0 items-center gap-2">
+                    {c.status && <ChunkStatusIcon status={c.status} />}
+                    {c.pr && (
+                      <Button asChild variant="ghost" size="sm">
+                        <a href={c.pr} target="_blank">
+                          <GitPullRequest /> PR
+                        </a>
+                      </Button>
+                    )}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          )}
+        </CardContent>
+      )}
 
-      <CardFooter className="text-xs text-muted-foreground">
+      <CardFooter className="py-3 text-xs text-muted-foreground">
         <FolderGit2 className="size-3.5 shrink-0" />
         <span className="truncate font-mono" title={p.repo}>{p.repo.replace(/^\/home\/[^/]+/, "~")}</span>
         <span>·</span>
