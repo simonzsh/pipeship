@@ -185,6 +185,16 @@ export function listDashboardStates(): DashboardState[] {
   });
 }
 
+// Switching to quick skips only the steps that have not started.
+export function setMode(id: string, mode: Mode): State {
+  if (mode !== "quick" && mode !== "full") throw new Error(`unknown mode: ${mode} (expected quick, full)`);
+  return updateState(id, (s) => {
+    s.mode = mode;
+    if (mode !== "quick") return;
+    for (const step of s.steps) if (QUICK_SKIPS.includes(step.name) && step.status === "pending") step.status = "skipped";
+  });
+}
+
 export function setStep(id: string, name: StepName, status: StepStatus): State {
   if (!STEPS.includes(name)) throw new Error(`unknown step: ${name} (expected ${STEPS.join(", ")})`);
   return updateState(id, (s) => {

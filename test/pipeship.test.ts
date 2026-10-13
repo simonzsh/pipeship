@@ -2,7 +2,7 @@ import { afterAll, beforeEach, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync, existsSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { createPipeline, listStates, pipelineDir, readState, setStep, updateState, upsertChunk } from "../src/state.ts";
+import { createPipeline, listStates, pipelineDir, readState, setMode, setStep, updateState, upsertChunk } from "../src/state.ts";
 import {
   DASHBOARD_PORT, deletePipeline, findRecipe, isAlive, mainService, normalizeRecipe, pickPorts, previewLines, resolveEnv,
   savedRecipePath, startOrder, startPreview, stopPipeline, type Service,
@@ -1042,4 +1042,22 @@ test("the API adds test.md as testGuide without writing it to state.json", async
   }
   expect(readFileSync(statePath, "utf8")).toBe(before);
   expect(readState(withGuide.id)).not.toHaveProperty("testGuide");
+});
+
+test("setMode quick sets the mode and skips only pending quick steps; full only changes the mode", () => {
+  const p = createPipeline({ repo, title: "Switch mode", source: "text" });
+  const plan = () => readState(p.id).steps.find((s) => s.name === "plan")!.status;
+  setMode(p.id, "quick");
+  expect(readState(p.id).mode).toBe("quick");
+  expect(plan()).toBe("skipped");
+  setMode(p.id, "full");
+  expect(readState(p.id).mode).toBe("full");
+  expect(plan()).toBe("skipped");
+
+  const running = createPipeline({ repo, title: "Plan running", source: "text" });
+  setStep(running.id, "plan", "running");
+  setMode(running.id, "quick");
+  expect(readState(running.id).steps.find((s) => s.name === "plan")!.status).toBe("running");
+
+  expect(() => setMode(p.id, "fast" as never)).toThrow("unknown mode: fast");
 });

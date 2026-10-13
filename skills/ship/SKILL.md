@@ -26,6 +26,7 @@ This skill runs in both. Where they differ:
 pipeship new --repo <path> --title <t> [--source <s>] [--ref <r> --url <u>]... [--mode quick] [--skip a,b]
 pipeship get <id>                      # read state: check stopRequested and skipped steps
 pipeship step <id> <step> running|done|skipped|failed
+pipeship mode <id> quick|full         # switch the mode after creation; quick skips the pending plan step
 pipeship status <id> waiting_for_user|running|ready|failed
 pipeship chunk <id> <name> [--worktree p] [--branch b] [--status s] [--pr url]
 pipeship recipe <repo>                 # the saved recipe to start the app, or "none"
@@ -70,7 +71,7 @@ In `quick` mode, do the map yourself in the main session, not in a subagent: on 
 
 1. Compare `ticket.md` with `map.md`. List what is missing or ambiguous.
 2. Ask **all questions in one batch**, numbered. Format: "Today the code does X. Question: … Recommended: …". The user answers in one word or corrects.
-3. In `full` mode, if the ticket is small (one coherent change), also propose switching to `quick`.
+3. In `full` mode, if the ticket is small (one coherent change), also propose switching to `quick`. When the user accepts, run `pipeship mode <id> quick` so the dashboard shows the badge.
 4. `pipeship status <id> waiting_for_user`, then **stop and wait** for the answers.
 5. When the user answers: append the answers to `ticket.md` under `## Answers`, then `pipeship step <id> questions done`.
 

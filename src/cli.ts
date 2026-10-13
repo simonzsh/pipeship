@@ -7,7 +7,7 @@ import { deletePipeline, findRecipe, git, isAlive, killGroup, loadRecipe, previe
 import { detectSession } from "./session.ts";
 import { DEFAULT_PORT, isDashboardUp, serve } from "./server.ts";
 import {
-  STEPS, createPipeline, home, listStates, pipelineDir, readState, setStep, updateState, upsertChunk,
+  STEPS, createPipeline, home, listStates, pipelineDir, readState, setMode, setStep, updateState, upsertChunk,
   type Chunk, type Mode, type Status, type StepName, type StepStatus,
 } from "./state.ts";
 
@@ -20,6 +20,7 @@ const USAGE = `pipeship — state, test environments and dashboard for the /pipe
   get <id>                     print the state (JSON)
   list                         list pipelines
   step <id> <step> <status>    steps: ${STEPS.join(", ")}; status: pending, running, done, skipped, failed
+  mode <id> quick|full         switch the mode; quick also skips the pending steps quick skips
   status <id> <status>         running, waiting_for_user, ready, failed, stopped
   chunk <id> <name> [--worktree p] [--branch b] [--status s] [--pr url]
   recipe <repo>                print the recipe used to start the app, or "none"
@@ -101,6 +102,9 @@ async function main() {
       return print(listStates().map((s) => `${s.id}\t${s.status}\t${s.step}\t${s.ticket.title}`).join("\n") || "no pipelines");
     case "step":
       setStep(need(args[0], "<id>"), need(args[1], "<step>") as StepName, need(args[2], "<status>") as StepStatus);
+      return print("ok");
+    case "mode":
+      setMode(need(args[0], "<id>"), need(args[1], "<mode>") as Mode);
       return print("ok");
     case "status":
       updateState(need(args[0], "<id>"), (s) => {
