@@ -13,7 +13,7 @@ type StatusConfig = {
 };
 
 // One entry per status. The key order is the group order on the dashboard (most urgent first).
-export const STATUS: Record<Status, StatusConfig> = {
+const STATUS: Record<Status, StatusConfig> = {
   waiting_for_user: {
     label: "Waiting for you",
     icon: MessageCircleQuestion,
