@@ -170,6 +170,7 @@ test("ids have no date: refs, --name, then the first 3 words of the title", () =
   expect(createPipeline({ repo, title: "Link sessions", name: "session-link", source: "text" }).id).toBe("session-link");
   expect(createPipeline({ repo, title: "t", name: "ignored-name", source: "linear", links: [{ ref: "IDC-1" }] }).id).toBe("idc-1");
   expect(createPipeline({ repo, title: "Link each pipeline to its agent", source: "text" }).id).toBe("link-each-pipeline");
+  expect(createPipeline({ repo, title: "Créer un lien rapide", source: "text" }).id).toBe("creer-un-lien");
 });
 
 test("duplicate ids get -2 then -3", () => {
