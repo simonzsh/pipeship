@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { AlertCircle, ChevronDown, ChevronRight, FileText, Loader2, RefreshCw } from "lucide-react";
+import { AlertCircle, ChevronDown, ChevronRight, ChevronsDownUp, ChevronsUpDown, Loader2, RefreshCw } from "lucide-react";
 import type { DashboardState } from "../state.ts";
 import { repoName } from "../repos.ts";
 import type { DiffErrorBody, DiffFile, DiffHunk, DiffResponse } from "../diff.ts";
@@ -113,11 +113,11 @@ function HunkRows({ hunk, lang }: { hunk: DiffHunk; lang: string | undefined }) 
   );
 }
 
-function FileDiff({ file, id, open, onToggle }: { file: DiffFile; id: string; open: boolean; onToggle: () => void }) {
+function FileDiff({ file, open, onToggle }: { file: DiffFile; open: boolean; onToggle: () => void }) {
   const lang = useMemo(() => languageOf(file.path), [file.path]);
   const renamed = file.oldPath && file.newPath && file.oldPath !== file.newPath;
   return (
-    <section id={id} className="scroll-mt-12 rounded-lg border bg-card">
+    <section className="rounded-lg border bg-card">
       <button
         type="button"
         onClick={onToggle}
@@ -164,15 +164,22 @@ function FileDiff({ file, id, open, onToggle }: { file: DiffFile; id: string; op
 // Few enough lines to read at once: open everything, otherwise let the reviewer pick.
 const OPEN_ALL_LINES = 3000;
 const linesOf = (f: DiffFile) => f.hunks.reduce((n, h) => n + h.lines.length, 0);
+const fitsOnOpen = (datas: DiffResponse[]) =>
+  datas.reduce((n, d) => n + d.files.reduce((m, f) => m + linesOf(f), 0), 0) <= OPEN_ALL_LINES;
 
-function RepoDiff({ id, data }: { id: string; data: DiffResponse }) {
+// `all` is the last "expand/collapse all" click; it overrides every per-file choice made before it.
+type All = { open: boolean; n: number } | null;
+
+function RepoDiff({ data, all }: { data: DiffResponse; all: All }) {
   const defaults = useMemo(() => {
-    const total = data.files.reduce((n, f) => n + linesOf(f), 0);
-    return Object.fromEntries(data.files.map((f) => [f.path, total <= OPEN_ALL_LINES && !isGenerated(f.path)]));
+    const open = fitsOnOpen([data]);
+    return Object.fromEntries(data.files.map((f) => [f.path, open && !isGenerated(f.path)]));
   }, [data]);
   const [overrides, setOverrides] = useState<Record<string, boolean>>({});
+  useEffect(() => {
+    if (all) setOverrides(Object.fromEntries(data.files.map((f) => [f.path, all.open])));
+  }, [all, data]);
   const isOpen = (path: string) => overrides[path] ?? defaults[path] ?? false;
-  const anchor = (i: number) => `${id}-${data.repo}-${data.chunk ?? "stack"}-${i}`.replace(/[^\w-]/g, "_");
 
   if (data.files.length === 0) {
     const msg = data.truncated ? "Diff too large to show." : "No changes in this range.";
@@ -180,34 +187,13 @@ function RepoDiff({ id, data }: { id: string; data: DiffResponse }) {
   }
   return (
     <div className="flex flex-col gap-3">
-      <ul className="flex flex-col rounded-lg border text-sm">
-        {data.files.map((f, i) => (
-          <li key={f.path} className="border-b last:border-b-0">
-            <button
-              type="button"
-              className="flex w-full items-center gap-2 px-3 py-1 text-left hover:bg-accent"
-              onClick={() => {
-                setOverrides((o) => ({ ...o, [f.path]: true }));
-                requestAnimationFrame(() => document.getElementById(anchor(i))?.scrollIntoView({ block: "start" }));
-              }}
-            >
-              <FileText className="size-3.5 shrink-0 text-muted-foreground" />
-              <span className="min-w-0 truncate font-mono text-xs">{f.path}</span>
-              <span className={`shrink-0 text-xs ${STATUS_STYLE[f.status]}`}>{f.status}</span>
-              <span className="ml-auto" />
-              <Counts additions={f.additions} deletions={f.deletions} />
-            </button>
-          </li>
-        ))}
-      </ul>
       {data.truncated && (
         <p className="text-sm text-muted-foreground">Diff too large: the last files are not shown.</p>
       )}
-      {data.files.map((f, i) => (
+      {data.files.map((f) => (
         <FileDiff
           key={f.path}
           file={f}
-          id={anchor(i)}
           open={isOpen(f.path)}
           onToggle={() => setOverrides((o) => ({ ...o, [f.path]: !isOpen(f.path) }))}
         />
@@ -218,6 +204,7 @@ function RepoDiff({ id, data }: { id: string; data: DiffResponse }) {
 
 export function CodeTab({ p, target, onTarget }: CodeTabProps) {
   const [manual, setManual] = useState(0);
+  const [all, setAll] = useState<All>(null);
   const requests = useMemo(() => diffRequests(p, target), [p, target]);
   // A chunk's range starts at the previous chunk, so any chunk of the repo can move it.
   const repos = new Set(requests.map((r) => r.repo));
@@ -231,6 +218,7 @@ export function CodeTab({ p, target, onTarget }: CodeTabProps) {
   const additions = datas.reduce((n, d) => n + d.additions, 0);
   const deletions = datas.reduce((n, d) => n + d.deletions, 0);
   const loading = results.some((r) => "loading" in r);
+  const allOpen = all ? all.open : fitsOnOpen(datas);
 
   return (
     <div className="flex flex-col gap-4">
@@ -243,6 +231,11 @@ export function CodeTab({ p, target, onTarget }: CodeTabProps) {
           {chunk && (
             <Button size="sm" variant="ghost" onClick={() => onTarget({})}>
               Whole stack
+            </Button>
+          )}
+          {datas.length > 0 && (
+            <Button size="sm" variant="outline" onClick={() => setAll((a) => ({ open: !allOpen, n: (a?.n ?? 0) + 1 }))}>
+              {allOpen ? <ChevronsDownUp /> : <ChevronsUpDown />} {allOpen ? "Collapse all" : "Expand all"}
             </Button>
           )}
           <Button size="sm" variant="outline" onClick={() => setManual((n) => n + 1)} disabled={loading}>
@@ -272,7 +265,7 @@ export function CodeTab({ p, target, onTarget }: CodeTabProps) {
                 <AlertCircle className="size-4 shrink-0" /> {r.error}
               </p>
             ) : (
-              <RepoDiff id={p.id} data={r.data} />
+              <RepoDiff data={r.data} all={all} />
             )}
           </div>
         );
