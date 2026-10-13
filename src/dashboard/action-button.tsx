@@ -11,14 +11,17 @@ const ACTIONS = {
   stopPipeline: {
     endpoint: "stop",
     icon: Square,
-    button: "Stop pipeline",
-    title: "Stop this pipeline?",
-    description: "The agents stop after their current step, and the test servers stop now.",
-    confirm: "Stop",
+    iconClass: "text-orange-600 dark:text-orange-400",
+    button: "Request stop",
+    title: "Request a stop for this pipeline?",
+    description: "The agents stop after their current step, not at once.",
+    serversNote: "The test servers stop now.",
+    confirm: "Request stop",
   },
   stopServer: {
     endpoint: "stop",
     icon: Square,
+    iconClass: "text-orange-600 dark:text-orange-400",
     button: "Stop test servers",
     title: "Stop the test servers?",
     description: "The test servers stop. The code, branches and PRs stay in place.",
@@ -27,6 +30,7 @@ const ACTIONS = {
   delete: {
     endpoint: "delete",
     icon: Trash2,
+    iconClass: "text-red-600 dark:text-red-400",
     button: "Delete",
     title: "Delete this pipeline?",
     description:
@@ -35,8 +39,11 @@ const ACTIONS = {
   },
 };
 
-export function ActionButton({ id, action }: { id: string; action: keyof typeof ACTIONS }) {
-  const { endpoint, icon: Icon, button, title, description, confirm } = ACTIONS[action];
+// Test servers usually start at the last step: only mention them when some exist.
+export function ActionButton({ id, action, hasServers }: { id: string; action: keyof typeof ACTIONS; hasServers?: boolean }) {
+  const def: { serversNote?: string } & (typeof ACTIONS)[typeof action] = ACTIONS[action];
+  const { endpoint, icon: Icon, iconClass, button, title, confirm } = def;
+  const description = hasServers && def.serversNote ? `${def.description} ${def.serversNote}` : def.description;
   const [error, setError] = useState<string>();
   const run = async () => {
     setError(undefined);
@@ -48,7 +55,7 @@ export function ActionButton({ id, action }: { id: string; action: keyof typeof 
       {error && <span className="text-xs text-destructive">{error}</span>}
       <AlertDialogTrigger asChild>
         <Button variant="outline" size="xs">
-          <Icon /> {button}
+          <Icon className={iconClass} /> {button}
         </Button>
       </AlertDialogTrigger>
       <AlertDialogContent>
