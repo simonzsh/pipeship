@@ -33,6 +33,7 @@ Steps: `map`, `questions`, `plan`, `implement`, `review`, `stack`, `preview`.
 - **The user can change the steps at any time** ("skip the review", "ask me your questions anyway"). Update the state with `pipeship step <id> <step> skipped|pending` and continue.
 - **Never skip a step another step needs**: the test environment needs a worktree; PRs need commits.
 - On failure: `pipeship step <id> <step> failed`, explain what failed, and ask the user what to do.
+- While this pipeline runs, it replaces process skills such as brainstorming, writing-plans, using-git-worktrees, subagent-driven-development and finishing-a-development-branch. Do not invoke them. The `simplify` and `code-review` skills in step 5 are fine.
 - Every server you start outside `pipeship preview` must be stopped before you finish (`kill <PID>`, never `pkill -f`).
 
 ## Step 0 — Start
@@ -46,7 +47,7 @@ Steps: `map`, `questions`, `plan`, `implement`, `review`, `stack`, `preview`.
 
 ## Step 1 — map
 
-Subagent (Explore). Input: `ticket.md` and the repo. Output: `<dir>/map.md` with:
+Subagent (Explore, model `sonnet`). Input: `ticket.md` and the repo. Output: `<dir>/map.md` with:
 - every file the ticket touches (modules, routes, models, UI, tests), with paths and one line on what each does today;
 - repo conventions to follow (structure, naming, test style);
 - the exact **check commands** (lint, typecheck, tests) from the repo config;
@@ -67,7 +68,7 @@ In `quick` mode, ask only **blocking** questions. If there are none, mark the st
 
 ## Step 3 — plan
 
-Subagent (Plan). Input: `ticket.md`, `map.md`. Output: `<dir>/plan.md` with:
+Subagent (Plan, model `opus`). Input: `ticket.md`, `map.md`. Output: `<dir>/plan.md` with:
 1. **Contracts first**: the types, API routes and data formats shared between chunks. Fixed contracts are what make chunks independent.
 2. **Chunks**: independent pieces of work, each with its files and its done criteria. Do not split for nothing — a small ticket is one chunk; every split adds integration risk.
 3. **Stack order** by dependency: contracts, then back end, then front end.
@@ -81,14 +82,14 @@ For each chunk, in stack order:
    `git -C <repo> worktree add <dir>/worktrees/<chunk> -b pipeship/<id>/<chunk> <base>`
 2. `pipeship chunk <id> <chunk> --worktree <path> --branch <branch> --status coding`
 
-Then launch **one subagent per chunk, all in the same message** so they run in parallel. Each subagent gets: its worktree path (it works only there), `ticket.md`, `map.md`, `plan.md` (contracts + its chunk), the check commands. It must: implement its chunk against the contracts, make the checks pass, commit, and report what it did. Install dependencies in the worktree if the checks need them.
+Then launch **one subagent per chunk (model `sonnet`), all in the same message** so they run in parallel. Each subagent gets: its worktree path (it works only there), `ticket.md`, `map.md`, `plan.md` (contracts + its chunk), the check commands. It must: implement its chunk against the contracts, make the checks pass, commit, and report what it did. Install dependencies in the worktree if the checks need them.
 
 When all are done, **restack**: in stack order, rebase each chunk branch onto the previous one (`git -C <worktree> rebase <previous branch>`). The last chunk branch is the **top of the stack** and contains the whole feature. Run the checks on the top. Update each chunk with `--status done`.
 
 ## Step 5 — review
 
-1. **Global review** (one subagent, top worktree, diff `<base>..<top branch>`): duplicated helpers across chunks, contract mismatches, integration bugs. Parallel agents cannot see each other — only this review finds these.
-2. **Cleanup per chunk**: simplification, dead code, repo conventions, readability. Use the `simplify` and `code-review` skills if available.
+1. **Global review** (one subagent, model `opus`, top worktree, diff `<base>..<top branch>`): duplicated helpers across chunks, contract mismatches, integration bugs. Parallel agents cannot see each other — only this review finds these.
+2. **Cleanup per chunk** (one subagent per chunk, model `sonnet`): simplification, dead code, repo conventions, readability. Use the `simplify` and `code-review` skills if available.
 3. Fix each problem **in the worktree of the chunk that owns the code**, commit, then restack the later chunks.
 4. **Safety rule**: after every pass that changes code, re-run the checks. If a check fails, fix it or revert the pass.
 

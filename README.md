@@ -12,12 +12,13 @@ Modes: `full` (default, all 7 steps) and `quick` (one chunk, blocking questions 
 
 ## Install
 
-Requires [Bun](https://bun.sh), git and `gh`.
+Requires [Bun](https://bun.sh), git and `gh`. From the repo root, link the skill into your Claude Code skills:
 
 ```sh
-bun install
 ln -s "$PWD/skills/pipeship" ~/.claude/skills/pipeship
 ```
+
+There is no build and no runtime dependency: the skill runs `src/cli.ts` from this repo, so changes apply at once. `bun install` is only needed to develop (see below).
 
 The skill runs when you type `/pipeship`, or when you explicitly ask Claude to use pipeship ("ship ABC-123 with pipeship"). Claude does not start it for ordinary feature requests.
 
@@ -40,6 +41,7 @@ State lives in `~/.pipeship/pipelines/<id>/` (`state.json`, `ticket.md`, `map.md
 ## Develop
 
 ```sh
+bun install
 bun test
 bun run typecheck
 ```
