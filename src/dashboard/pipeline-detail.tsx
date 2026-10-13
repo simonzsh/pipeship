@@ -16,7 +16,7 @@ import { StatusBadge } from "./status";
 import { Steps } from "./steps";
 import { TestGuide } from "./test-guide";
 import { TicketIcon } from "./ticket-icon";
-import { shortRepo } from "./utils";
+import { cn, shortRepo } from "./utils";
 
 export function PipelineDetail({ p, onBack }: { p: DashboardState; onBack: () => void }) {
   const [target, setTarget] = useState<DiffTarget>({});
@@ -133,9 +133,9 @@ export function PipelineDetail({ p, onBack }: { p: DashboardState; onBack: () =>
       <div className="flex flex-col gap-3 px-6 pt-5">
         <div className="flex flex-wrap items-center gap-2">
           <h3 className="mr-auto text-sm font-semibold">Pull request stack</h3>
-          {/* Only a way back: on the whole stack already, there is nothing to switch to. */}
-          {target.chunk !== undefined && (
-            <Button variant="outline" size="sm" onClick={() => select({})}>
+          {/* Only a way back, so hidden on the whole stack. It keeps its space so the page does not jump. */}
+          {p.chunks.some((c) => c.branch) && (
+            <Button variant="outline" size="sm" onClick={() => select({})} className={cn(target.chunk === undefined && "invisible")}>
               <Layers /> Whole stack
             </Button>
           )}
