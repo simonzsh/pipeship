@@ -1,5 +1,5 @@
 import { GitMerge, Loader2, XCircle } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import type { Chunk, MergeRun } from "../state.ts";
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription,
@@ -59,14 +59,22 @@ export function MergeChoice({ todo, base, mode, onMode }: {
   );
 }
 
-export function MergeButton({ id, chunks, base }: { id: string; chunks: Chunk[]; base?: string }) {
+// While a merge runs, the button itself shows it: a spinner and the branch being merged.
+export function MergeButton({ id, chunks, base, merge }: { id: string; chunks: Chunk[]; base?: string; merge?: MergeRun }) {
   const [error, setError] = useState<string>();
   const [choice, setChoice] = useState<Mode>("combine");
+  // Covers the gap between the POST and the first state update from the stream.
+  const [starting, setStarting] = useState(false);
   // Merged PRs are skipped by the engine, so the dialog lists only the rest.
   const todo = chunks.filter((c) => c.pr && c.status !== "merged");
   const mode: Mode = todo.length < 2 ? "base" : choice;
+  const running = merge?.status === "running";
+  useEffect(() => {
+    if (running) setStarting(false);
+  }, [running]);
   const run = async () => {
     setError(undefined);
+    setStarting(true);
     try {
       const res = await fetch(`/api/pipelines/${encodeURIComponent(id)}/merge`, {
         method: "POST",
@@ -77,14 +85,27 @@ export function MergeButton({ id, chunks, base }: { id: string; chunks: Chunk[];
         // The body may not be JSON (proxy error page).
         const body: { error?: string } | null = await res.json().catch(() => null);
         setError(body?.error ?? `Merge failed (${res.status})`);
+        setStarting(false);
       }
     } catch {
       setError("Network error: the merge did not start");
+      setStarting(false);
     }
   };
+  if (running || starting) {
+    const current = chunks.find((c) => c.name === merge?.current);
+    const label = running ? (current?.branch ?? merge?.current) : undefined;
+    return (
+      <Button size="xs" disabled className="bg-emerald-600 text-white disabled:opacity-80" title={merge?.message}>
+        <Loader2 className="animate-spin" />
+        <span className="max-w-64 truncate">{label ? `Merging ${label}…` : "Merging…"}</span>
+      </Button>
+    );
+  }
   return (
     <AlertDialog onOpenChange={(open) => open && setChoice("combine")}>
       {error && <span className="text-xs text-destructive">{error}</span>}
+      {!error && merge && <MergeResult merge={merge} chunks={chunks} />}
       <AlertDialogTrigger asChild>
         <Button size="xs" className="bg-emerald-600 text-white hover:bg-emerald-700">
           <GitMerge /> Merge stack
@@ -111,45 +132,30 @@ export function MergeButton({ id, chunks, base }: { id: string; chunks: Chunk[];
   );
 }
 
-// Shown on the collapsed card too: progress while it runs, the reason when it stops.
-export function MergeLine({ merge, chunks = [] }: { merge: MergeRun; chunks?: Chunk[] }) {
-  if (merge.status === "done") {
-    // Base mode: the Merged badge already says it.
-    if (merge.mode !== "combine") return null;
-    // The PR left open is the lowest one not merged.
-    const left = chunks.find((c) => c.pr && c.status !== "merged")?.pr;
+// Next to the button: why the last run stopped, or the PR left after a combine.
+export function MergeResult({ merge, chunks }: { merge: MergeRun; chunks: Chunk[] }) {
+  if (merge.status === "failed") {
     return (
-      <p className="mt-3 flex items-start gap-1.5 text-xs text-muted-foreground" role="status">
-        <GitMerge className="mt-0.5 size-3.5 shrink-0 text-violet-600 dark:text-violet-400" />
-        <span className="min-w-0">
-          {merge.message ?? "combined the stack"}
-          {left && (
-            <>
-              {" · "}
-              <a href={left} target="_blank" rel="noreferrer" onClick={(e) => e.stopPropagation()} className="underline underline-offset-2 hover:text-foreground">
-                open PR #{prNumber(left)}
-              </a>
-            </>
-          )}
-        </span>
-      </p>
+      <span className="flex min-w-0 items-center gap-1 text-xs text-destructive" title={merge.error}>
+        <XCircle className="size-3.5 shrink-0" />
+        <span className="max-w-72 truncate">Merge stopped: {merge.error}</span>
+      </span>
     );
   }
-  const where = [merge.pr && `#${merge.pr}`, merge.current].filter(Boolean).join(" ");
-  const running = merge.status === "running";
-  const detail = running ? merge.message : merge.error;
-  const prefix = running ? "Merging" : where ? "Merge stopped at" : "Merge stopped";
+  // Base mode: the Merged badge already says it.
+  if (merge.status !== "done" || merge.mode !== "combine") return null;
+  // The PR left open is the lowest one not merged.
+  const left = chunks.find((c) => c.pr && c.status !== "merged")?.pr;
+  if (!left) return null;
   return (
-    <p className="mt-3 flex items-start gap-1.5 text-xs text-muted-foreground" role="status">
-      {running ? (
-        <Loader2 className="mt-0.5 size-3.5 shrink-0 animate-spin text-blue-600 dark:text-blue-400" />
-      ) : (
-        <XCircle className="mt-0.5 size-3.5 shrink-0 text-red-600 dark:text-red-400" />
-      )}
-      <span className="min-w-0">
-        {where ? `${prefix} ${where}` : prefix}
-        {detail && `: ${detail}`}
-      </span>
-    </p>
+    <a
+      href={left}
+      target="_blank"
+      rel="noreferrer"
+      title={merge.message}
+      className="flex items-center gap-1 text-xs text-muted-foreground underline-offset-2 hover:text-foreground hover:underline"
+    >
+      <GitMerge className="size-3.5 text-violet-600 dark:text-violet-400" /> Combined into PR #{prNumber(left)}
+    </a>
   );
 }
