@@ -39,6 +39,13 @@ function timeAgo(iso: string): string {
   return `${Math.floor(seconds / 86400)} d ago`;
 }
 
+// A chunk's status is free text from the skill: "done", "pr" and "failed" are final, anything else is in progress.
+function ChunkStatusIcon({ status }: { status: string }) {
+  if (status === "done" || status === "pr") return <CheckCircle2 className="size-4 text-emerald-600 dark:text-emerald-400" aria-label={status} />;
+  if (status === "failed") return <XCircle className="size-4 text-red-600 dark:text-red-400" aria-label={status} />;
+  return <Loader2 className="size-4 animate-spin text-blue-600 dark:text-blue-400" aria-label={status} />;
+}
+
 function StatusBadge({ status }: { status: Status }) {
   const { label, icon: Icon, className } = STATUS[status];
   return (
@@ -146,7 +153,7 @@ function PipelineCard({ p }: { p: State }) {
                 <span className="font-medium">{c.name}</span>
                 {c.branch && <code className="truncate rounded bg-muted px-1.5 py-0.5 text-xs text-muted-foreground">{c.branch}</code>}
                 <span className="ml-auto flex items-center gap-2">
-                  {c.status && <Badge variant="secondary">{c.status}</Badge>}
+                  {c.status && <ChunkStatusIcon status={c.status} />}
                   {c.pr && (
                     <Button asChild variant="ghost" size="sm">
                       <a href={c.pr} target="_blank">
