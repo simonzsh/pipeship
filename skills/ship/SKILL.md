@@ -43,6 +43,7 @@ Steps: `map`, `questions`, `plan`, `implement`, `review`, `stack`, `preview`.
 - **Never skip a step another step needs**: the test environment needs a worktree; PRs need commits.
 - On failure: `pipeship step <id> <step> failed`, explain what failed, and ask the user what to do.
 - While this pipeline runs, it replaces process skills such as brainstorming, writing-plans, using-git-worktrees, subagent-driven-development and finishing-a-development-branch. Do not invoke them. The `simplify` and `code-review` skills in step 5 are fine.
+- If the dashboard shows *Session gone*, the user can resume with the command on the card, then continue from the first step that is not done or skipped (`pipeship get <id>`).
 - Every server you start outside `pipeship preview` must be stopped before you finish (`kill <PID>`, never `pkill -f`).
 
 ## Step 0 — Start
@@ -50,7 +51,7 @@ Steps: `map`, `questions`, `plan`, `implement`, `review`, `stack`, `preview`.
 1. Parse the arguments (if `$ARGUMENTS` is empty or was not replaced, use the user's request): an optional mode (`quick` or `full`, default `full`), an optional `--skip a,b`, and the ticket (reference, URL or text).
 2. **Read the ticket** with whatever tool this session has for its source: an MCP server (Linear, Notion, Jira…), `gh issue view`, or fetching the URL. Plain text is the ticket itself. A bare reference like `ABC-123` does not name its source: infer it from the tools you have, and ask if unsure. If no tool can read the source, ask the user to paste the ticket.
 3. The repo is the git root of the current directory. The base branch is the current branch. If the working tree has uncommitted changes, tell the user — they will not be in the worktrees.
-4. `pipeship new ...` with the ticket title, source (`linear`, `notion`, `github`, `jira`, `url`, `text`…), and one `--ref`/`--url` pair per ticket when the pipeline covers several (never join refs into one `--ref`). Note the `id` and `dir` it prints.
+4. `pipeship new ...` with the ticket title, source (`linear`, `notion`, `github`, `jira`, `url`, `text`…), and one `--ref`/`--url` pair per ticket when the pipeline covers several (never join refs into one `--ref`). Note the `id` and `dir` it prints. `pipeship new` records the session that runs it (harness, id, cwd). Run it from this orchestrator session, never from a subagent.
    - For a plain-text ticket, pick a 2 or 3 word name that sums it up (`session-link`, `quick-mode`) and pass it with `--name`. Ticket refs win over the name.
 5. Write the full ticket text to `<dir>/ticket.md`. Later steps read only this file, never the original source.
 6. Run `pipeship dashboard` and give the user the URL.
