@@ -46,14 +46,15 @@ export function PipelineCard({ p }: { p: DashboardState }) {
       setOpen(!open);
     },
   };
+  const { tint, hover } = statusConfig(p.status);
   return (
     <Card className="gap-0 overflow-hidden py-0">
       {/* The header and the steps toggle the card. */}
       <div
         className={cn(
           "flex flex-col gap-5 py-5",
-          statusConfig(p.status).tint,
-          hasDetails && "cursor-pointer transition-colors hover:bg-accent",
+          tint,
+          hasDetails && cn("cursor-pointer transition-colors", hover),
         )}
         {...(hasDetails && toggle)}
       >

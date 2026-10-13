@@ -7,6 +7,8 @@ type StatusConfig = {
   icon: LucideIcon;
   badge: string;
   tint: string;
+  // Only on clickable cards: a deeper shade of the tint, so hover keeps the status colour.
+  hover: string;
   dot: string;
   text: string;
   group: string;
@@ -19,6 +21,7 @@ const STATUS: Record<Status, StatusConfig> = {
     icon: MessageCircleQuestion,
     badge: "bg-amber-500/20 text-amber-800 ring-1 ring-inset ring-amber-500/40 dark:text-amber-300",
     tint: "bg-amber-500/5",
+    hover: "hover:bg-amber-500/10",
     dot: "bg-amber-500",
     text: "text-amber-700 dark:text-amber-400",
     group: "Waiting",
@@ -28,6 +31,7 @@ const STATUS: Record<Status, StatusConfig> = {
     icon: CheckCircle2,
     badge: "bg-emerald-500/20 text-emerald-800 ring-1 ring-inset ring-emerald-500/40 dark:text-emerald-300",
     tint: "bg-emerald-500/5",
+    hover: "hover:bg-emerald-500/10",
     dot: "bg-emerald-500",
     text: "text-emerald-700 dark:text-emerald-400",
     group: "Ready for testing",
@@ -37,6 +41,7 @@ const STATUS: Record<Status, StatusConfig> = {
     icon: Loader2,
     badge: "bg-blue-500/20 text-blue-800 ring-1 ring-inset ring-blue-500/40 dark:text-blue-300 [&>svg]:animate-spin",
     tint: "bg-blue-500/5",
+    hover: "hover:bg-blue-500/10",
     dot: "bg-blue-500",
     text: "text-blue-700 dark:text-blue-400",
     group: "In progress",
@@ -46,6 +51,7 @@ const STATUS: Record<Status, StatusConfig> = {
     icon: XCircle,
     badge: "bg-red-500/20 text-red-800 ring-1 ring-inset ring-red-500/40 dark:text-red-300",
     tint: "bg-red-500/5",
+    hover: "hover:bg-red-500/10",
     dot: "bg-red-500",
     text: "text-red-700 dark:text-red-400",
     group: "Failed",
@@ -55,6 +61,7 @@ const STATUS: Record<Status, StatusConfig> = {
     icon: Square,
     badge: "bg-muted text-muted-foreground ring-1 ring-inset ring-border",
     tint: "bg-muted/40",
+    hover: "hover:bg-muted",
     dot: "bg-muted-foreground/60",
     text: "text-muted-foreground",
     group: "Stopped",
