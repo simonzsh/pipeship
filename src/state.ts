@@ -16,6 +16,23 @@ export interface Chunk {
   pr?: string;
 }
 
+// Chunk.status stays free text; the merge engine writes this value.
+export const MERGED = "merged";
+
+export type MergeStatus = "running" | "done" | "failed";
+export interface MergeRun {
+  status: MergeStatus;
+  pid?: number; // process that runs the merge (the dashboard server)
+  current?: string; // name of the chunk being merged, or the one that stopped the merge
+  pr?: number; // PR number of `current`
+  message?: string; // progress, e.g. "waiting for checks on #12 (2 pending)"
+  error?: string; // why it stopped (status "failed" only)
+  startedAt: string;
+  updatedAt: string; // refreshed on every progress write
+  endedAt?: string;
+  oldTips?: Record<string, string>; // chunk name -> head before its rebase; the next rebase needs it after a resume
+}
+
 export interface TicketLink {
   ref: string;
   url?: string;
@@ -52,6 +69,7 @@ export interface State {
   chunks: Chunk[];
   preview?: { url: string; port: number; pid?: number; worktree: string; log: string; services?: PreviewService[] };
   session?: Session;
+  merge?: MergeRun; // last "Merge stack" run from the dashboard
   base?: string; // branch checked out in the repo when the pipeline started; unset on a detached HEAD
   stopRequested: boolean;
   createdAt: string;

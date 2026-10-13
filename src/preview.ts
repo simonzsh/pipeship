@@ -436,6 +436,7 @@ export async function deletePipeline(id: string, opts: { force?: boolean } = {})
   if (state.status === "running" || state.status === "waiting_for_user") {
     throw new Error("stop the pipeline before deleting it");
   }
+  if (state.merge?.status === "running") throw new Error("wait for the merge to finish before deleting");
   await stopPreview(id);
 
   const dir = join(pipelineDir(id), "worktrees");
