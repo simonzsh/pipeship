@@ -175,6 +175,26 @@ export function listStates(): State[] {
     .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
 }
 
+export type DashboardState = State & { testGuide?: string };
+
+// The guide is read for the API only: it never goes into state.json.
+export function listDashboardStates(): DashboardState[] {
+  return listStates().map((s) => {
+    const file = join(pipelineDir(s.id), "test.md");
+    return existsSync(file) ? { ...s, testGuide: readFileSync(file, "utf8") } : s;
+  });
+}
+
+// Switching to quick skips only the steps that have not started.
+export function setMode(id: string, mode: Mode): State {
+  if (mode !== "quick" && mode !== "full") throw new Error(`unknown mode: ${mode} (expected quick, full)`);
+  return updateState(id, (s) => {
+    s.mode = mode;
+    if (mode !== "quick") return;
+    for (const step of s.steps) if (QUICK_SKIPS.includes(step.name) && step.status === "pending") step.status = "skipped";
+  });
+}
+
 export function setStep(id: string, name: StepName, status: StepStatus): State {
   if (!STEPS.includes(name)) throw new Error(`unknown step: ${name} (expected ${STEPS.join(", ")})`);
   return updateState(id, (s) => {

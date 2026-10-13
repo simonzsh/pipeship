@@ -1,7 +1,7 @@
 import { CircleDashed, Terminal } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { createRoot } from "react-dom/client";
-import type { State, Status } from "../state.ts";
+import type { DashboardState, Status } from "../state.ts";
 import { Card, CardDescription, CardTitle } from "./components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "./components/ui/select";
 import { PipelineCard } from "./pipeline-card";
@@ -37,7 +37,7 @@ const COUNTED: [Status, string][] = [
 ];
 
 function App() {
-  const [pipelines, setPipelines] = useState<State[]>();
+  const [pipelines, setPipelines] = useState<DashboardState[]>();
   const [repo, setRepo] = useState(() => new URLSearchParams(location.search).get("repo"));
   const [live, setLive] = useState(false);
   const [, tick] = useState(0);

@@ -2,7 +2,7 @@ import { afterAll, beforeEach, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync, existsSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { createPipeline, listStates, pipelineDir, readState, setStep, updateState, upsertChunk } from "../src/state.ts";
+import { createPipeline, listStates, pipelineDir, readState, setMode, setStep, updateState, upsertChunk } from "../src/state.ts";
 import {
   DASHBOARD_PORT, deletePipeline, findRecipe, isAlive, mainService, normalizeRecipe, pickPorts, previewLines, resolveEnv,
   savedRecipePath, startOrder, startPreview, stopPipeline, type Service,
@@ -1016,4 +1016,48 @@ test("merge mode: validation by open PR count, and an unknown mode is a 400", as
   expect(b.state.merge?.mode).toBe("combine");
   await b.done;
   expect(gh2.calls).toEqual(["merge 2 --merge", "patch 1 body"]);
+});
+
+test("the API adds test.md as testGuide without writing it to state.json", async () => {
+  const withGuide = createPipeline({ repo, title: "Guide", source: "text" });
+  const without = createPipeline({ repo, title: "No guide", source: "text" });
+  const statePath = join(pipelineDir(withGuide.id), "state.json");
+  const before = readFileSync(statePath, "utf8");
+  writeFileSync(join(pipelineDir(withGuide.id), "test.md"), "# Test\n1. Open the page\n");
+
+  const server = await serve(0);
+  try {
+    const list = (await (await fetch(`http://localhost:${server.port}/api/pipelines`)).json()) as { id: string; testGuide?: string }[];
+    expect(list.find((p) => p.id === withGuide.id)?.testGuide).toBe("# Test\n1. Open the page\n");
+    expect(list.find((p) => p.id === without.id)).not.toHaveProperty("testGuide");
+
+    // The SSE stream carries it too.
+    const res = await fetch(`http://localhost:${server.port}/api/events`);
+    const reader = res.body!.getReader();
+    const first = new TextDecoder().decode((await reader.read()).value);
+    await reader.cancel();
+    expect(first).toContain('"testGuide":"# Test\\n1. Open the page\\n"');
+  } finally {
+    server.stop(true);
+  }
+  expect(readFileSync(statePath, "utf8")).toBe(before);
+  expect(readState(withGuide.id)).not.toHaveProperty("testGuide");
+});
+
+test("setMode quick sets the mode and skips only pending quick steps; full only changes the mode", () => {
+  const p = createPipeline({ repo, title: "Switch mode", source: "text" });
+  const plan = () => readState(p.id).steps.find((s) => s.name === "plan")!.status;
+  setMode(p.id, "quick");
+  expect(readState(p.id).mode).toBe("quick");
+  expect(plan()).toBe("skipped");
+  setMode(p.id, "full");
+  expect(readState(p.id).mode).toBe("full");
+  expect(plan()).toBe("skipped");
+
+  const running = createPipeline({ repo, title: "Plan running", source: "text" });
+  setStep(running.id, "plan", "running");
+  setMode(running.id, "quick");
+  expect(readState(running.id).steps.find((s) => s.name === "plan")!.status).toBe("running");
+
+  expect(() => setMode(p.id, "fast" as never)).toThrow("unknown mode: fast");
 });
