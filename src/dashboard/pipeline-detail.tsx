@@ -1,5 +1,5 @@
 import { ArrowLeft, FolderGit2, GitMerge, Layers, Loader2, Zap } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { repoName, repoStacks } from "../repos.ts";
 import type { DashboardState } from "../state.ts";
 import { ActionButton } from "./action-button";
@@ -31,6 +31,16 @@ export function PipelineDetail({ p, onBack }: { p: DashboardState; onBack: () =>
   const repoLabel =
     p.repos.length === 0 ? "" : multi ? stacks.map((st) => st.name).join(" + ") : shortRepo(p.repos[0]!.path);
   const showTicket = p.ticket.links.length > 0 || (p.ticket.source && p.ticket.source !== "text");
+  // The header sticks on scroll; its height goes to --detail-header so the file headers stick right below it.
+  const root = useRef<HTMLDivElement>(null);
+  const header = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const h = header.current;
+    if (!h) return;
+    const ro = new ResizeObserver(() => root.current?.style.setProperty("--detail-header", `${h.offsetHeight}px`));
+    ro.observe(h);
+    return () => ro.disconnect();
+  }, []);
   const select = (t: DiffTarget) => {
     setTarget(t);
     setTab("code");
@@ -72,9 +82,9 @@ export function PipelineDetail({ p, onBack }: { p: DashboardState; onBack: () =>
     );
 
   return (
-    <div className="flex flex-col">
+    <div ref={root} className="flex flex-col">
       {/* No status tint here: the list already carries the colour, the detail stays calm. */}
-      <div className="flex flex-col gap-4 border-b px-6 py-5">
+      <div ref={header} className="sticky top-0 z-20 flex flex-col gap-4 border-b bg-background px-6 py-5">
         <Button variant="ghost" size="sm" onClick={onBack} className="-ml-2 hidden w-fit max-[899px]:inline-flex">
           <ArrowLeft /> Pipelines
         </Button>
