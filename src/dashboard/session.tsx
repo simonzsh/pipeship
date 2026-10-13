@@ -1,0 +1,84 @@
+import { Check } from "lucide-react";
+import { useEffect, useState } from "react";
+import { siClaude } from "simple-icons";
+import type { PipelineView, Session } from "../state.ts";
+
+// Shown in place of Running or Waiting: the pipeline cannot move without its agent.
+export function isAgentStopped(p: PipelineView): boolean {
+  const live = p.status === "running" || p.status === "waiting_for_user";
+  const status = p.sessionState?.status;
+  return live && (status === "stopped" || status === "archived" || status === "deleted");
+}
+
+export function resumeCommand(s: Session): string {
+  const cwd = /^[\w./~-]+$/.test(s.cwd) ? s.cwd : `'${s.cwd.replace(/'/g, `'\\''`)}'`;
+  return s.harness === "claude" ? `cd ${cwd} && claude --resume ${s.id}` : `cd ${cwd} && codex resume ${s.id}`;
+}
+
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+// navigator.clipboard needs a secure origin; the dashboard may be open on a LAN IP.
+async function copyText(text: string): Promise<boolean> {
+  try {
+    await navigator.clipboard.writeText(text);
+    return true;
+  } catch {}
+  const area = document.createElement("textarea");
+  area.value = text;
+  area.style.position = "fixed";
+  area.style.opacity = "0";
+  document.body.append(area);
+  area.select();
+  try {
+    return document.execCommand("copy");
+  } catch {
+    return false;
+  } finally {
+    area.remove();
+  }
+}
+
+// The ChatGPT knot; simple-icons dropped it, this path comes from @lobehub/icons (MIT).
+const CHATGPT = { title: "ChatGPT", path: "M9.205 8.658v-2.26c0-.19.072-.333.238-.428l4.543-2.616c.619-.357 1.356-.523 2.117-.523 2.854 0 4.662 2.212 4.662 4.566 0 .167 0 .357-.024.547l-4.71-2.759a.797.797 0 00-.856 0l-5.97 3.473zm10.609 8.8V12.06c0-.333-.143-.57-.429-.737l-5.97-3.473 1.95-1.118a.433.433 0 01.476 0l4.543 2.617c1.309.76 2.189 2.378 2.189 3.948 0 1.808-1.07 3.473-2.76 4.163zM7.802 12.703l-1.95-1.142c-.167-.095-.239-.238-.239-.428V5.899c0-2.545 1.95-4.472 4.591-4.472 1 0 1.927.333 2.712.928L8.23 5.067c-.285.166-.428.404-.428.737v6.898zM12 15.128l-2.795-1.57v-3.33L12 8.658l2.795 1.57v3.33L12 15.128zm1.796 7.23c-1 0-1.927-.332-2.712-.927l4.686-2.712c.285-.166.428-.404.428-.737v-6.898l1.974 1.142c.167.095.238.238.238.428v5.233c0 2.545-1.974 4.472-4.614 4.472zm-5.637-5.303l-4.544-2.617c-1.308-.761-2.188-2.378-2.188-3.948A4.482 4.482 0 014.21 6.327v5.423c0 .333.143.571.428.738l5.947 3.449-1.95 1.118a.432.432 0 01-.476 0zm-.262 3.9c-2.688 0-4.662-2.021-4.662-4.519 0-.19.024-.38.047-.57l4.686 2.71c.286.167.571.167.856 0l5.97-3.448v2.26c0 .19-.07.333-.237.428l-4.543 2.616c-.619.357-1.356.523-2.117.523zm5.899 2.83a5.947 5.947 0 005.827-4.756C22.287 18.339 24 15.84 24 13.296c0-1.665-.713-3.282-1.998-4.448.119-.5.19-.999.19-1.498 0-3.401-2.759-5.947-5.946-5.947-.642 0-1.26.095-1.88.31A5.962 5.962 0 0010.205 0a5.947 5.947 0 00-5.827 4.757C1.713 5.447 0 7.945 0 10.49c0 1.666.713 3.283 1.998 4.448-.119.5-.19 1-.19 1.499 0 3.401 2.759 5.946 5.946 5.946.642 0 1.26-.095 1.88-.309a5.96 5.96 0 004.162 1.713z" };
+
+// The provider logo; a click copies the resume command, so the card needs no session row.
+export function AgentLogo({ p }: { p: PipelineView }) {
+  const [copied, setCopied] = useState(false);
+  // Reset the icon after 1.5 s; clean up if the card unmounts first.
+  useEffect(() => {
+    if (!copied) return;
+    const t = setTimeout(() => setCopied(false), 1500);
+    return () => clearTimeout(t);
+  }, [copied]);
+  const session = p.session;
+  if (typeof session?.id !== "string") return null;
+  const claude = session.harness === "claude";
+  const icon = claude ? siClaude : CHATGPT;
+  const cmd = resumeCommand(session);
+  // Hand-edited state may hold anything: only offer a command for a real session id that still exists.
+  const canResume = UUID.test(session.id) && p.sessionState?.status !== "deleted" && p.sessionState?.status !== "unknown";
+  const title = `${claude ? "Claude Code" : "Codex"} session` + (canResume ? ": click to copy the resume command" : "");
+  return (
+    <button
+      type="button"
+      title={title}
+      aria-label={title}
+      disabled={!canResume}
+      className="flex size-6 items-center justify-center rounded-md enabled:hover:bg-accent"
+      onClick={async (e) => {
+        e.stopPropagation();
+        if (await copyText(cmd)) setCopied(true);
+        else window.prompt("Copy the resume command", cmd);
+      }}
+    >
+      {copied ? (
+        <Check className="size-3.5 text-emerald-600 dark:text-emerald-400" />
+      ) : (
+        // Claude in its brand orange; the ChatGPT logo is black or white, so it follows the text colour.
+        <svg viewBox="0 0 24 24" fill="currentColor" className="size-3.5 text-foreground" style={{ color: claude ? `#${siClaude.hex}` : undefined }}>
+          <path d={icon.path} />
+        </svg>
+      )}
+    </button>
+  );
+}
