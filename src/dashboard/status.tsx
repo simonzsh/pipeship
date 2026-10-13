@@ -1,4 +1,4 @@
-import { CheckCircle2, Loader2, MessageCircleQuestion, Square, XCircle, type LucideIcon } from "lucide-react";
+import { CheckCircle2, Loader2, MessageCircleQuestion, Square, Unplug, XCircle, type LucideIcon } from "lucide-react";
 import type { Status } from "../state.ts";
 import { Badge } from "./components/ui/badge";
 
@@ -10,6 +10,9 @@ const STATUS: Record<Status, { label: string; icon: LucideIcon; className: strin
   stopped: { label: "Stopped", icon: Square, className: "bg-muted text-muted-foreground" },
 };
 
+// Display only: the pipeline keeps its status, so Stop and Delete work as before.
+const AGENT_STOPPED = { label: "Agent stopped", icon: Unplug, className: "bg-red-500/15 text-red-700 dark:text-red-400" };
+
 // A chunk's status is free text from the skill: "done", "pr" and "failed" are final, anything else is in progress.
 export function ChunkStatusIcon({ status }: { status: string }) {
   if (status === "done" || status === "pr") return <CheckCircle2 className="size-4 text-emerald-600 dark:text-emerald-400" aria-label={status} />;
@@ -17,8 +20,8 @@ export function ChunkStatusIcon({ status }: { status: string }) {
   return <Loader2 className="size-4 animate-spin text-blue-600 dark:text-blue-400" aria-label={status} />;
 }
 
-export function StatusBadge({ status }: { status: Status }) {
-  const { label, icon: Icon, className } = STATUS[status];
+export function StatusBadge({ status, agentStopped }: { status: Status; agentStopped?: boolean }) {
+  const { label, icon: Icon, className } = agentStopped ? AGENT_STOPPED : STATUS[status];
   return (
     <Badge variant="secondary" className={className}>
       <Icon /> {label}

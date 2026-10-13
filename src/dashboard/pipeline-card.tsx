@@ -5,7 +5,7 @@ import { ActionButton } from "./action-button";
 import { Badge } from "./components/ui/badge";
 import { Button } from "./components/ui/button";
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "./components/ui/card";
-import { SessionGoneBadge, SessionRow, isSessionGone } from "./session";
+import { AgentLogo, isAgentStopped } from "./session";
 import { ChunkStatusIcon, StatusBadge } from "./status";
 import { Steps } from "./steps";
 import { TicketIcon } from "./ticket-icon";
@@ -77,8 +77,8 @@ export function PipelineCard({ p }: { p: PipelineView }) {
                   Quick
                 </Badge>
               )}
-              {isSessionGone(p) && <SessionGoneBadge />}
-              <StatusBadge status={p.status} />
+              <AgentLogo p={p} />
+              <StatusBadge status={p.status} agentStopped={isAgentStopped(p)} />
             </div>
             {hasDetails && (
               <span className="flex items-center gap-1 text-xs text-muted-foreground">
@@ -136,8 +136,6 @@ export function PipelineCard({ p }: { p: PipelineView }) {
           )}
         </CardContent>
       )}
-
-      {typeof p.session?.id === "string" && <SessionRow session={p.session} state={p.sessionState} />}
 
       <CardFooter className="py-3 text-xs text-muted-foreground">
         <FolderGit2 className="size-3.5 shrink-0" />

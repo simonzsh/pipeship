@@ -43,7 +43,7 @@ Steps: `map`, `questions`, `plan`, `implement`, `review`, `stack`, `preview`.
 - **Never skip a step another step needs**: the test environment needs a worktree; PRs need commits.
 - On failure: `pipeship step <id> <step> failed`, explain what failed, and ask the user what to do.
 - While this pipeline runs, it replaces process skills such as brainstorming, writing-plans, using-git-worktrees, subagent-driven-development and finishing-a-development-branch. Do not invoke them. The `simplify` and `code-review` skills in step 5 are fine.
-- If the dashboard shows *Session gone*, the user can resume with the command on the card, then continue from the first step that is not done or skipped (`pipeship get <id>`).
+- If the dashboard shows *Agent stopped*, the user can resume with the command copied from the agent logo on the card, then continue from the first step that is not done or skipped (`pipeship get <id>`).
 - Every server you start outside `pipeship preview` must be stopped before you finish (`kill <PID>`, never `pkill -f`).
 
 ## Step 0 — Start
