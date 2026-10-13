@@ -48,7 +48,7 @@ export function StackTree({ base, chunks, merge }: { base?: string; chunks: Chun
             )}
             <span className="ml-auto flex shrink-0 items-center gap-2">
               {mergeHere?.status === "running" ? (
-                <Loader2 className="size-4 animate-spin text-blue-600 dark:text-blue-400" aria-label="merging" />
+                <Loader2 className="size-4 animate-spin text-violet-600 dark:text-violet-400" aria-label="merging" />
               ) : mergeHere?.status === "failed" ? (
                 <XCircle className="size-4 text-red-600 dark:text-red-400" aria-label="merge stopped" role="img">
                   <title>{mergeHere.error}</title>

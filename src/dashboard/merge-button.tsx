@@ -68,6 +68,10 @@ export function MergeButton({ id, chunks, base, merge }: { id: string; chunks: C
   // Merged PRs are skipped by the engine, so the dialog lists only the rest.
   const todo = chunks.filter((c) => c.pr && c.status !== "merged");
   const mode: Mode = todo.length < 2 ? "base" : choice;
+  // One PR left (e.g. after a combine): the button says where it goes, in another colour.
+  const single = todo.length < 2;
+  const baseName = base ?? "the base branch";
+  const tone = single ? "bg-violet-600 hover:bg-violet-700" : "bg-emerald-600 hover:bg-emerald-700";
   const running = merge?.status === "running";
   useEffect(() => {
     if (running) setStarting(false);
@@ -96,7 +100,13 @@ export function MergeButton({ id, chunks, base, merge }: { id: string; chunks: C
     const current = chunks.find((c) => c.name === merge?.current);
     const label = running ? (current?.branch ?? merge?.current) : undefined;
     return (
-      <Button size="xs" disabled className="bg-emerald-600 text-white disabled:opacity-80" title={merge?.message}>
+      <Button
+        size="xs"
+        disabled
+        // A combine merges PRs one by one: keep its colour while the open count drops.
+        className={`${merge?.mode === "combine" ? "bg-emerald-600" : tone} text-white disabled:opacity-80`}
+        title={merge?.message}
+      >
         <Loader2 className="animate-spin" />
         <span className="max-w-64 truncate">{label ? `Merging ${label}…` : "Merging…"}</span>
       </Button>
@@ -107,13 +117,13 @@ export function MergeButton({ id, chunks, base, merge }: { id: string; chunks: C
       {error && <span className="text-xs text-destructive">{error}</span>}
       {!error && merge && <MergeFailure merge={merge} />}
       <AlertDialogTrigger asChild>
-        <Button size="xs" className="bg-emerald-600 text-white hover:bg-emerald-700">
-          <GitMerge /> Merge stack
+        <Button size="xs" className={`${tone} text-white`}>
+          <GitMerge /> {single ? `Merge into ${baseName}` : "Merge stack"}
         </Button>
       </AlertDialogTrigger>
       <AlertDialogContent>
         <AlertDialogHeader>
-          <AlertDialogTitle>Merge the PR stack?</AlertDialogTitle>
+          <AlertDialogTitle>{single ? `Merge #${prNumber(todo[0]?.pr ?? "")} into ${baseName}?` : "Merge the PR stack?"}</AlertDialogTitle>
           {/* asChild: a list cannot sit inside the default <p>. */}
           <AlertDialogDescription asChild>
             <div className="flex flex-col gap-3">
@@ -123,8 +133,8 @@ export function MergeButton({ id, chunks, base, merge }: { id: string; chunks: C
         </AlertDialogHeader>
         <AlertDialogFooter>
           <AlertDialogCancel>Cancel</AlertDialogCancel>
-          <AlertDialogAction onClick={run} className="bg-emerald-600 text-white hover:bg-emerald-700">
-            {mode === "combine" ? "Combine" : `Merge into ${base ?? "the base branch"}`}
+          <AlertDialogAction onClick={run} className={`${tone} text-white`}>
+            {mode === "combine" ? "Combine" : `Merge into ${baseName}`}
           </AlertDialogAction>
         </AlertDialogFooter>
       </AlertDialogContent>
