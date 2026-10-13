@@ -11,10 +11,11 @@ const ACTIONS = {
   stopPipeline: {
     endpoint: "stop",
     icon: Square,
-    button: "Stop pipeline",
-    title: "Stop this pipeline?",
-    description: "The agents stop after their current step, and the test servers stop now.",
-    confirm: "Stop",
+    button: "Request stop",
+    title: "Request a stop for this pipeline?",
+    description: "The agents stop after their current step, not at once.",
+    serversNote: "The test servers stop now.",
+    confirm: "Request stop",
   },
   stopServer: {
     endpoint: "stop",
@@ -35,8 +36,11 @@ const ACTIONS = {
   },
 };
 
-export function ActionButton({ id, action }: { id: string; action: keyof typeof ACTIONS }) {
-  const { endpoint, icon: Icon, button, title, description, confirm } = ACTIONS[action];
+// Test servers usually start at the last step: only mention them when some exist.
+export function ActionButton({ id, action, hasServers }: { id: string; action: keyof typeof ACTIONS; hasServers?: boolean }) {
+  const def: { serversNote?: string } & (typeof ACTIONS)[typeof action] = ACTIONS[action];
+  const { endpoint, icon: Icon, button, title, confirm } = def;
+  const description = hasServers && def.serversNote ? `${def.description} ${def.serversNote}` : def.description;
   const [error, setError] = useState<string>();
   const run = async () => {
     setError(undefined);

@@ -137,7 +137,7 @@ export function PipelineCard({ p }: { p: PipelineView }) {
           {p.status === "ready" ? (
             p.preview && <ActionButton id={p.id} action="stopServer" />
           ) : p.status === "running" || p.status === "waiting_for_user" || (p.status === "failed" && p.preview) ? (
-            <ActionButton id={p.id} action="stopPipeline" />
+            <ActionButton id={p.id} action="stopPipeline" hasServers={!!p.preview} />
           ) : null}
           {(p.status === "ready" || p.status === "failed" || p.status === "stopped") && <ActionButton id={p.id} action="delete" />}
         </div>
