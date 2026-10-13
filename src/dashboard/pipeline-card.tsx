@@ -137,7 +137,7 @@ export function PipelineCard({ p }: { p: PipelineView }) {
         </CardContent>
       )}
 
-      {p.session && <SessionRow session={p.session} state={p.sessionState} />}
+      {typeof p.session?.id === "string" && <SessionRow session={p.session} state={p.sessionState} />}
 
       <CardFooter className="py-3 text-xs text-muted-foreground">
         <FolderGit2 className="size-3.5 shrink-0" />

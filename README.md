@@ -73,7 +73,7 @@ You do not configure anything: on the first pipeline in a repo, Claude reads the
 
 The dashboard on http://localhost:4400 lists pipelines live, with their steps, PRs and test URL. It can stop a pipeline or its test server, and delete a finished pipeline: its worktrees and files go, its branches and PRs stay. Light and dark themes follow your system, with a toggle.
 
-Each card shows the agent session that runs the pipeline (Claude Code or Codex): its short id and its state (working, idle, loaded, stopped, archived or deleted). The server reads the state when the page updates. A running pipeline whose session is stopped, archived or deleted gets a "Session gone" badge. The "Copy resume" button copies the command that reopens the session in its folder. Pipeship stores the harness, the session id and the folder, never a pid or a token.
+Each card shows the agent session that runs the pipeline (Claude Code or Codex): its short id and its state (Working, Idle, Active, Loaded, Stopped, Archived, Deleted or Unknown). The server reads the state when the page updates. A running or waiting pipeline whose session is stopped, archived or deleted gets a "Session gone" badge. The "Copy resume" button copies the command that reopens the session in its folder. Pipeship stores the harness, the session id and the folder, never a pid or a token.
 
 The pipeline starts the dashboard for you. To start or stop it yourself, use `/pipeship:dashboard` and `/pipeship:dashboard stop` in Claude Code, or `$dashboard` and `$dashboard stop` in Codex (from a terminal: `scripts/pipeship dashboard [stop]`). Stopping it leaves the pipelines and their test servers running.
 

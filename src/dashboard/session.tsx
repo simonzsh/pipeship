@@ -18,6 +18,29 @@ export function resumeCommand(s: Session): string {
   return s.harness === "claude" ? `cd ${cwd} && claude --resume ${s.id}` : `cd ${cwd} && codex resume ${s.id}`;
 }
 
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+// navigator.clipboard needs a secure origin; the dashboard may be open on a LAN IP.
+async function copyText(text: string): Promise<boolean> {
+  try {
+    await navigator.clipboard.writeText(text);
+    return true;
+  } catch {}
+  const area = document.createElement("textarea");
+  area.value = text;
+  area.style.position = "fixed";
+  area.style.opacity = "0";
+  document.body.append(area);
+  area.select();
+  try {
+    return document.execCommand("copy");
+  } catch {
+    return false;
+  } finally {
+    area.remove();
+  }
+}
+
 function label(state: SessionState): string {
   if (state.status === "active") return state.activity === "busy" ? "Working" : state.activity === "idle" ? "Idle" : "Active";
   return state.status[0]!.toUpperCase() + state.status.slice(1);
@@ -56,6 +79,8 @@ function HarnessIcon({ harness }: { harness: Harness }) {
 export function SessionRow({ session, state }: { session: Session; state?: SessionState }) {
   const [copied, setCopied] = useState(false);
   const cmd = resumeCommand(session);
+  // Hand-edited state may hold anything: only offer a command for a real, live session id.
+  const canResume = UUID.test(session.id) && state?.status !== "deleted" && state?.status !== "unknown";
   // Reset the icon after 1.5 s; clean up if the card unmounts first.
   useEffect(() => {
     if (!copied) return;
@@ -63,7 +88,7 @@ export function SessionRow({ session, state }: { session: Session; state?: Sessi
     return () => clearTimeout(t);
   }, [copied]);
   return (
-    <div className="flex items-center gap-2 border-t px-6 py-2.5 text-xs text-muted-foreground">
+    <div className="flex items-center gap-2 border-t px-5 py-2.5 text-xs text-muted-foreground">
       <HarnessIcon harness={session.harness} />
       <span className="font-medium capitalize text-foreground">{session.harness}</span>
       <span className="font-mono" title={session.id}>{session.id.slice(0, 8)}</span>
@@ -73,18 +98,20 @@ export function SessionRow({ session, state }: { session: Session; state?: Sessi
           {label(state)}
         </span>
       )}
-      <Button
-        size="xs"
-        variant="outline"
-        className="ml-auto"
-        title={cmd}
-        onClick={(e) => {
-          e.stopPropagation();
-          navigator.clipboard.writeText(cmd).then(() => setCopied(true), () => {});
-        }}
-      >
-        {copied ? <Check /> : <Copy />} Copy resume
-      </Button>
+      {canResume && (
+        <Button
+          size="xs"
+          variant="outline"
+          className="ml-auto"
+          title={cmd}
+          onClick={async () => {
+            if (await copyText(cmd)) setCopied(true);
+            else window.prompt("Copy the resume command", cmd);
+          }}
+        >
+          {copied ? <Check /> : <Copy />} Copy resume
+        </Button>
+      )}
     </div>
   );
 }
