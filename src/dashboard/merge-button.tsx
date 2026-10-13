@@ -15,8 +15,16 @@ export function MergeButton({ id, chunks, base }: { id: string; chunks: Chunk[];
   const todo = chunks.filter((c) => c.pr && c.status !== "merged");
   const run = async () => {
     setError(undefined);
-    const res = await fetch(`/api/pipelines/${encodeURIComponent(id)}/merge`, { method: "POST" });
-    if (!res.ok) setError((await res.json()).error);
+    try {
+      const res = await fetch(`/api/pipelines/${encodeURIComponent(id)}/merge`, { method: "POST" });
+      if (!res.ok) {
+        // The body may not be JSON (proxy error page).
+        const body: { error?: string } | null = await res.json().catch(() => null);
+        setError(body?.error ?? `Merge failed (${res.status})`);
+      }
+    } catch {
+      setError("Network error: the merge did not start");
+    }
   };
   return (
     <AlertDialog>
@@ -62,6 +70,7 @@ export function MergeLine({ merge }: { merge: MergeRun }) {
   const where = [merge.pr && `#${merge.pr}`, merge.current].filter(Boolean).join(" ");
   const running = merge.status === "running";
   const detail = running ? merge.message : merge.error;
+  const prefix = running ? "Merging" : where ? "Merge stopped at" : "Merge stopped";
   return (
     <p className="mt-3 flex items-start gap-1.5 text-xs text-muted-foreground" role="status">
       {running ? (
@@ -70,7 +79,7 @@ export function MergeLine({ merge }: { merge: MergeRun }) {
         <XCircle className="mt-0.5 size-3.5 shrink-0 text-red-600 dark:text-red-400" />
       )}
       <span className="min-w-0">
-        {[running ? "Merging" : "Merge stopped at", where].filter(Boolean).join(" ")}
+        {where ? `${prefix} ${where}` : prefix}
         {detail && `: ${detail}`}
       </span>
     </p>

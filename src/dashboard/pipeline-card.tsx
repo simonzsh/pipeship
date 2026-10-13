@@ -30,6 +30,7 @@ export function PipelineCard({ p }: { p: PipelineView }) {
   const prChunks = p.chunks.filter((c) => c.pr);
   const allMerged = prChunks.length > 0 && prChunks.every((c) => c.status === "merged");
   const merging = p.merge?.status === "running";
+  const finished = p.status === "ready" || p.status === "failed" || p.status === "stopped";
   const steps = p.steps.map((s) => ({
     name: s.name,
     status: s.status === "running" && p.status === "waiting_for_user" ? ("waiting" as const) : s.status,
@@ -120,13 +121,13 @@ export function PipelineCard({ p }: { p: PipelineView }) {
         <span>·</span>
         <span className="whitespace-nowrap">updated {timeAgo(p.updatedAt)}</span>
         <div className="ml-auto flex items-center gap-2">
-          {prChunks.length > 0 && !allMerged && !merging && <MergeButton id={p.id} chunks={p.chunks} base={p.base} />}
+          {finished && prChunks.length > 0 && !allMerged && !merging && <MergeButton id={p.id} chunks={p.chunks} base={p.base} />}
           {p.status === "ready" ? (
             p.preview && <ActionButton id={p.id} action="stopServer" />
           ) : p.status === "running" || p.status === "waiting_for_user" || (p.status === "failed" && p.preview) ? (
             <ActionButton id={p.id} action="stopPipeline" hasServers={!!p.preview} />
           ) : null}
-          {!merging && (p.status === "ready" || p.status === "failed" || p.status === "stopped") && <ActionButton id={p.id} action="delete" />}
+          {!merging && finished && <ActionButton id={p.id} action="delete" />}
         </div>
       </CardFooter>
     </Card>
