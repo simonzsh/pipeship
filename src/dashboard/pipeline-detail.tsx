@@ -169,7 +169,7 @@ export function PipelineDetail({ p, onBack }: { p: DashboardState; onBack: () =>
           {!p.preview && !p.testGuide && <p className="text-sm text-muted-foreground">No test environment yet</p>}
         </TabsContent>
         <TabsContent value="code">
-          <CodeTab p={p} target={target} onTarget={setTarget} />
+          <CodeTab p={p} target={target} />
         </TabsContent>
       </Tabs>
     </div>

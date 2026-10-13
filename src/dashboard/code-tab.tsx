@@ -6,7 +6,6 @@ export type DiffTarget = { chunk?: string };
 export interface CodeTabProps {
   p: DashboardState;
   target: DiffTarget;
-  onTarget: (t: DiffTarget) => void;
 }
 
 // PLACEHOLDER: the diff-view chunk replaces this body and keeps the exports.
