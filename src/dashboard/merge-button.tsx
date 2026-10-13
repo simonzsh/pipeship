@@ -112,8 +112,29 @@ export function MergeButton({ id, chunks, base }: { id: string; chunks: Chunk[];
 }
 
 // Shown on the collapsed card too: progress while it runs, the reason when it stops.
-export function MergeLine({ merge }: { merge: MergeRun }) {
-  if (merge.status === "done") return null;
+export function MergeLine({ merge, chunks = [] }: { merge: MergeRun; chunks?: Chunk[] }) {
+  if (merge.status === "done") {
+    // Base mode: the Merged badge already says it.
+    if (merge.mode !== "combine") return null;
+    // The PR left open is the lowest one not merged.
+    const left = chunks.find((c) => c.pr && c.status !== "merged")?.pr;
+    return (
+      <p className="mt-3 flex items-start gap-1.5 text-xs text-muted-foreground" role="status">
+        <GitMerge className="mt-0.5 size-3.5 shrink-0 text-violet-600 dark:text-violet-400" />
+        <span className="min-w-0">
+          {merge.message ?? "combined the stack"}
+          {left && (
+            <>
+              {" · "}
+              <a href={left} target="_blank" rel="noreferrer" onClick={(e) => e.stopPropagation()} className="underline underline-offset-2 hover:text-foreground">
+                open PR #{prNumber(left)}
+              </a>
+            </>
+          )}
+        </span>
+      </p>
+    );
+  }
   const where = [merge.pr && `#${merge.pr}`, merge.current].filter(Boolean).join(" ");
   const running = merge.status === "running";
   const detail = running ? merge.message : merge.error;

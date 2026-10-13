@@ -104,7 +104,7 @@ export function PipelineCard({ p }: { p: PipelineView }) {
 
         <CardContent>
           <Steps steps={steps} />
-          {p.merge && <MergeLine merge={p.merge} />}
+          {p.merge && <MergeLine merge={p.merge} chunks={p.chunks} />}
         </CardContent>
       </div>
 
