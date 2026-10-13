@@ -7,7 +7,7 @@ import { groupByStatus } from "./groups";
 import { PipelineCard } from "./pipeline-card";
 import { STATUS_ORDER, statusConfig } from "./status";
 import { ThemeToggle } from "./theme";
-import { cn } from "./utils";
+import { cn, shortRepo } from "./utils";
 
 function EmptyState() {
   return (
@@ -25,8 +25,6 @@ function EmptyState() {
 }
 
 const ALL = "__all__"; // Radix forbids "" as an item value.
-
-const shortRepo = (path: string) => path.replace(/^\/(?:home|Users)\/[^/]+/, "~");
 
 function App() {
   const [pipelines, setPipelines] = useState<DashboardState[]>();

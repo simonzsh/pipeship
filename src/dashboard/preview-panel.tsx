@@ -2,8 +2,8 @@ import { ExternalLink, Globe } from "lucide-react";
 import Markdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { Badge } from "./components/ui/badge";
-import { repoName } from "../repos.ts";
 import { Button } from "./components/ui/button";
+import { repoName } from "../repos.ts";
 
 // Structural type, so this file typechecks with or without the core chunk's PreviewService.
 type PanelPreview = { url: string; services?: { name: string; kind: string; url: string; repo?: string }[] };
@@ -33,7 +33,7 @@ const guideComponents: Components = {
 export function PreviewPanel({ preview, guide }: { preview: PanelPreview; guide?: string }) {
   const services = preview.services ?? [];
   // Repo names only help when the services come from different repos.
-  const multiRepo = new Set(services.map((s) => s.repo)).size > 1;
+  const multiRepo = new Set(services.flatMap((s) => (s.repo ? [s.repo] : []))).size > 1;
   return (
     <div className="flex flex-col rounded-lg border border-emerald-500/30 bg-emerald-500/5 px-3 py-2.5">
       <div className="flex items-center gap-3">

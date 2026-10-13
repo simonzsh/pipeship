@@ -11,7 +11,7 @@ import { StackTree } from "./stack-tree";
 import { statusConfig, StatusBadge } from "./status";
 import { Steps } from "./steps";
 import { TicketIcon } from "./ticket-icon";
-import { cn } from "./utils";
+import { cn, shortRepo } from "./utils";
 import { repoName, repoStacks } from "../repos.ts";
 
 function timeAgo(iso: string): string {
@@ -33,7 +33,9 @@ export function PipelineCard({ p }: { p: DashboardState }) {
   const detailsLabel = multi ? `${branchLabel} · ${p.repos.length} repos` : branchLabel;
   // One merge runs per pipeline: the other repos' buttons hide meanwhile.
   const busyFor = (path: string) => p.merge?.status === "running" && p.merge.repo !== path;
-  const short = (path: string) => path.replace(/^\/home\/[^/]+/, "~");
+  const repoLabel =
+    p.repos.length === 0 ? "" : multi ? stacks.map((st) => st.name).join(" + ") : shortRepo(p.repos[0]!.path);
+  const repoTitle = p.repos.map((r) => r.path).join("\n");
   const prChunks = p.chunks.filter((c) => c.pr);
   const allMerged = prChunks.length > 0 && prChunks.every((c) => c.status === "merged");
   const merging = p.merge?.status === "running";
@@ -130,7 +132,7 @@ export function PipelineCard({ p }: { p: DashboardState }) {
                   <FolderGit2 className="size-4 shrink-0 text-muted-foreground" />
                   <span className="font-medium">{st.name}</span>
                   <span className="truncate font-mono text-xs text-muted-foreground" title={st.repo.path}>
-                    {short(st.repo.path)}
+                    {shortRepo(st.repo.path)}
                   </span>
                   <div className="ml-auto flex items-center gap-2">
                     <MergeButton
@@ -157,20 +159,13 @@ export function PipelineCard({ p }: { p: DashboardState }) {
       )}
 
       <CardFooter className="py-3 text-xs text-muted-foreground">
-        {multi ? (
+        {repoLabel && (
           <>
             <FolderGit2 className="size-3.5 shrink-0" />
-            <span className="truncate font-mono" title={p.repos.map((r) => r.path).join("\n")}>
-              {stacks.map((st) => st.name).join(" + ")}
-            </span>
+            <span className="truncate font-mono" title={repoTitle}>{repoLabel}</span>
+            <span>·</span>
           </>
-        ) : p.repos[0] ? (
-          <>
-            <FolderGit2 className="size-3.5 shrink-0" />
-            <span className="truncate font-mono" title={p.repos[0].path}>{short(p.repos[0].path)}</span>
-          </>
-        ) : null}
-        <span>·</span>
+        )}
         <span className="whitespace-nowrap">updated {timeAgo(p.updatedAt)}</span>
         <div className="ml-auto flex items-center gap-2">
           {multi && merging && p.merge && (
