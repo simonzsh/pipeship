@@ -3,7 +3,7 @@ import { spawn } from "node:child_process";
 import { existsSync, mkdirSync, openSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { parseArgs } from "node:util";
-import { deletePipeline, findRecipe, isAlive, killGroup, loadRecipe, startPreview, stopPipeline } from "./preview.ts";
+import { deletePipeline, findRecipe, isAlive, killGroup, loadRecipe, previewLines, startPreview, stopPipeline } from "./preview.ts";
 import { detectSession } from "./session.ts";
 import { DEFAULT_PORT, isDashboardUp, serve } from "./server.ts";
 import {
@@ -23,8 +23,8 @@ const USAGE = `pipeship — state, test environments and dashboard for the /pipe
   status <id> <status>         running, waiting_for_user, ready, failed, stopped
   chunk <id> <name> [--worktree p] [--branch b] [--status s] [--pr url]
   recipe <repo>                print the recipe used to start the app, or "none"
-  preview <id> <worktree> [--recipe file]   start the test environment; a --recipe that works is saved for the repo
-  stop <id>                    stop the pipeline and its test server
+  preview <id> <worktree> [--recipe file]   start the test environment (every service), print its URLs; a --recipe that works is saved for the repo
+  stop <id>                    stop the pipeline and its test servers
   delete <id> [--force]        delete its worktrees and files (branches and PRs stay); --force drops uncommitted changes
   dashboard [start|stop] [--port n]   start the dashboard in the background (default) or stop it
   serve [--port n]             run the dashboard in the foreground`;
@@ -120,7 +120,7 @@ async function main() {
     case "preview": {
       const draft = values.recipe ? resolve(values.recipe) : undefined;
       const state = await startPreview(need(args[0], "<id>"), resolve(need(args[1], "<worktree>")), draft);
-      return print(state.preview!.url);
+      return print(previewLines(state.preview!).join("\n"));
     }
     case "stop":
       await stopPipeline(need(args[0], "<id>"));

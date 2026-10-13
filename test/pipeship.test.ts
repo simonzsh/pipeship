@@ -3,7 +3,11 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync, existsSync, readFileSync
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createPipeline, listStates, pipelineDir, readState, setStep, updateState, upsertChunk } from "../src/state.ts";
-import { deletePipeline, findRecipe, isAlive, savedRecipePath, startPreview, stopPipeline } from "../src/preview.ts";
+import {
+  DASHBOARD_PORT, deletePipeline, findRecipe, isAlive, mainService, normalizeRecipe, pickPorts, previewLines, resolveEnv,
+  savedRecipePath, startOrder, startPreview, stopPipeline, type Service,
+} from "../src/preview.ts";
+import { DEFAULT_PORT } from "../src/server.ts";
 import { spawn, spawnSync } from "node:child_process";
 import { Database } from "bun:sqlite";
 import { detectSession, lockHeld, procStart, sessionState, withSessionState, type ReadProc } from "../src/session.ts";
@@ -73,7 +77,14 @@ test("preview starts the app, copies local files, and stop kills it", async () =
 
   const state = await startPreview(id, worktree);
   expect(state.status).toBe("ready");
-  expect(state.preview!.url).toBe(`http://demo-7.localhost:${state.preview!.port}`);
+  const { port } = state.preview!;
+  expect(state.preview!.url).toBe(`http://localhost:${port}`);
+  expect(port).toBeGreaterThanOrEqual(3000);
+  expect(port).toBeLessThan(4000);
+  expect(state.preview!.services).toEqual([
+    { name: "app", kind: "front", port, url: `http://localhost:${port}`, pid: state.preview!.pid, log: join(pipelineDir(id), "preview-app.log") },
+  ]);
+  expect(previewLines(state.preview!)).toEqual([`http://localhost:${port}`]);
   expect(readFileSync(join(worktree, ".env.local"), "utf8")).toBe("SECRET=1");
   expect(await (await fetch(`http://localhost:${state.preview!.port}`)).text()).toBe("hello");
 
@@ -89,7 +100,7 @@ test("preview fails clearly when the server crashes", async () => {
   const { id } = createPipeline({ repo, title: "t", source: "text" });
   await expect(startPreview(id, repo)).rejects.toThrow("boom");
   expect(readState(id).preview).toBeUndefined();
-  expect(existsSync(join(process.env.PIPESHIP_HOME!, "pipelines", id, "preview.log"))).toBe(true);
+  expect(existsSync(join(pipelineDir(id), "preview-app.log"))).toBe(true);
 }, 30_000);
 
 test("a draft recipe is saved for the repo only when the app starts", async () => {
@@ -109,15 +120,6 @@ test("a draft recipe is saved for the repo only when the app starts", async () =
   const state = await startPreview(second.id, repo);
   expect(state.status).toBe("ready");
   await stopPipeline(second.id);
-}, 30_000);
-
-test("the URL falls back to localhost when the app rejects the ticket host", async () => {
-  const strict = `Bun.serve({ port: Number(process.env.PORT), fetch: (r) => r.headers.get('host')?.startsWith('localhost') ? new Response('ok') : new Response('blocked', { status: 403 }) })`;
-  writeFileSync(join(repo, ".pipeship.json"), JSON.stringify({ start: `bun -e "${strict}"` }));
-  const { id } = createPipeline({ repo, title: "t", source: "text", links: [{ ref: "HOST-1" }] });
-  const state = await startPreview(id, repo);
-  expect(state.preview!.url).toBe(`http://localhost:${state.preview!.port}`);
-  await stopPipeline(id);
 }, 30_000);
 
 test("a pipeline keeps one link per ticket, and old state files are upgraded", () => {
@@ -319,4 +321,149 @@ test("the server never forwards registry secrets", () => {
   const out = JSON.stringify(withSessionState([state], { homes, now: Date.now() + 61_000 }));
   expect(out).toContain("sessionState");
   expect(out).not.toContain("secret");
+});
+
+const svc = (name: string, kind: string, extra: Partial<Service> = {}): Service => ({
+  name, kind, start: "true", portEnv: "PORT", readyPath: "/", env: {}, ...extra,
+});
+
+test("a dashboard port constant matches the server", () => {
+  expect(DASHBOARD_PORT).toBe(DEFAULT_PORT);
+});
+
+test("fronts take ports from 3000, other kinds from 4000", async () => {
+  const ports = await pickPorts([svc("web", "front"), svc("api", "back"), svc("worker", "job"), svc("admin", "front")], async () => true);
+  expect(ports).toEqual({ web: 3000, api: 4000, worker: 4001, admin: 3001 });
+});
+
+test("port picking skips 4400 and ports in use", async () => {
+  const back = await pickPorts([svc("api", "back")], async (p) => p >= 4400);
+  expect(back).toEqual({ api: 4401 });
+  const front = await pickPorts([svc("web", "front")], async (p) => p !== 3000);
+  expect(front).toEqual({ web: 3001 });
+});
+
+test("fixed ports are reserved and must be free", async () => {
+  const services = [svc("db", "infra", { fixedPort: 4000, portEnv: undefined }), svc("api", "back")];
+  expect(await pickPorts(services, async () => true)).toEqual({ db: 4000, api: 4001 });
+  await expect(pickPorts(services, async (p) => p !== 4000)).rejects.toThrow("fixed port 4000 is already in use");
+});
+
+test("env templates resolve ports and leave other placeholders", () => {
+  const env = { A: "http://localhost:${api.port}", B: "${HOME}", C: "${api.portx}" };
+  expect(resolveEnv(env, { api: 4000 })).toEqual({ A: "http://localhost:4000", B: "${HOME}", C: "${api.portx}" });
+});
+
+test("start order is back and other kinds, then fronts; the main service is the first front", () => {
+  const list = [svc("web", "front"), svc("api", "back"), svc("admin", "front"), svc("worker", "job")];
+  expect(startOrder(list).map((s) => s.name)).toEqual(["api", "worker", "web", "admin"]);
+  expect(mainService(list).name).toBe("web");
+  expect(mainService([svc("api", "back"), svc("worker", "job")]).name).toBe("api");
+});
+
+test("recipe validation errors", () => {
+  const bad = (recipe: object) => () => normalizeRecipe(recipe as never, "r.json");
+  const ok = { name: "a", kind: "back", start: "x" };
+  expect(bad({ start: "x", services: [ok] })).toThrow('r.json: use either "start" or "services", not both');
+  expect(bad({})).toThrow('r.json: "start" or "services" is required');
+  expect(bad({ services: [] })).toThrow('r.json: "services" must be a non-empty list');
+  expect(bad({ services: [{ kind: "back", start: "x" }] })).toThrow('r.json: service #1 needs a "name"');
+  expect(bad({ services: [{ ...ok, name: "a b" }] })).toThrow('service name "a b" may only use letters, digits, "-" and "_"');
+  expect(bad({ services: [ok, ok] })).toThrow('duplicate service name "a"');
+  expect(bad({ services: [{ name: "a", kind: "back" }] })).toThrow('service "a": "start" is required');
+  expect(bad({ services: [{ name: "a", start: "x" }] })).toThrow('service "a": "kind" is required');
+  expect(bad({ services: [{ ...ok, fixedPort: 70000 }] })).toThrow('service "a": "fixedPort" must be a port number');
+  expect(bad({ services: [{ ...ok, env: { K: 1 } }] })).toThrow('service "a": env "K" must be a string');
+  expect(bad({ services: [{ ...ok, env: { K: "${nope.port}" } }] })).toThrow('env "K" refers to unknown service "nope"');
+  expect(bad({ services: [{ ...ok, env: { K: "${a.port}" } }] })).toThrow('env "K" refers to its own port');
+
+  expect(normalizeRecipe({ start: "bun dev" })).toEqual([
+    { name: "app", kind: "front", start: "bun dev", portEnv: "PORT", readyPath: "/", env: {} },
+  ]);
+  expect(normalizeRecipe({ services: [{ ...ok, fixedPort: 5432 }] })[0]!.portEnv).toBeUndefined();
+});
+
+test("a multi-service recipe starts back ends first, wires ports, and stop kills every service", async () => {
+  const api = `Bun.serve({ port: Number(process.env.API_PORT), fetch: () => new Response('api') })`;
+  const web = `await fetch(process.env.API_URL); Bun.serve({ port: Number(process.env.WEB_PORT), fetch: () => new Response(process.env.API_URL) })`;
+  writeFileSync(
+    join(repo, ".pipeship.json"),
+    JSON.stringify({
+      services: [
+        { name: "web", kind: "front", start: `bun -e "${web}"`, portEnv: "WEB_PORT", env: { API_URL: "http://localhost:${api.port}" } },
+        { name: "api", kind: "back", start: `bun -e "${api}"`, portEnv: "API_PORT" },
+      ],
+    }),
+  );
+  const { id } = createPipeline({ repo, title: "t", source: "text" });
+  const state = await startPreview(id, repo);
+  const preview = state.preview!;
+  const [first, second] = preview.services!;
+  expect([first!.name, second!.name]).toEqual(["api", "web"]);
+  expect(second!.port).toBeGreaterThanOrEqual(3000);
+  expect(second!.port).toBeLessThan(4000);
+  expect(first!.port).toBeGreaterThanOrEqual(4000);
+  expect(first!.port).toBeLessThan(5000);
+  expect(first!.port).not.toBe(4400);
+  expect(preview.url).toBe(second!.url);
+  expect(preview.pid).toBe(second!.pid);
+  expect(await (await fetch(second!.url)).text()).toBe(first!.url);
+  expect(existsSync(first!.log) && existsSync(second!.log)).toBe(true);
+  expect(previewLines(preview)).toHaveLength(3);
+
+  await stopPipeline(id);
+  expect(isAlive(first!.pid) || isAlive(second!.pid)).toBe(false);
+  expect(readState(id).preview).toBeUndefined();
+}, 30_000);
+
+test("a failed service stops the services already started", async () => {
+  const api = `Bun.serve({ port: Number(process.env.PORT), fetch: () => new Response('api') })`;
+  writeFileSync(
+    join(repo, ".pipeship.json"),
+    JSON.stringify({
+      services: [
+        { name: "api", kind: "back", start: `bun -e "${api}"` },
+        { name: "web", kind: "front", start: "echo api=$API_URL; exit 1", env: { API_URL: "http://localhost:${api.port}" } },
+      ],
+    }),
+  );
+  const { id } = createPipeline({ repo, title: "t", source: "text" });
+  const error = await startPreview(id, repo).catch((e: Error) => e);
+  expect((error as Error).message).toMatch(/service "web" exited.*api=http:\/\/localhost:\d+/s);
+  const port = /api=http:\/\/localhost:(\d+)/.exec((error as Error).message)![1];
+  await expect(fetch(`http://localhost:${port}`)).rejects.toThrow();
+  expect(readState(id).preview).toBeUndefined();
+}, 30_000);
+
+function fakePreview(id: string, pid: number, extra: object = {}) {
+  updateState(id, (s) => {
+    s.preview = { url: "http://localhost:3000", port: 3000, pid, worktree: repo, log: "x", ...extra };
+  });
+}
+
+test("stop handles an old state without services", async () => {
+  const sleeper = Bun.spawn(["sleep", "60"], { detached: true } as never);
+  const { id } = createPipeline({ repo, title: "t", source: "text" });
+  fakePreview(id, sleeper.pid);
+  try {
+    await stopPipeline(id);
+    expect(isAlive(sleeper.pid)).toBe(false);
+    expect(readState(id).preview).toBeUndefined();
+  } finally {
+    if (isAlive(sleeper.pid)) process.kill(sleeper.pid);
+  }
+}, 30_000);
+
+test("a fixed-port recipe refuses a second live pipeline of the same repo", async () => {
+  const sleeper = Bun.spawn(["sleep", "60"], { detached: true } as never);
+  const a = createPipeline({ repo, title: "a", name: "fixed-a", source: "text" });
+  const b = createPipeline({ repo, title: "b", name: "fixed-b", source: "text" });
+  fakePreview(a.id, sleeper.pid);
+  writeFileSync(join(repo, ".pipeship.json"), JSON.stringify({ services: [{ name: "db", kind: "infra", start: "sleep 60", fixedPort: 4999 }] }));
+  try {
+    await expect(startPreview(b.id, repo)).rejects.toThrow("live test environment");
+  } finally {
+    await stopPipeline(a.id);
+    if (isAlive(sleeper.pid)) process.kill(sleeper.pid);
+  }
 });
