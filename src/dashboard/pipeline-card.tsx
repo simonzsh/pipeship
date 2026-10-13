@@ -85,7 +85,7 @@ export function PipelineCard({ p }: { p: DashboardState }) {
           </div>
           <div className="flex shrink-0 flex-col items-end gap-2">
             <div className="flex items-center gap-1.5">
-              {p.t3Thread && <T3ThreadButton thread={p.t3Thread} />}
+              {p.session?.t3Thread && <T3ThreadButton thread={p.session.t3Thread} />}
               <AgentLogo p={p} />
               {p.mode === "quick" && (
                 <Badge variant="secondary" className="bg-pink-500/15 text-pink-700 dark:text-pink-400">

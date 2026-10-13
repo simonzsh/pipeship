@@ -2,14 +2,16 @@ import { Check } from "lucide-react";
 import { useEffect, useState } from "react";
 import { siClaude } from "simple-icons";
 import { Tooltip, TooltipContent, TooltipTrigger } from "./components/ui/tooltip";
-import type { Session, State } from "../state.ts";
-import type { T3Thread } from "../session.ts";
+import type { Session, State, T3Thread } from "../state.ts";
 import { cn } from "./utils";
 
 export function resumeCommand(s: Session): string {
   const cwd = /^[\w./~-]+$/.test(s.cwd) ? s.cwd : `'${s.cwd.replace(/'/g, `'\\''`)}'`;
   return s.harness === "claude" ? `cd ${cwd} && claude --resume ${s.id}` : `cd ${cwd} && codex resume ${s.id}`;
 }
+
+// The two header buttons share their box, so they stay the same size side by side.
+const ICON_BUTTON = "flex size-6 items-center justify-center rounded-md";
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -64,7 +66,7 @@ export function AgentLogo({ p }: { p: State }) {
           aria-label={canResume ? `Copy the command to resume the ${name} session` : `${name} session`}
           aria-disabled={!canResume}
           className={cn(
-            "flex size-6 items-center justify-center rounded-md",
+            ICON_BUTTON,
             canResume ? "cursor-pointer hover:bg-accent" : "cursor-default",
           )}
           onClick={async (e) => {
@@ -106,7 +108,7 @@ export function T3ThreadButton({ thread }: { thread: T3Thread }) {
         <a
           href={t3ThreadLink(thread)}
           aria-label="Open the thread in T3 Code"
-          className="flex size-6 items-center justify-center rounded-md text-foreground hover:bg-accent"
+          className={cn(ICON_BUTTON, "text-foreground hover:bg-accent")}
           onClick={(e) => e.stopPropagation()}
         >
           {/* The mark is black in T3 Code: follow the text colour, like the ChatGPT logo. */}
