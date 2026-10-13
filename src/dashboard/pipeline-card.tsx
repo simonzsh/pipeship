@@ -4,7 +4,7 @@ import type { PipelineView } from "../state.ts";
 import { ActionButton } from "./action-button";
 import { Badge } from "./components/ui/badge";
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "./components/ui/card";
-import { MergeButton } from "./merge-button";
+import { CombinedNote, MergeButton } from "./merge-button";
 import { PreviewPanel } from "./preview-panel";
 import { AgentLogo, isAgentStopped } from "./session";
 import { StackTree } from "./stack-tree";
@@ -111,6 +111,7 @@ export function PipelineCard({ p }: { p: PipelineView }) {
         <CardContent className="flex flex-col gap-4 border-t py-5">
           {p.preview && <PreviewPanel preview={p.preview} />}
           {p.chunks.length > 0 && <StackTree base={p.base} chunks={p.chunks} merge={p.merge} />}
+          {p.merge && <CombinedNote merge={p.merge} chunks={p.chunks} />}
         </CardContent>
       )}
 

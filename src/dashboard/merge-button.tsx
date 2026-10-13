@@ -105,7 +105,7 @@ export function MergeButton({ id, chunks, base, merge }: { id: string; chunks: C
   return (
     <AlertDialog onOpenChange={(open) => open && setChoice("combine")}>
       {error && <span className="text-xs text-destructive">{error}</span>}
-      {!error && merge && <MergeResult merge={merge} chunks={chunks} />}
+      {!error && merge && <MergeFailure merge={merge} />}
       <AlertDialogTrigger asChild>
         <Button size="xs" className="bg-emerald-600 text-white hover:bg-emerald-700">
           <GitMerge /> Merge stack
@@ -132,30 +132,33 @@ export function MergeButton({ id, chunks, base, merge }: { id: string; chunks: C
   );
 }
 
-// Next to the button: why the last run stopped, or the PR left after a combine.
-export function MergeResult({ merge, chunks }: { merge: MergeRun; chunks: Chunk[] }) {
-  if (merge.status === "failed") {
-    return (
-      <span className="flex min-w-0 items-center gap-1 text-xs text-destructive" title={merge.error}>
-        <XCircle className="size-3.5 shrink-0" />
-        <span className="max-w-72 truncate">Merge stopped: {merge.error}</span>
-      </span>
-    );
-  }
+// Next to the button: why the last run stopped.
+export function MergeFailure({ merge }: { merge: MergeRun }) {
+  if (merge.status !== "failed") return null;
+  return (
+    <span className="flex min-w-0 items-center gap-1 text-xs text-destructive" title={merge.error}>
+      <XCircle className="size-3.5 shrink-0" />
+      <span className="max-w-72 truncate">Merge stopped: {merge.error}</span>
+    </span>
+  );
+}
+
+// Under the branch tree, after a combine: the one PR left to merge.
+export function CombinedNote({ merge, chunks }: { merge: MergeRun; chunks: Chunk[] }) {
   // Base mode: the Merged badge already says it.
   if (merge.status !== "done" || merge.mode !== "combine") return null;
   // The PR left open is the lowest one not merged.
   const left = chunks.find((c) => c.pr && c.status !== "merged")?.pr;
   if (!left) return null;
   return (
-    <a
-      href={left}
-      target="_blank"
-      rel="noreferrer"
-      title={merge.message}
-      className="flex items-center gap-1 text-xs text-muted-foreground underline-offset-2 hover:text-foreground hover:underline"
-    >
-      <GitMerge className="size-3.5 text-violet-600 dark:text-violet-400" /> Combined into PR #{prNumber(left)}
-    </a>
+    <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
+      <GitMerge className="size-3.5 shrink-0 text-violet-600 dark:text-violet-400" />
+      <span>
+        {merge.message ?? "Combined the stack"} ·{" "}
+        <a href={left} target="_blank" rel="noreferrer" className="underline underline-offset-2 hover:text-foreground">
+          open PR #{prNumber(left)}
+        </a>
+      </span>
+    </p>
   );
 }
