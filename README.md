@@ -116,7 +116,7 @@ Each pipeline's header shows the logo of the agent that runs the pipeline (Claud
 
 ### Actions
 
-The header can request a pipeline stop (the agents stop after their current step), stop the test servers, and delete a finished pipeline: its worktrees and files go, its branches and PRs stay.
+The header can request a pipeline stop (the agents stop after their current step), stop the test servers ("Stop preview", the pipeline stays ready) and start them again ("Start preview", with no confirmation; a failure shows in the Test tab), and delete a finished pipeline: its worktrees and files go, its branches and PRs stay.
 
 The PR stack is always visible, with one row per repo, its path and its merge button. A finished pipeline's PRs merge in two steps, one button at a time. The green "Combine PRs" button merges each PR into the branch below, from the top, so one PR is left. The violet "Merge into <base>" button then squash-merges that PR into the base branch, after a confirmation. Both wait for the checks and stop at the first PR that cannot merge, with the reason in the pipeline's detail. Only one merge runs at a time.
 

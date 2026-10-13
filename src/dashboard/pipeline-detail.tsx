@@ -2,7 +2,7 @@ import { ArrowLeft, FolderGit2, GitMerge, Loader2, Zap } from "lucide-react";
 import { useState } from "react";
 import { repoName, repoStacks } from "../repos.ts";
 import type { DashboardState } from "../state.ts";
-import { ActionButton } from "./action-button";
+import { ActionButton, StartPreviewButton } from "./action-button";
 import { CodeTab, type DiffTarget } from "./code-tab";
 import { Badge } from "./components/ui/badge";
 import { Button } from "./components/ui/button";
@@ -20,7 +20,7 @@ import { cn, shortRepo } from "./utils";
 
 export function PipelineDetail({ p, onBack }: { p: DashboardState; onBack: () => void }) {
   const [target, setTarget] = useState<DiffTarget>({});
-  const hasTest = p.preview !== undefined || !!p.testGuide;
+  const hasTest = p.preview !== undefined || !!p.testGuide || !!p.previewError;
   const [tab, setTab] = useState(hasTest ? "test" : "code");
   const stacks = repoStacks(p);
   const multi = p.repos.length > 1;
@@ -28,6 +28,8 @@ export function PipelineDetail({ p, onBack }: { p: DashboardState; onBack: () =>
   const busyFor = (path: string) => p.merge?.status === "running" && p.merge.repo !== path;
   const merging = p.merge?.status === "running";
   const done = finished(p);
+  // Services get a pid when they spawn; a preview with some still unset is mid-start.
+  const starting = p.preview?.services?.some((s) => s.pid === undefined) ?? false;
   const repoLabel =
     p.repos.length === 0 ? "" : multi ? stacks.map((st) => st.name).join(" + ") : shortRepo(p.repos[0]!.path);
   const showTicket = p.ticket.links.length > 0 || (p.ticket.source && p.ticket.source !== "text");
@@ -124,7 +126,10 @@ export function PipelineDetail({ p, onBack }: { p: DashboardState; onBack: () =>
             {p.session?.t3Thread && <T3ThreadButton thread={p.session.t3Thread} />}
             <AgentLogo p={p} />
             {p.status === "ready" ? (
-              p.preview && <ActionButton id={p.id} action="stopServer" />
+              <>
+                {(!p.preview || starting) && <StartPreviewButton id={p.id} starting={starting} />}
+                {p.preview && <ActionButton id={p.id} action="stopServer" />}
+              </>
             ) : p.status === "running" || p.status === "waiting_for_user" || (p.status === "failed" && p.preview) ? (
               <ActionButton id={p.id} action="stopPipeline" hasServers={!!p.preview} />
             ) : null}
@@ -154,9 +159,14 @@ export function PipelineDetail({ p, onBack }: { p: DashboardState; onBack: () =>
             <TabsTrigger value="code">Code</TabsTrigger>
           </TabsList>
           <TabsContent value="test" className="flex flex-col gap-4 px-6">
+            {p.previewError && !p.preview && (
+              <p className="text-sm text-destructive" title={p.previewError}>
+                Preview failed: <span className="line-clamp-3 whitespace-pre-wrap break-words font-mono text-xs">{p.previewError}</span>
+              </p>
+            )}
             {p.preview && <PreviewPanel preview={p.preview} />}
             {p.testGuide && <TestGuide guide={p.testGuide} />}
-            {!p.preview && !p.testGuide && <p className="text-sm text-muted-foreground">No test environment yet</p>}
+            {!p.preview && !p.testGuide && !p.previewError && <p className="text-sm text-muted-foreground">No test environment yet</p>}
           </TabsContent>
           {/* The code tab pads its own rows. */}
           <TabsContent value="code">

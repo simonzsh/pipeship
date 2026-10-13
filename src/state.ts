@@ -76,6 +76,7 @@ export interface State {
   chunks: Chunk[];
   preview?: { url: string; port: number; pid?: number; log: string; services?: PreviewService[] };
   session?: Session;
+  previewError?: string; // why the last dashboard "Start preview" failed
   merge?: MergeRun; // last "Merge stack" run from the dashboard
   stopRequested: boolean;
   createdAt: string;
