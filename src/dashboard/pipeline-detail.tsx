@@ -12,11 +12,11 @@ import { allMerged, displaySteps, finished, timeAgo } from "./pipeline-info";
 import { PreviewPanel } from "./preview-panel";
 import { AgentLogo, T3ThreadButton } from "./session";
 import { StackTree } from "./stack-tree";
-import { StatusBadge, statusConfig } from "./status";
+import { StatusBadge } from "./status";
 import { Steps } from "./steps";
 import { TestGuide } from "./test-guide";
 import { TicketIcon } from "./ticket-icon";
-import { cn, shortRepo } from "./utils";
+import { shortRepo } from "./utils";
 
 export function PipelineDetail({ p, onBack }: { p: DashboardState; onBack: () => void }) {
   const [target, setTarget] = useState<DiffTarget>({});
@@ -71,69 +71,53 @@ export function PipelineDetail({ p, onBack }: { p: DashboardState; onBack: () =>
 
   return (
     <div className="flex flex-col">
-      <div className={cn("flex flex-col gap-4 border-b px-6 py-5", statusConfig(p.status).tint)}>
+      {/* No status tint here: the list already carries the colour, the detail stays calm. */}
+      <div className="flex flex-col gap-4 border-b px-6 py-5">
         <Button variant="ghost" size="sm" onClick={onBack} className="-ml-2 hidden w-fit max-[899px]:inline-flex">
           <ArrowLeft /> Pipelines
         </Button>
         <div className="flex items-start justify-between gap-4 max-[599px]:flex-col">
-          <div className="flex min-w-0 flex-col gap-1.5">
+          <div className="flex min-w-0 flex-col gap-2">
             <h2 className="text-lg font-semibold leading-tight">{p.ticket.title}</h2>
-            {/* A plain-text ticket has nothing to show under its title. */}
-            {showTicket && (
-              <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm text-muted-foreground">
-                <TicketIcon ticket={p.ticket} />
-                {p.ticket.links.map((link) =>
-                  link.url ? (
-                    <a key={link.ref} href={link.url} target="_blank" className="font-medium text-foreground underline-offset-4 hover:underline">
-                      {link.ref}
-                    </a>
-                  ) : (
-                    <span key={link.ref} className="font-medium text-foreground">{link.ref}</span>
-                  ),
-                )}
-              </div>
-            )}
+            <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
+              <StatusBadge status={p.status} />
+              {p.mode === "quick" && (
+                <Badge variant="secondary" className="bg-pink-500/15 text-pink-700 dark:text-pink-400">
+                  <Zap /> Quick
+                </Badge>
+              )}
+              {allMerged(p) && (
+                <Badge variant="secondary" className="bg-violet-500/15 text-violet-700 dark:text-violet-400">
+                  <GitMerge /> Merged
+                </Badge>
+              )}
+              {/* A plain-text ticket has no link to show. */}
+              {showTicket && (
+                <span className="flex items-center gap-1.5 text-sm">
+                  <TicketIcon ticket={p.ticket} />
+                  {p.ticket.links.map((link) =>
+                    link.url ? (
+                      <a key={link.ref} href={link.url} target="_blank" className="font-medium text-foreground underline-offset-4 hover:underline">
+                        {link.ref}
+                      </a>
+                    ) : (
+                      <span key={link.ref} className="font-medium text-foreground">{link.ref}</span>
+                    ),
+                  )}
+                </span>
+              )}
+              {repoLabel && (
+                <span className="flex min-w-0 items-center gap-1.5">
+                  <FolderGit2 className="size-3.5 shrink-0" />
+                  <span className="truncate font-mono" title={p.repos.map((r) => r.path).join("\n")}>{repoLabel}</span>
+                </span>
+              )}
+              <span className="whitespace-nowrap">· updated {timeAgo(p.updatedAt)}</span>
+            </div>
           </div>
-          <div className="flex shrink-0 flex-wrap items-center gap-1.5">
+          <div className="flex shrink-0 flex-wrap items-center gap-2">
             {p.session?.t3Thread && <T3ThreadButton thread={p.session.t3Thread} />}
             <AgentLogo p={p} />
-            {p.mode === "quick" && (
-              <Badge variant="secondary" className="bg-pink-500/15 text-pink-700 dark:text-pink-400">
-                <Zap /> Quick
-              </Badge>
-            )}
-            {allMerged(p) && (
-              <Badge variant="secondary" className="bg-violet-500/15 text-violet-700 dark:text-violet-400">
-                <GitMerge /> Merged
-              </Badge>
-            )}
-            <StatusBadge status={p.status} />
-          </div>
-        </div>
-
-        <Steps steps={displaySteps(p)} />
-
-        <div className="flex flex-wrap items-center gap-x-3 gap-y-2 text-xs text-muted-foreground">
-          {repoLabel && (
-            <>
-              <FolderGit2 className="size-3.5 shrink-0" />
-              <span className="truncate font-mono" title={p.repos.map((r) => r.path).join("\n")}>{repoLabel}</span>
-              <span>·</span>
-            </>
-          )}
-          <span className="whitespace-nowrap">updated {timeAgo(p.updatedAt)}</span>
-          <div className="ml-auto flex flex-wrap items-center gap-2">
-            {multi && merging && p.merge && (
-              <span className="flex items-center gap-1.5">
-                <Loader2 className="size-3.5 animate-spin" /> Merging {repoName(p.merge.repo)}…
-              </span>
-            )}
-            {!multi && p.repos[0] && (
-              <MergeButton
-                id={p.id} repo={p.repos[0].path} chunks={p.chunks} base={p.repos[0].base} merge={p.merge}
-                busy={false} finished={done}
-              />
-            )}
             {p.status === "ready" ? (
               p.preview && <ActionButton id={p.id} action="stopServer" />
             ) : p.status === "running" || p.status === "waiting_for_user" || (p.status === "failed" && p.preview) ? (
@@ -142,11 +126,24 @@ export function PipelineDetail({ p, onBack }: { p: DashboardState; onBack: () =>
             {!merging && done && <ActionButton id={p.id} action="delete" />}
           </div>
         </div>
+
+        <Steps steps={displaySteps(p)} />
       </div>
 
       <div className="flex flex-col gap-3 px-6 pt-5">
-        <div className="flex items-center justify-between gap-2">
-          <h3 className="text-sm font-semibold">Pull request stack</h3>
+        <div className="flex flex-wrap items-center gap-2">
+          <h3 className="mr-auto text-sm font-semibold">Pull request stack</h3>
+          {multi && merging && p.merge && (
+            <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
+              <Loader2 className="size-3.5 animate-spin" /> Merging {repoName(p.merge.repo)}…
+            </span>
+          )}
+          {!multi && p.repos[0] && (
+            <MergeButton
+              id={p.id} repo={p.repos[0].path} chunks={p.chunks} base={p.repos[0].base} merge={p.merge}
+              busy={false} finished={done}
+            />
+          )}
           {p.chunks.some((c) => c.branch) && (
             <Button
               variant={target.chunk === undefined ? "outline" : "ghost"}
