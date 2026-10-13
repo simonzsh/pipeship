@@ -76,6 +76,7 @@ export interface State {
   chunks: Chunk[];
   preview?: { url: string; port: number; pid?: number; log: string; services?: PreviewService[] };
   session?: Session;
+  previewError?: string; // why the last dashboard "Start preview" failed
   merge?: MergeRun; // last "Merge stack" run from the dashboard
   stopRequested: boolean;
   createdAt: string;
@@ -217,13 +218,15 @@ export function listStates(): State[] {
     .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
 }
 
-export type DashboardState = State & { testGuide?: string };
+export type DashboardState = State & { testGuide?: string; previewStarting?: boolean };
 
-// The guide is read for the API only: it never goes into state.json.
-export function listDashboardStates(): DashboardState[] {
+// The guide and the starting flag are for the API only: they never go into state.json.
+export function listDashboardStates(isStarting: (id: string) => boolean = () => false): DashboardState[] {
   return listStates().map((s) => {
     const file = join(pipelineDir(s.id), "test.md");
-    return existsSync(file) ? { ...s, testGuide: readFileSync(file, "utf8") } : s;
+    const d: DashboardState = existsSync(file) ? { ...s, testGuide: readFileSync(file, "utf8") } : { ...s };
+    if (isStarting(s.id)) d.previewStarting = true;
+    return d;
   });
 }
 

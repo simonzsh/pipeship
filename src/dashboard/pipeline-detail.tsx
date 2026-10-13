@@ -2,7 +2,7 @@ import { ArrowLeft, FolderGit2, GitMerge, Loader2, Zap } from "lucide-react";
 import { useState } from "react";
 import { repoName, repoStacks } from "../repos.ts";
 import type { DashboardState } from "../state.ts";
-import { ActionsMenu } from "./action-button";
+import { ActionsMenu, StartPreviewButton } from "./action-button";
 import { CodeTab, type DiffTarget } from "./code-tab";
 import { Badge } from "./components/ui/badge";
 import { Button } from "./components/ui/button";
@@ -20,7 +20,7 @@ import { shortRepo } from "./utils";
 
 export function PipelineDetail({ p, onBack }: { p: DashboardState; onBack: () => void }) {
   const [target, setTarget] = useState<DiffTarget>({});
-  const hasTest = p.preview !== undefined || !!p.testGuide;
+  const hasTest = p.preview !== undefined || !!p.testGuide || !!p.previewError;
   const [tab, setTab] = useState(hasTest ? "test" : "code");
   const stacks = repoStacks(p);
   const multi = p.repos.length > 1;
@@ -28,6 +28,8 @@ export function PipelineDetail({ p, onBack }: { p: DashboardState; onBack: () =>
   const busyFor = (path: string) => p.merge?.status === "running" && p.merge.repo !== path;
   const merging = p.merge?.status === "running";
   const done = finished(p);
+  // The server knows a dashboard start is in flight; a CLI start only shows as services still without a pid.
+  const starting = p.previewStarting || (p.preview?.services?.some((s) => s.pid === undefined) ?? false);
   const repoLabel =
     p.repos.length === 0 ? "" : multi ? stacks.map((st) => st.name).join(" + ") : shortRepo(p.repos[0]!.path);
   const showTicket = p.ticket.links.length > 0 || (p.ticket.source && p.ticket.source !== "text");
@@ -93,7 +95,8 @@ export function PipelineDetail({ p, onBack }: { p: DashboardState; onBack: () =>
                   <GitMerge /> Merged
                 </Badge>
               )}
-              <ActionsMenu p={p} merging={merging} />
+              {p.status === "ready" && (!p.preview || starting) && <StartPreviewButton id={p.id} starting={starting} />}
+              <ActionsMenu p={p} merging={merging} starting={starting} />
             </div>
           </div>
           <div className="flex items-center justify-between gap-4 max-[599px]:flex-col max-[599px]:items-start">
@@ -150,9 +153,14 @@ export function PipelineDetail({ p, onBack }: { p: DashboardState; onBack: () =>
             <TabsTrigger value="code">Code</TabsTrigger>
           </TabsList>
           <TabsContent value="test" className="flex flex-col gap-4 px-6">
+            {p.previewError && !p.preview && (
+              <p className="text-sm text-destructive" title={p.previewError}>
+                Preview failed: <span className="line-clamp-3 whitespace-pre-wrap break-words font-mono text-xs">{p.previewError}</span>
+              </p>
+            )}
             {p.preview && <PreviewPanel preview={p.preview} />}
             {p.testGuide && <TestGuide guide={p.testGuide} />}
-            {!p.preview && !p.testGuide && <p className="text-sm text-muted-foreground">No test environment yet</p>}
+            {!p.preview && !p.testGuide && !p.previewError && <p className="text-sm text-muted-foreground">No test environment yet</p>}
           </TabsContent>
           {/* The code tab pads its own rows. */}
           <TabsContent value="code">

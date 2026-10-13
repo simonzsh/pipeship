@@ -488,6 +488,7 @@ export async function startPreview(id: string, worktree?: string, draft?: string
 }
 
 export async function stopPreview(id: string): Promise<void> {
+  if (startsInFlight.has(id)) stoppedMidStart.add(id);
   const errors: string[] = [];
   const killed = new Set<number>();
   const killAll = async (preview: Preview | undefined) => {
@@ -510,6 +511,52 @@ export async function stopPreview(id: string): Promise<void> {
   updateState(id, (s) => {
     s.preview = undefined;
   });
+}
+
+export class PreviewError extends Error {
+  constructor(message: string, readonly status: number) {
+    super(message);
+  }
+}
+
+// One dashboard-started preview per pipeline, like merge's `active` set.
+const startsInFlight = new Set<string>();
+// Killing a service mid-start can fail the start with another message: remember the stop.
+const stoppedMidStart = new Set<string>();
+
+// The dashboard cannot wait minutes for a start: failures go to state.previewError instead.
+export const isPreviewStarting = (id: string) => startsInFlight.has(id);
+
+export function requestPreviewStart(id: string): { state: State; done: Promise<void> } {
+  let state: State;
+  try {
+    state = readState(id);
+  } catch (err) {
+    throw new PreviewError((err as Error).message, 404);
+  }
+  if (state.status !== "ready") throw new PreviewError("the pipeline is not ready: no preview to start", 409);
+  if (startsInFlight.has(id)) throw new PreviewError("a preview is already starting", 409);
+  // Before the guard is set: a throw here must not leave the id marked in flight.
+  const cleared = updateState(id, (s) => {
+    delete s.previewError;
+  });
+  startsInFlight.add(id);
+  stoppedMidStart.delete(id);
+  const done = startPreview(id)
+    .then(() => undefined)
+    .catch((err: unknown) => {
+      const message = err instanceof Error ? err.message : String(err);
+      // A stop during the start is the user's own choice, not a failure.
+      if (message === "stopped while starting" || stoppedMidStart.has(id)) return;
+      updateState(id, (s) => {
+        s.previewError = message;
+      });
+    })
+    .finally(() => {
+      startsInFlight.delete(id);
+      stoppedMidStart.delete(id);
+    });
+  return { state: cleared, done };
 }
 
 export async function stopPipeline(id: string): Promise<State> {

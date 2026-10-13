@@ -2,8 +2,8 @@ import tailwind from "bun-plugin-tailwind";
 import { errorMessage, failStaleMerges, MergeError, startMerge } from "./merge.ts";
 import { DiffError, pipelineDiff } from "./diff-git.ts";
 import type { DiffErrorBody } from "./diff.ts";
-import { listDashboardStates } from "./state.ts";
-import { deletePipeline, stopPipeline } from "./preview.ts";
+import { listDashboardStates, readState } from "./state.ts";
+import { deletePipeline, isPreviewStarting, PreviewError, requestPreviewStart, stopPipeline, stopPreview } from "./preview.ts";
 
 export const DEFAULT_PORT = 4400;
 
@@ -35,7 +35,7 @@ export async function serve(port = DEFAULT_PORT) {
     routes: {
       ...assets,
       "/api/health": () => Response.json({ app: "pipeship" }),
-      "/api/pipelines": () => Response.json(listDashboardStates()),
+      "/api/pipelines": () => Response.json(listDashboardStates(isPreviewStarting)),
       "/api/pipelines/:id/diff": async (req) => {
         // Ids come from slug(): reject anything else before it reaches the filesystem.
         if (!/^[a-z0-9][a-z0-9-]*$/i.test(req.params.id)) {
@@ -58,6 +58,27 @@ export async function serve(port = DEFAULT_PORT) {
             return Response.json(await stopPipeline(req.params.id));
           } catch (err) {
             return Response.json({ error: String(err) }, { status: 500 });
+          }
+        },
+      },
+      "/api/pipelines/:id/preview/start": {
+        POST: async (req) => {
+          try {
+            return Response.json(requestPreviewStart(req.params.id).state, { status: 202 });
+          } catch (err) {
+            const status = err instanceof PreviewError ? err.status : 500;
+            return Response.json({ error: errorMessage(err) }, { status });
+          }
+        },
+      },
+      // Unlike /stop, the pipeline keeps its status: only the test servers go.
+      "/api/pipelines/:id/preview/stop": {
+        POST: async (req) => {
+          try {
+            await stopPreview(req.params.id);
+            return Response.json(readState(req.params.id));
+          } catch (err) {
+            return Response.json({ error: errorMessage(err) }, { status: 500 });
           }
         },
       },
@@ -89,7 +110,7 @@ export async function serve(port = DEFAULT_PORT) {
         const stream = new ReadableStream({
           start(controller) {
             const push = () => {
-              const data = JSON.stringify(listDashboardStates());
+              const data = JSON.stringify(listDashboardStates(isPreviewStarting));
               if (data !== last) controller.enqueue(`data: ${data}\n\n`);
               last = data;
             };

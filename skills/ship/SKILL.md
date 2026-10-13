@@ -151,7 +151,7 @@ If the preview fails to start, it prints the log tail: diagnose, fix the recipe 
 
 ## End
 
-Give the user a short summary: the test URL, the PRs in stack order (per repo), what the verification covered (or why it was skipped), and anything to check by hand. Point to the test guide: the user finds it in the pipeline's Test tab. The test servers keep running on purpose; the user stops them with the dashboard's "Stop preview" button.
+Give the user a short summary: the test URL, the PRs in stack order (per repo), what the verification covered (or why it was skipped), and anything to check by hand. Point to the test guide: the user finds it in the pipeline's Test tab. The test servers keep running on purpose; the user stops them with the dashboard's "Stop preview" button and starts them again with "Start preview".
 
 ## Test environment recipe
 
