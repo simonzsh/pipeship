@@ -61,7 +61,7 @@ You can also ask in plain words: "ship ABC-123 with pipeship". pipeship writes t
 
 ## Test environment
 
-At the end of a pipeline, the app runs from the feature's worktree on a free port from 3100, at `http://<ticket>.localhost:<port>`.
+At the end of a pipeline, the app runs from the feature's worktree. Each front service takes the first free port from 3000. Back ends and other kinds take the first free port from 4000 (4400, the dashboard, is skipped). Every service is served at `http://localhost:<port>`.
 
 You do not configure anything: on the first pipeline in a repo, Claude reads the project and writes a recipe (install and start commands, port variable, local files to copy). Once the app starts, the recipe is saved in `~/.pipeship/recipes/` and reused. To share a recipe with your team, commit it as `.pipeship.json` at the repo root:
 
@@ -69,9 +69,24 @@ You do not configure anything: on the first pipeline in a repo, Claude reads the
 { "install": "bun install", "start": "bun run dev", "portEnv": "PORT", "copyFiles": [".env.local"], "readyPath": "/" }
 ```
 
+This recipe is one front service. For a monorepo, list `services` instead. pipeship picks every port first, so a service can read another one's port in `env`. Back ends start first, then fronts; each service must answer on its `readyPath` before the next one starts.
+
+```json
+{
+  "install": "pnpm install",
+  "services": [
+    { "name": "api", "kind": "back", "start": "pnpm --filter api dev", "portEnv": "API_PORT", "readyPath": "/health" },
+    { "name": "web", "kind": "front", "start": "pnpm --filter web exec next dev -p $PORT",
+      "env": { "API_URL": "http://localhost:${api.port}" } }
+  ]
+}
+```
+
+A service that cannot take its port from the environment can set `"fixedPort": <port>`. pipeship then refuses to start a second pipeline of the same repo while one test environment runs.
+
 ## Dashboard
 
-The dashboard on http://localhost:4400 lists pipelines live, with their steps, PRs and test URL. It can stop a pipeline or its test server, and delete a finished pipeline: its worktrees and files go, its branches and PRs stay. Light and dark themes follow your system, with a toggle.
+The dashboard on http://localhost:4400 lists pipelines live, with their steps, PRs and test URL. It can stop a pipeline or its test servers, and delete a finished pipeline: its worktrees and files go, its branches and PRs stay. Light and dark themes follow your system, with a toggle.
 
 Each card shows the logo of the agent that runs the pipeline (Claude Code or Codex). Click it to copy the command that reopens the session in its folder. When a running or waiting pipeline has lost its agent (session stopped, archived or deleted), its status shows "Agent stopped". Pipeship stores the harness, the session id and the folder, never a pid or a token.
 

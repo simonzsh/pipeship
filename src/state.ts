@@ -49,11 +49,20 @@ export interface State {
   step: StepName;
   steps: { name: StepName; status: StepStatus; startedAt?: string; endedAt?: string }[];
   chunks: Chunk[];
-  preview?: { url: string; port: number; pid: number; worktree: string; log: string };
+  preview?: { url: string; port: number; pid?: number; worktree: string; log: string; services?: PreviewService[] };
   session?: Session;
   stopRequested: boolean;
   createdAt: string;
   updatedAt: string;
+}
+
+export interface PreviewService {
+  name: string;
+  kind: string;
+  port: number;
+  url: string; // http://localhost:<port>
+  pid?: number; // unset until the service is spawned
+  log: string; // <pipelineDir>/preview-<name>.log
 }
 
 // Quick mode: a single chunk, so no separate plan/contracts step.

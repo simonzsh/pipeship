@@ -62,7 +62,7 @@ Subagent (read-only, model `sonnet`; Claude Code: `Explore` type). Input: `ticke
 - every file the ticket touches (modules, routes, models, UI, tests), with paths and one line on what each does today;
 - repo conventions to follow (structure, naming, test style, branch names from recent `git branch -r`);
 - the exact **check commands** (lint, typecheck, tests) from the repo config;
-- how to start the app: run `pipeship recipe <repo>`. If it prints `none` and the repo has anything that serves requests (a web app, an API, an MCP server, a worker with a health route), write a draft recipe to `<dir>/recipe.json` (see "Test environment recipe"). Back-end only changes count: do not conclude "no preview needed" because the change has no UI. Say "nothing to run" only for a pure library, a CLI that cannot start, or a docs-only change. List what the app needs to run (database, env files, seed data, other services) and how to get test data locally.
+- how to start the app: run `pipeship recipe <repo>`. If it prints `none` and the repo has anything that serves requests (a web app, an API, an MCP server, a worker with a health route), write a draft recipe to `<dir>/recipe.json` (see "Test environment recipe"). If the repo runs several apps (a monorepo, a front and an API), the recipe lists one service per app. Back-end only changes count: do not conclude "no preview needed" because the change has no UI. Say "nothing to run" only for a pure library, a CLI that cannot start, or a docs-only change. List what the app needs to run (database, env files, seed data, other services) and how to get test data locally.
 
 In `quick` mode, do the map yourself in the main session, not in a subagent: on a small ticket a subagent costs as much as the work. Keep the map short: only the files to change, the check commands and how to start the app.
 
@@ -122,7 +122,7 @@ If the repo has no remote, skip this step and tell the user.
 
 Run the changed code, front end or back end. An API, MCP or engine change needs a running server as much as a UI change: unit tests do not show what a real client gets. Mark this step `skipped` only when nothing the change touches can run (a pure library with no server, a CLI you cannot start, a docs-only change), and say why in the final summary. "No UI" and "engine only" are not reasons to skip. Once every step is done or skipped, the pipeline becomes `ready` on its own.
 
-1. **Start.** Run `pipeship preview <id> <top worktree>`, with `--recipe <dir>/recipe.json` if step 1 wrote a draft. It copies local files, installs, starts the app on a free port, waits until it answers, and marks the pipeline `ready`. A draft recipe that works is saved, so later pipelines in this repo skip this work. Give the user the URL. Services the app needs (a local database, a queue) belong in the recipe's `start` command, so the dashboard's "Stop test server" button stops them with the app (see "Test environment recipe"). One-off setup such as seeding test data is fine to run yourself.
+1. **Start.** Run `pipeship preview <id> <top worktree>`, with `--recipe <dir>/recipe.json` if step 1 wrote a draft. It copies local files, installs, starts each service of the recipe on its own free port (back ends first, then fronts), waits until each answers, and marks the pipeline `ready`. A draft recipe that works is saved, so later pipelines in this repo skip this work. Give the user the URLs it prints (the first is the main front). Services the app needs (a local database, a queue) belong in a `start` command of the recipe, so the dashboard's "Stop test servers" button stops them with the app (see "Test environment recipe"). One-off setup such as seeding test data is fine to run yourself.
 2. **Verify.** Use the changed behaviour the way its client does, and write what you called and what came back to `<dir>/verify.md`: a UI change in a browser (the preview tools of your harness), an HTTP API with `curl`, an MCP or other protocol with a real client. Cover the main path and one failure path. If you cannot exercise it (no test data, a missing service), say so in the summary. Never claim it works from unit tests alone.
 3. **Fix.** If verification fails, fix the code in the worktree of the chunk that owns it, commit, restack and re-run the checks. Push only if step 6 opened PRs.
 
@@ -130,7 +130,7 @@ If the preview fails to start, it prints the log tail: diagnose, fix the recipe 
 
 ## End
 
-Give the user a short summary: the test URL, the PRs in stack order, what the verification covered (or why it was skipped), and anything to check by hand. The test server keeps running on purpose; the user stops it with the dashboard's "Stop test server" button.
+Give the user a short summary: the test URL, the PRs in stack order, what the verification covered (or why it was skipped), and anything to check by hand. The test servers keep running on purpose; the user stops them with the dashboard's "Stop test servers" button.
 
 ## Test environment recipe
 
@@ -147,6 +147,31 @@ You write the recipe; the user never has to. Read `package.json`, the lock file,
 ```
 
 - `start` must honour the port in `portEnv` (e.g. `next dev -p $PORT` if the framework ignores `PORT`).
-- Services the app needs must run in the foreground inside `start`, e.g. `docker compose up db & bun run dev`. pipeship stops the whole process group, so they stop with the app. A detached service (`docker compose up -d`) would outlive the pipeline.
+- Services the app needs must run in the foreground inside `start`, e.g. `docker compose up db & bun run dev`. pipeship stops the whole process group, so they stop with the app. A detached service (`docker compose up -d`) would outlive the pipeline. With `services`, a dependency such as a database can be its own service (`"ready": "tcp"`, `fixedPort` if its port cannot be set).
 - `copyFiles`: untracked local files the app needs (`.env`, `.env.local`…), copied from the main checkout into the worktree. List them with `git -C <repo> status --ignored --short`.
-- The app is served as `http://<ticket>.localhost:<port>`. Some dev servers reject unknown hosts (Next.js `allowedDevOrigins`, Vite `server.allowedHosts`): pipeship detects this and prints `http://localhost:<port>` instead. Never change the repo's config only for pipeship.
+- Every service is served as `http://localhost:<port>`. Never change the repo's config only for pipeship.
+
+### Several services
+
+For a monorepo or a front with its own API, list one service per app. `install` and `copyFiles` stay at the top level. Never put a top-level `start` next to `services`.
+
+```json
+{
+  "install": "pnpm install",
+  "copyFiles": [".env"],
+  "services": [
+    { "name": "api", "kind": "back", "start": "pnpm --filter api dev", "portEnv": "API_PORT", "readyPath": "/health" },
+    { "name": "web", "kind": "front", "start": "pnpm --filter web exec next dev -p $PORT",
+      "env": { "API_URL": "http://localhost:${api.port}" } },
+    { "name": "db", "kind": "infra", "start": "docker compose up db", "ready": "tcp", "fixedPort": 5432 }
+  ]
+}
+```
+
+- One service per app: `name`, `kind` (`front`, `back` or another word), its own `start`, `portEnv`, `readyPath` and `env`.
+- Set the port through `portEnv` or a flag in `start` (`next dev -p $PORT`, `vite --port $PORT`).
+- Never use the repo's global dev command (`turbo dev`, a root `pnpm dev`) when it starts apps on fixed ports.
+- A service gets another service's URL through `env`: `"API_URL": "http://localhost:${api.port}"`.
+- pipeship picks every port first: fronts from 3000, other kinds from 4000 (4400 is skipped).
+- Back ends and other kinds start first, then fronts. Each service must answer on its `readyPath` before the next one starts (`"ready": "tcp"` only waits for a connection to its port, for a database or queue).
+- Never change the repo's config only for pipeship. If a port truly cannot be set, write `"fixedPort": <port>`. pipeship then refuses to start a second pipeline of this repo while one runs.

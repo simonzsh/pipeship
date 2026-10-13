@@ -1,19 +1,50 @@
 import { spawn, spawnSync } from "node:child_process";
 import { copyFileSync, existsSync, mkdirSync, openSync, readFileSync, readdirSync, rmSync, closeSync } from "node:fs";
-import { createServer } from "node:net";
+import { connect, createServer } from "node:net";
 import { dirname, join } from "node:path";
-import { home, pipelineDir, readState, updateState, type State } from "./state.ts";
+import { home, listStates, pipelineDir, readState, updateState, type PreviewService, type State } from "./state.ts";
+
+export interface ServiceRecipe {
+  name: string;
+  kind: string; // "front", "back" or any other word (treated like back)
+  start: string;
+  portEnv?: string;
+  readyPath?: string;
+  ready?: "http" | "tcp"; // "tcp": ready as soon as the port accepts a connection (databases, queues)
+  env?: Record<string, string>; // values may hold ${<service>.port}
+  fixedPort?: number;
+}
 
 export interface Recipe {
   install?: string;
-  start: string;
-  portEnv?: string;
   copyFiles?: string[];
+  // Legacy single service: same as one front service named "app".
+  start?: string;
+  portEnv?: string;
   readyPath?: string;
+  services?: ServiceRecipe[];
 }
 
-const FIRST_PORT = 3100;
-const READY_TIMEOUT_MS = 180_000;
+export interface Service {
+  name: string;
+  kind: string;
+  start: string;
+  portEnv?: string;
+  readyPath: string;
+  ready: "http" | "tcp";
+  env: Record<string, string>;
+  fixedPort?: number;
+}
+
+type Preview = NonNullable<State["preview"]>;
+
+export const FRONT_FIRST_PORT = 3000;
+export const BACK_FIRST_PORT = 4000;
+// The dashboard's port (server.ts DEFAULT_PORT). Not imported: server.ts imports this module.
+export const DASHBOARD_PORT = 4400;
+const PORT_SCAN = 1000;
+const READY_TIMEOUT_MS = 180_000; // per service
+const PORT_REF = /\$\{([A-Za-z0-9_-]+)\.port\}/g;
 
 export function savedRecipePath(repo: string): string {
   return join(home(), "recipes", `${repo.replace(/^\/+/, "").replace(/[^a-zA-Z0-9.]+/g, "-")}.json`);
@@ -27,8 +58,79 @@ export function findRecipe(repo: string, worktree?: string): string | undefined 
 
 export function loadRecipe(path: string): Recipe {
   const recipe = JSON.parse(readFileSync(path, "utf8")) as Recipe;
-  if (!recipe.start) throw new Error(`${path}: "start" is required`);
+  normalizeRecipe(recipe, path);
   return recipe;
+}
+
+export function normalizeRecipe(recipe: Recipe, source = "recipe"): Service[] {
+  if (recipe.services === undefined) {
+    if (!recipe.start) throw new Error(`${source}: "start" or "services" is required`);
+    const { start, portEnv, readyPath } = recipe;
+    if (readyPath !== undefined && !(typeof readyPath === "string" && readyPath.startsWith("/"))) {
+      throw new Error(`${source}: "readyPath" must start with "/"`);
+    }
+    return [{ name: "app", kind: "front", start, portEnv: portEnv ?? "PORT", readyPath: readyPath ?? "/", ready: "http", env: {} }];
+  }
+  if (recipe.start) throw new Error(`${source}: use either "start" or "services", not both`);
+  if (!Array.isArray(recipe.services) || recipe.services.length === 0) {
+    throw new Error(`${source}: "services" must be a non-empty list`);
+  }
+
+  const services: Service[] = [];
+  recipe.services.forEach((raw, index) => {
+    if (typeof raw !== "object" || raw === null || Array.isArray(raw)) {
+      throw new Error(`${source}: service #${index + 1} must be an object`);
+    }
+    const { name } = raw;
+    if (!name) throw new Error(`${source}: service #${index + 1} needs a "name"`);
+    if (!/^[A-Za-z0-9_-]+$/.test(name)) {
+      throw new Error(`${source}: service name "${name}" may only use letters, digits, "-" and "_"`);
+    }
+    if (services.some((s) => s.name === name)) throw new Error(`${source}: duplicate service name "${name}"`);
+    const where = `${source}: service "${name}"`;
+    if (!raw.start) throw new Error(`${where}: "start" is required`);
+    if (!raw.kind) throw new Error(`${where}: "kind" is required`);
+    const { fixedPort } = raw;
+    if (fixedPort !== undefined && !(Number.isInteger(fixedPort) && fixedPort >= 1 && fixedPort <= 65535)) {
+      throw new Error(`${where}: "fixedPort" must be a port number`);
+    }
+    if (raw.readyPath !== undefined && !(typeof raw.readyPath === "string" && raw.readyPath.startsWith("/"))) {
+      throw new Error(`${where}: "readyPath" must start with "/"`);
+    }
+    if (raw.ready !== undefined && raw.ready !== "http" && raw.ready !== "tcp") {
+      throw new Error(`${where}: "ready" must be "http" or "tcp"`);
+    }
+    if (raw.env !== undefined && (typeof raw.env !== "object" || raw.env === null || Array.isArray(raw.env))) {
+      throw new Error(`${where}: "env" must be an object`);
+    }
+    const other = fixedPort === undefined ? undefined : services.find((s) => s.fixedPort === fixedPort);
+    if (other) throw new Error(`${where}: fixed port ${fixedPort} is already used by "${other.name}"`);
+    for (const [key, value] of Object.entries(raw.env ?? {})) {
+      if (typeof value !== "string") throw new Error(`${where}: env "${key}" must be a string`);
+    }
+    services.push({
+      name,
+      kind: raw.kind,
+      start: raw.start,
+      portEnv: raw.portEnv ?? (fixedPort === undefined ? "PORT" : undefined),
+      readyPath: raw.readyPath ?? "/",
+      ready: raw.ready ?? "http",
+      env: raw.env ?? {},
+      fixedPort,
+    });
+  });
+
+  // Second pass: a service may refer to one declared after it.
+  for (const service of services) {
+    for (const [key, value] of Object.entries(service.env)) {
+      for (const match of value.matchAll(PORT_REF)) {
+        const where = `${source}: service "${service.name}": env "${key}"`;
+        if (match[1] === service.name) throw new Error(`${where} refers to its own port`);
+        if (!services.some((s) => s.name === match[1])) throw new Error(`${where} refers to unknown service "${match[1]}"`);
+      }
+    }
+  }
+  return services;
 }
 
 function portIsFree(port: number): Promise<boolean> {
@@ -39,9 +141,76 @@ function portIsFree(port: number): Promise<boolean> {
   });
 }
 
-export async function findFreePort(from = FIRST_PORT): Promise<number> {
-  for (let port = from; port < from + 1000; port++) if (await portIsFree(port)) return port;
-  throw new Error("no free port found");
+// Every port is picked before anything starts, so env templates resolve and no two services share a port.
+export async function pickPorts(
+  services: Service[],
+  isFree: (port: number) => Promise<boolean> = portIsFree,
+  reserved: Set<number> = new Set(),
+): Promise<Record<string, number>> {
+  const taken = new Set<number>([DASHBOARD_PORT, ...reserved]);
+  for (const s of services) if (s.fixedPort !== undefined) taken.add(s.fixedPort);
+  const ports: Record<string, number> = {};
+  for (const s of services) {
+    if (s.fixedPort !== undefined) {
+      if (reserved.has(s.fixedPort) || !(await isFree(s.fixedPort))) throw new Error(`service "${s.name}": fixed port ${s.fixedPort} is already in use`);
+      ports[s.name] = s.fixedPort;
+      continue;
+    }
+    const from = s.kind === "front" ? FRONT_FIRST_PORT : BACK_FIRST_PORT;
+    let found: number | undefined;
+    for (let port = from; port < from + PORT_SCAN && found === undefined; port++) {
+      if (!taken.has(port) && (await isFree(port))) found = port;
+    }
+    if (found === undefined) throw new Error(`service "${s.name}": no free port from ${from} to ${from + PORT_SCAN - 1}`);
+    taken.add(found);
+    ports[s.name] = found;
+  }
+  return ports;
+}
+
+export function resolveEnv(env: Record<string, string>, ports: Record<string, number>): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const [key, value] of Object.entries(env)) {
+    out[key] = value.replace(PORT_REF, (_, name: string) => {
+      if (ports[name] === undefined) throw new Error(`env "${key}" refers to unknown service "${name}"`);
+      return String(ports[name]);
+    });
+  }
+  return out;
+}
+
+// Back ends and other kinds first, then fronts: a front can call them as soon as it starts.
+export function startOrder<T extends { kind: string }>(services: T[]): T[] {
+  return [...services.filter((s) => s.kind !== "front"), ...services.filter((s) => s.kind === "front")];
+}
+
+export function mainService<T extends { kind: string }>(services: T[]): T {
+  return services.find((s) => s.kind === "front") ?? services[0]!;
+}
+
+export function previewAlive(preview: Preview): boolean {
+  const pids = preview.services?.length ? preview.services.map((s) => s.pid) : [preview.pid];
+  return pids.some((pid) => pid !== undefined && isAlive(pid));
+}
+
+// Ports are planned before install, so a pipeline can hold ports while no process runs yet.
+function previewStarting(preview: Preview): boolean {
+  return preview.services?.some((s) => s.pid === undefined) ?? false;
+}
+
+function reservedPorts(id: string): Set<number> {
+  const ports = new Set<number>();
+  for (const s of listStates()) {
+    if (s.id === id || !s.preview) continue;
+    ports.add(s.preview.port);
+    for (const svc of s.preview.services ?? []) ports.add(svc.port);
+  }
+  return ports;
+}
+
+export function previewLines(preview: Preview): string[] {
+  const services = preview.services ?? [];
+  return [preview.url, ...(services.length > 1 ? services.map((s) => `${s.name} (${s.kind}): ${s.url}`) : [])];
 }
 
 export function isAlive(pid: number): boolean {
@@ -68,109 +237,184 @@ export async function killGroup(pid: number): Promise<void> {
   if (isAlive(pid)) throw new Error(`process ${pid} is still running`);
 }
 
-function hostLabel(state: State): string {
-  return (state.ticket.links[0]?.ref ?? state.id).toLowerCase().replace(/[^a-z0-9-]+/g, "-").replace(/^-|-$/g, "");
-}
-
 function tail(path: string, lines = 30): string {
   return existsSync(path) ? readFileSync(path, "utf8").split("\n").slice(-lines).join("\n") : "";
 }
 
-async function waitReady(url: string, pid: number, log: string): Promise<void> {
+function tcpOpen(port: number): Promise<boolean> {
+  return new Promise((resolve) => {
+    const socket = connect({ port, host: "localhost" });
+    socket.setTimeout(5000);
+    socket.once("connect", () => socket.destroy(void resolve(true)));
+    socket.once("error", () => resolve(false));
+    socket.once("timeout", () => socket.destroy(void resolve(false)));
+  });
+}
+
+async function waitReady(svc: Service, port: number, pid: number, log: string): Promise<void> {
+  const { name } = svc;
   const deadline = Date.now() + READY_TIMEOUT_MS;
   while (Date.now() < deadline) {
-    if (!isAlive(pid)) throw new Error(`server exited before it was ready. Log tail:\n${tail(log)}`);
+    if (!isAlive(pid)) throw new Error(`service "${name}" exited before it was ready. Log tail:\n${tail(log)}`);
     try {
-      await fetch(url, { redirect: "manual", signal: AbortSignal.timeout(5000) });
-      return;
+      if (svc.ready === "tcp") {
+        if (await tcpOpen(port)) return;
+      } else {
+        await fetch(`http://localhost:${port}${svc.readyPath}`, { redirect: "manual", signal: AbortSignal.timeout(5000) });
+        return;
+      }
     } catch {}
     await Bun.sleep(1000);
   }
-  throw new Error(`server not ready after ${READY_TIMEOUT_MS / 1000}s. Log tail:\n${tail(log)}`);
-}
-
-// Some dev servers reject unknown hosts (e.g. Vite's allowedHosts) with 400 or 403.
-async function acceptsHost(url: string, host: string): Promise<boolean> {
-  try {
-    const res = await fetch(url, { headers: { Host: host }, redirect: "manual", signal: AbortSignal.timeout(5000) });
-    return res.status !== 400 && res.status !== 403;
-  } catch {
-    return false;
-  }
+  throw new Error(`service "${name}" not ready after ${READY_TIMEOUT_MS / 1000}s. Log tail:\n${tail(log)}`);
 }
 
 // `draft` is a recipe written by the agent; it is saved for the repo only once the app starts.
 export async function startPreview(id: string, worktree: string, draft?: string): Promise<State> {
   let state = readState(id);
-  if (state.preview && isAlive(state.preview.pid)) await stopPreview(id);
+  if (state.preview && previewAlive(state.preview)) await stopPreview(id);
   state = readState(id);
 
   const recipePath = draft ?? findRecipe(state.repo, worktree);
   if (!recipePath) throw new Error(`no recipe for ${state.repo}: write one and pass it with --recipe`);
   const recipe = loadRecipe(recipePath);
-  for (const file of recipe.copyFiles ?? []) {
-    const from = join(state.repo, file);
-    const to = join(worktree, file);
-    if (existsSync(from) && !existsSync(to)) {
-      mkdirSync(dirname(to), { recursive: true });
-      copyFileSync(from, to);
+  const services = normalizeRecipe(recipe, recipePath);
+
+  // A fixed port can serve one pipeline at a time: a live or still-starting one blocks it.
+  const fixed = services.find((s) => s.fixedPort !== undefined);
+  if (fixed) {
+    const other = listStates().find(
+      (s) => s.id !== id && s.repo === state.repo && s.preview && (previewAlive(s.preview) || previewStarting(s.preview)),
+    );
+    if (other) {
+      throw new Error(
+        `service "${fixed.name}" uses the fixed port ${fixed.fixedPort}, and pipeline ${other.id} of this repo has a live test environment: stop it first (pipeship stop ${other.id})`,
+      );
     }
   }
 
-  const log = join(pipelineDir(id), "preview.log");
-  const fd = openSync(log, "w");
-  try {
-    if (recipe.install) {
-      const result = spawnSync("sh", ["-c", recipe.install], { cwd: worktree, stdio: ["ignore", fd, fd] });
-      if (result.status !== 0) throw new Error(`install failed (${recipe.install}). Log tail:\n${tail(log)}`);
+  // Reserve the ports before the (slow) install, so another pipeline cannot pick them meanwhile.
+  const installLog = join(pipelineDir(id), "preview.log");
+  const ports = await pickPorts(services, portIsFree, reservedPorts(id));
+  const main = mainService(services);
+  const order = startOrder(services);
+  const mainUrl = `http://localhost:${ports[main.name]}`;
+  const planned: PreviewService[] = order.map((svc) => ({
+    name: svc.name,
+    kind: svc.kind,
+    port: ports[svc.name]!,
+    url: `http://localhost:${ports[svc.name]}`,
+    log: join(pipelineDir(id), `preview-${svc.name}.log`),
+  }));
+  const preview = (mainPid?: number) =>
+    ({ url: mainUrl, port: ports[main.name]!, pid: mainPid, worktree, log: installLog, services: planned });
+  updateState(id, (s) => {
+    s.preview = preview();
+  });
+
+  const started: PreviewService[] = [];
+  // Roll back: kill what started (reverse), clear the preview, and report what would not die.
+  const abort = async (err: Error): Promise<never> => {
+    const errors: string[] = [];
+    for (const svc of [...started].reverse()) {
+      await killGroup(svc.pid!).catch((e: Error) => errors.push(e.message));
     }
-
-    const port = await findFreePort();
-    const child = spawn("sh", ["-c", recipe.start], {
-      cwd: worktree,
-      detached: true,
-      stdio: ["ignore", fd, fd],
-      env: { ...process.env, [recipe.portEnv ?? "PORT"]: String(port) },
-    });
-    child.unref();
-    const pid = child.pid!;
-    const host = `${hostLabel(state)}.localhost:${port}`;
-    const readyUrl = `http://localhost:${port}${recipe.readyPath ?? "/"}`;
-
-    // Save the pid before waiting, so "stop" works even during a slow start.
     updateState(id, (s) => {
-      s.preview = { url: `http://${host}`, port, pid, worktree, log };
+      s.preview = undefined;
     });
+    if (errors.length) err.message += `; could not stop: ${errors.join("; ")}`;
+    throw err;
+  };
+
+  try {
+    for (const file of recipe.copyFiles ?? []) {
+      const from = join(state.repo, file);
+      const to = join(worktree, file);
+      if (existsSync(from) && !existsSync(to)) {
+        mkdirSync(dirname(to), { recursive: true });
+        copyFileSync(from, to);
+      }
+    }
+
+    const installFd = openSync(installLog, "w");
     try {
-      await waitReady(readyUrl, pid, log);
-    } catch (err) {
-      await killGroup(pid).catch(() => {});
+      if (recipe.install) {
+        const result = spawnSync("sh", ["-c", recipe.install], { cwd: worktree, stdio: ["ignore", installFd, installFd] });
+        if (result.status !== 0) throw new Error(`install failed (${recipe.install}). Log tail:\n${tail(installLog)}`);
+      }
+    } finally {
+      closeSync(installFd);
+    }
+
+    for (const svc of order) {
+      // A stop during a slow install or readiness wait must not leave a service behind.
+      if (!readState(id).preview) throw new Error("stopped while starting");
+      const plan = planned.find((p) => p.name === svc.name)!;
+      const fd = openSync(plan.log, "w");
+      try {
+        const child = spawn("sh", ["-c", svc.start], {
+          cwd: worktree,
+          detached: true,
+          stdio: ["ignore", fd, fd],
+          env: {
+            ...process.env,
+            ...resolveEnv(svc.env, ports),
+            ...(svc.portEnv ? { [svc.portEnv]: String(plan.port) } : {}),
+          },
+        });
+        child.unref();
+        plan.pid = child.pid!;
+      } finally {
+        closeSync(fd);
+      }
+      started.push(plan);
+
+      // Save each pid as soon as it exists, so "stop" works even during a slow start.
+      // A stop clears the preview: never bring it back, the check below then aborts.
+      const mainPid = (started.find((x) => x.name === main.name) ?? started[0]!).pid;
       updateState(id, (s) => {
-        s.preview = undefined;
+        if (s.preview) s.preview = preview(mainPid);
       });
-      throw err;
+      await waitReady(svc, plan.port, plan.pid!, plan.log);
     }
-    if (draft) {
-      const saved = savedRecipePath(state.repo);
-      mkdirSync(dirname(saved), { recursive: true });
-      copyFileSync(draft, saved);
-    }
-    const hostOk = await acceptsHost(readyUrl, host);
-    return updateState(id, (s) => {
-      if (!hostOk) s.preview!.url = `http://localhost:${port}`;
-      s.status = "ready";
-      const step = s.steps.find((x) => x.name === "preview")!;
-      step.status = "done";
-      step.endedAt = new Date().toISOString();
-    });
-  } finally {
-    closeSync(fd);
+    if (!readState(id).preview) throw new Error("stopped while starting");
+  } catch (err) {
+    return abort(err as Error);
   }
+
+  if (draft) {
+    const saved = savedRecipePath(state.repo);
+    mkdirSync(dirname(saved), { recursive: true });
+    copyFileSync(draft, saved);
+  }
+  return updateState(id, (s) => {
+    s.status = "ready";
+    const step = s.steps.find((x) => x.name === "preview")!;
+    step.status = "done";
+    step.endedAt = new Date().toISOString();
+  });
 }
 
 export async function stopPreview(id: string): Promise<void> {
-  const { preview } = readState(id);
-  if (preview && isAlive(preview.pid)) await killGroup(preview.pid);
+  const errors: string[] = [];
+  const killed = new Set<number>();
+  const killAll = async (preview: Preview | undefined) => {
+    if (!preview) return;
+    const pids = preview.services?.length ? [...preview.services].reverse().map((s) => s.pid) : [preview.pid];
+    for (const pid of pids) {
+      if (pid === undefined || killed.has(pid) || !isAlive(pid)) continue;
+      killed.add(pid);
+      try {
+        await killGroup(pid);
+      } catch (err) {
+        errors.push((err as Error).message);
+      }
+    }
+  };
+  await killAll(readState(id).preview);
+  // A start in progress may have spawned a service while we were killing.
+  await killAll(readState(id).preview);
+  if (errors.length) throw new Error(`could not stop the test servers: ${errors.join("; ")}`);
   updateState(id, (s) => {
     s.preview = undefined;
   });
