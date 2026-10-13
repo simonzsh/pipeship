@@ -55,7 +55,7 @@ You can also ask in plain words: "ship ABC-123 with pipeship". pipeship writes t
 
 ### Options
 
-- **Modes**: `full` (default, all 7 steps) and `quick` (one chunk, blocking questions only).
+- **Modes**: `full` (default, all 7 steps) and `quick` (one chunk, blocking questions only, map in the main session, one `sonnet` cleanup pass instead of the full review, no `opus`).
 - **`--skip`** removes steps, e.g. `--skip questions,stack`. You can also say "skip the review" during the run.
 - pipeship only starts when you name it. It does not run on ordinary feature requests.
 
