@@ -135,7 +135,7 @@ function FileDiff({ file, open, onToggle }: { file: DiffFile; open: boolean; onT
         type="button"
         onClick={onToggle}
         aria-expanded={open}
-        className={`sticky top-0 z-10 flex w-full items-center gap-2 bg-card px-3 py-2 text-left text-sm hover:bg-[color-mix(in_oklab,var(--card),var(--foreground)_4%)] ${open ? "border-b" : ""}`}
+        className={`sticky top-(--detail-header,0px) z-10 flex w-full items-center gap-2 bg-card px-3 py-2 text-left text-sm hover:bg-[color-mix(in_oklab,var(--card),var(--foreground)_4%)] ${open ? "border-b" : ""}`}
       >
         {open ? <ChevronDown className="size-4 shrink-0 text-muted-foreground" /> : <ChevronRight className="size-4 shrink-0 text-muted-foreground" />}
         <FilePath path={renamed ? `${file.oldPath} → ${file.newPath}` : file.path} />
