@@ -100,9 +100,44 @@ A service that cannot take its port from the environment can set `"fixedPort": <
 
 ## Dashboard
 
-The dashboard on http://localhost:4400 has two columns: the pipelines on the left, grouped by status, and the selected pipeline on the right (`?p=<id>` in the URL, so you can share a link; the first pipeline is selected by default). The right side shows the title, ticket links, steps and actions in its header, then the PR stack, always visible, then two tabs. The **Test** tab holds the test URLs and the test guide. The **Code** tab shows the code diff: click a PR in the stack for its diff, or "Whole stack" for everything; with several repos you get one diff per repo. Diffs come from the local branches only, and code is highlighted in diffs and in the guide. Under 900 px the page shows one column, with a back button on the detail. The header actions can request a pipeline stop (the agents stop after their current step), stop the test servers, and delete a finished pipeline: its worktrees and files go, its branches and PRs stay. It also merges a finished pipeline's PRs in two steps, one button at a time. The green "Combine PRs" button merges each PR into the branch below, from the top, so one PR is left. The violet "Merge into <base>" button then squash-merges that PR into the base branch, after a confirmation. Both wait for the checks and stop at the first PR that cannot merge, with the reason in the pipeline's detail. With several repos, the detail shows one stack tree and one Combine/Merge button per repo. Only one merge runs at a time. When the agent writes a `test.md` guide (the page to open, the steps to follow, what could not be tested), the Test tab shows it under the test URLs, so you can test without leaving the dashboard. Light and dark themes follow your system, with a toggle.
+The dashboard on http://localhost:4400 has two columns.
+
+- **Left: the pipelines**, grouped by status, each with its ticket, its steps and its status. The repo filter sits on top of the list.
+- **Right: the selected pipeline.** The first one is selected by default, and `?p=<id>` in the URL links to a pipeline. The header stays on top while the rest scrolls: title, status, ticket links, repos, steps, and the actions.
+
+Under 900 px the page shows one column, with a back button on the detail. Light and dark themes follow your system, with a toggle.
 
 Each pipeline's header shows the logo of the agent that runs the pipeline (Claude Code or Codex). Click it to copy the command that reopens the session in its folder. Pipeship stores the harness, the session id, the folder and the T3 Code thread, never a pid or a token.
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/dashboard-dark.png">
+  <img alt="The pipeship dashboard: the pipelines grouped by status on the left; on the right a pipeline over two repos with its steps, one PR stack per repo and the Test tab" src="docs/dashboard-light.png" width="720">
+</picture>
+
+### Actions
+
+The header can request a pipeline stop (the agents stop after their current step), stop the test servers, and delete a finished pipeline: its worktrees and files go, its branches and PRs stay.
+
+The PR stack is always visible, with one row per repo, its path and its merge button. A finished pipeline's PRs merge in two steps, one button at a time. The green "Combine PRs" button merges each PR into the branch below, from the top, so one PR is left. The violet "Merge into <base>" button then squash-merges that PR into the base branch, after a confirmation. Both wait for the checks and stop at the first PR that cannot merge, with the reason in the pipeline's detail. Only one merge runs at a time.
+
+### Test tab
+
+The test URLs, one per service, and the agent's `test.md` guide: the page to open, the steps to follow, what could not be tested. You can test without leaving the dashboard. Code blocks in the guide are highlighted.
+
+### Code tab
+
+The code diff, to review the work without leaving the dashboard.
+
+- **Whole stack** by default: `<base>...<top branch>`, one diff per repo.
+- **One PR**: click it in the stack for `<previous branch>...<branch>`. The breadcrumb ("Whole stack › PR #17") or the base branch row brings you back.
+- Every file opens as a collapsible block with its line numbers, its +/− counts and syntax highlighting. "Collapse all" and "Expand all" toggle every file; "Refresh" reloads the diff.
+
+Diffs come from the local branches (or `origin/<branch>` when the local one is gone). A missing branch shows a message in its repo's section.
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/dashboard-code-dark.png">
+  <img alt="The Code tab: the diff of one PR of the stack, with line numbers and syntax highlighting" src="docs/dashboard-code-light.png" width="720">
+</picture>
 
 ### T3 Code
 
@@ -110,16 +145,13 @@ pipeship recognizes when a session runs in [T3 Code](https://github.com/pingdotg
 
 `pipeship new` finds the thread in T3 Code's local database (`$T3CODE_HOME`, default `~/.t3`), read-only; `pipeship step` looks again until it is found. Without T3 Code, the header has no T3 button and nothing else changes.
 
+### Run it
+
 The pipeline starts the dashboard for you. To start or stop it yourself, use `/pipeship:dashboard` and `/pipeship:dashboard stop` in Claude Code, or `$dashboard` and `$dashboard stop` in Codex (from a terminal: `scripts/pipeship dashboard [stop]`). Stopping it leaves the pipelines and their test servers running.
 
 The page is React, Tailwind and [shadcn/ui](https://ui.shadcn.com) components (`src/dashboard/`). Bun builds it in memory when the dashboard starts: no Vite, no build step.
 
 State lives in `~/.pipeship/pipelines/<id>/` (`state.json`, `ticket.md`, `map.md`, `plan.md`, `test.md`, worktrees, `preview.log`).
-
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset="docs/dashboard-dark.png">
-  <img alt="The pipeship dashboard: one card per pipeline with its status, steps, T3 Code link, test URL and stacked PRs" src="docs/dashboard-light.png" width="720">
-</picture>
 
 ## Develop
 
