@@ -23,6 +23,8 @@ import { groupByStatus } from "../src/dashboard/groups.ts";
 import { t3ThreadLink } from "../src/dashboard/session.tsx";
 import { buildSearch, parseUrl } from "../src/dashboard/url.ts";
 import { allMerged, displaySteps, finished, timeAgo } from "../src/dashboard/pipeline-info.ts";
+import { diffRequests, diffUrl, isGenerated } from "../src/dashboard/diff-requests.ts";
+import { highlightLines, languageOf } from "../src/dashboard/highlight.tsx";
 
 const root = mkdtempSync(join(tmpdir(), "pipeship-test-"));
 process.env.PIPESHIP_HOME = join(root, "home");
@@ -1686,4 +1688,43 @@ test("allMerged and finished", () => {
   expect(allMerged({ chunks: [{ name: "a", pr: "u", status: "merged" }, { name: "b", pr: "v", status: "pr" }] as never })).toBe(false);
   expect(finished({ status: "ready" })).toBe(true);
   expect(finished({ status: "running" })).toBe(false);
+});
+
+test("languageOf maps extensions and file names", () => {
+  expect(languageOf("src/a.ts")).toBe("typescript");
+  expect(languageOf("src/a.tsx")).toBe("typescript");
+  expect(languageOf("docker/Dockerfile")).toBe("bash");
+  expect(languageOf("notes.unknownext")).toBeUndefined();
+  expect(languageOf("README")).toBeUndefined();
+});
+
+test("highlightLines keeps one entry per line and the class of multi-line tokens", () => {
+  const lines = highlightLines("/* a\n b */\nconst x = 1;", "typescript");
+  expect(lines).toHaveLength(3);
+  const cls = (n: unknown) => (n as { props?: { className?: string } }).props?.className;
+  expect(cls(lines[0]![0])).toContain("hljs-comment");
+  expect(cls(lines[1]![0])).toContain("hljs-comment");
+  expect(highlightLines("a\nb", undefined)).toEqual([["a"], ["b"]]);
+});
+
+test("diffRequests: whole stack skips repos without branches, a chunk targets its repo", () => {
+  const p = {
+    repos: [{ path: "/r/api" }, { path: "/r/web" }],
+    chunks: [
+      { name: "c1", repo: "/r/api", branch: "f/c1" },
+      { name: "c2", repo: "/r/web" },
+    ],
+  } as unknown as Parameters<typeof diffRequests>[0];
+  expect(diffRequests(p, {})).toEqual([{ repo: "/r/api" }]);
+  expect(diffRequests(p, { chunk: "c2" })).toEqual([{ repo: "/r/web", chunk: "c2" }]);
+  expect(diffRequests(p, { chunk: "nope" })).toEqual([]);
+  expect(diffUrl("a b", { repo: "/r/api", chunk: "c1" })).toBe("/api/pipelines/a%20b/diff?repo=%2Fr%2Fapi&chunk=c1");
+});
+
+test("isGenerated flags lock files, minified files and dist", () => {
+  expect(isGenerated("bun.lock")).toBe(true);
+  expect(isGenerated("web/package-lock.json")).toBe(true);
+  expect(isGenerated("public/app.min.js")).toBe(true);
+  expect(isGenerated("dist/index.js")).toBe(true);
+  expect(isGenerated("src/index.ts")).toBe(false);
 });

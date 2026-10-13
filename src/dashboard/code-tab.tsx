@@ -1,19 +1,272 @@
+import { useEffect, useMemo, useState } from "react";
+import { AlertCircle, ChevronDown, ChevronRight, FileText, Loader2, RefreshCw } from "lucide-react";
 import type { DashboardState } from "../state.ts";
+import { repoName } from "../repos.ts";
+import type { DiffErrorBody, DiffFile, DiffHunk, DiffResponse } from "../diff.ts";
+import { Button } from "./components/ui/button";
+import { highlightLines, languageOf } from "./highlight";
+import { diffRequests, diffUrl, isGenerated, type DiffRequest, type DiffTarget } from "./diff-requests";
+import { prNumber } from "./utils";
 
-// chunk undefined = whole stack (one diff per repo with at least one branch).
-export type DiffTarget = { chunk?: string };
-
+export type { DiffTarget };
 export interface CodeTabProps {
   p: DashboardState;
   target: DiffTarget;
   onTarget: (t: DiffTarget) => void; // the "Whole stack" breadcrumb link
 }
 
-// PLACEHOLDER: the diff-view chunk replaces this body and keeps the exports.
-export function CodeTab({ target }: CodeTabProps) {
+type Result = { loading: true } | { data: DiffResponse } | { error: string };
+
+// Refetch on manual refresh or when a chunk's branch/status changes, not on every SSE tick.
+function useDiff(id: string, requests: DiffRequest[], refreshKey: string): Result[] {
+  const [results, setResults] = useState<Record<string, Result>>({});
+  const urls = requests.map((r) => diffUrl(id, r));
+  const urlsKey = urls.join("\n");
+  useEffect(() => {
+    const ctl = new AbortController();
+    setResults(Object.fromEntries(urls.map((u) => [u, { loading: true } as Result])));
+    for (const url of urls) {
+      fetch(url, { signal: ctl.signal, cache: "no-store" })
+        .then(async (res) => {
+          const body = await res.json().catch(() => null);
+          const r: Result = res.ok ? { data: body as DiffResponse } : { error: (body as DiffErrorBody | null)?.error ?? `Request failed (${res.status})` };
+          setResults((prev) => ({ ...prev, [url]: r }));
+        })
+        .catch((e) => {
+          if (ctl.signal.aborted) return;
+          setResults((prev) => ({ ...prev, [url]: { error: e instanceof Error ? e.message : String(e) } }));
+        });
+    }
+    return () => ctl.abort();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [urlsKey, refreshKey]);
+  return urls.map((u) => results[u] ?? { loading: true });
+}
+
+const STATUS_STYLE: Record<DiffFile["status"], string> = {
+  added: "text-emerald-600 dark:text-emerald-400",
+  deleted: "text-red-600 dark:text-red-400",
+  modified: "text-amber-600 dark:text-amber-400",
+  renamed: "text-sky-600 dark:text-sky-400",
+  copied: "text-sky-600 dark:text-sky-400",
+};
+
+function Counts({ additions, deletions }: { additions: number; deletions: number }) {
   return (
-    <div className="rounded-lg border border-dashed p-6 text-sm text-muted-foreground">
-      Diff: {target.chunk ?? "Whole stack"}
+    <span className="shrink-0 font-mono text-xs tabular-nums">
+      <span className="text-emerald-600 dark:text-emerald-400">+{additions}</span>{" "}
+      <span className="text-red-600 dark:text-red-400">-{deletions}</span>
+    </span>
+  );
+}
+
+const ROW: Record<string, string> = {
+  add: "bg-emerald-500/10",
+  del: "bg-red-500/10",
+  context: "",
+};
+const GUTTER: Record<string, string> = {
+  add: "bg-emerald-500/20 text-emerald-700 dark:text-emerald-300",
+  del: "bg-red-500/20 text-red-700 dark:text-red-300",
+  context: "text-muted-foreground",
+};
+const MARK = { add: "+", del: "-", context: " " } as const;
+
+// Old side (context + del) and new side (context + add) are highlighted as two blocks, then mapped back per line.
+function HunkRows({ hunk, lang }: { hunk: DiffHunk; lang: string | undefined }) {
+  const rows = useMemo(() => {
+    const oldIdx: number[] = [];
+    const newIdx: number[] = [];
+    hunk.lines.forEach((l, i) => {
+      if (l.kind !== "add") oldIdx.push(i);
+      if (l.kind !== "del") newIdx.push(i);
+    });
+    const oldHl = highlightLines(oldIdx.map((i) => hunk.lines[i]!.text).join("\n"), lang);
+    const newHl = highlightLines(newIdx.map((i) => hunk.lines[i]!.text).join("\n"), lang);
+    return hunk.lines.map((l, i) => (l.kind === "del" ? oldHl[oldIdx.indexOf(i)] : newHl[newIdx.indexOf(i)]));
+  }, [hunk, lang]);
+  return (
+    <>
+      <tr className="bg-sky-500/10 text-sky-700 dark:text-sky-300">
+        <td colSpan={4} className="px-3 py-0.5 select-none">
+          {hunk.header}
+        </td>
+      </tr>
+      {hunk.lines.map((l, i) => (
+        <tr key={i} className={ROW[l.kind]}>
+          <td className={`w-12 min-w-12 select-none px-2 text-right align-top tabular-nums ${GUTTER[l.kind]}`}>{l.oldNo ?? ""}</td>
+          <td className={`w-12 min-w-12 select-none border-r px-2 text-right align-top tabular-nums ${GUTTER[l.kind]}`}>{l.newNo ?? ""}</td>
+          <td className="w-4 select-none px-1 text-center align-top text-muted-foreground">{MARK[l.kind]}</td>
+          <td className="whitespace-pre pr-4">
+            {rows[i]}
+            {l.noNewline && <span className="ml-2 select-none text-muted-foreground italic">No newline at end of file</span>}
+          </td>
+        </tr>
+      ))}
+    </>
+  );
+}
+
+function FileDiff({ file, id, open, onToggle }: { file: DiffFile; id: string; open: boolean; onToggle: () => void }) {
+  const lang = useMemo(() => languageOf(file.path), [file.path]);
+  const renamed = file.oldPath && file.newPath && file.oldPath !== file.newPath;
+  return (
+    <section id={id} className="scroll-mt-12 rounded-lg border bg-card">
+      <button
+        type="button"
+        onClick={onToggle}
+        aria-expanded={open}
+        className={`sticky top-0 z-10 flex w-full items-center gap-2 bg-muted px-3 py-1.5 text-left text-sm ${open ? "rounded-t-lg border-b" : "rounded-lg"}`}
+      >
+        {open ? <ChevronDown className="size-4 shrink-0" /> : <ChevronRight className="size-4 shrink-0" />}
+        <span className="min-w-0 truncate font-mono text-xs" title={file.path}>
+          {renamed ? `${file.oldPath} → ${file.newPath}` : file.path}
+        </span>
+        <span className={`shrink-0 text-xs ${STATUS_STYLE[file.status]}`}>{file.status}</span>
+        {file.similarity !== undefined && file.status !== "modified" && (
+          <span className="shrink-0 text-xs text-muted-foreground">{file.similarity}%</span>
+        )}
+        <span className="ml-auto" />
+        <Counts additions={file.additions} deletions={file.deletions} />
+      </button>
+      {open &&
+        (file.binary ? (
+          <p className="px-3 py-2 text-sm text-muted-foreground">Binary file</p>
+        ) : file.truncated ? (
+          <p className="px-3 py-2 text-sm text-muted-foreground">
+            Large diff hidden ({file.additions + file.deletions} changed lines)
+          </p>
+        ) : file.hunks.length === 0 ? (
+          <p className="px-3 py-2 text-sm text-muted-foreground">
+            {file.oldMode && file.newMode ? `Mode changed ${file.oldMode} → ${file.newMode}` : "No content changes"}
+          </p>
+        ) : (
+          <div className="overflow-x-auto rounded-b-lg">
+            <table className="w-max min-w-full border-collapse font-mono text-xs leading-5">
+              <tbody>
+                {file.hunks.map((h, i) => (
+                  <HunkRows key={i} hunk={h} lang={lang} />
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ))}
+    </section>
+  );
+}
+
+// Few enough lines to read at once: open everything, otherwise let the reviewer pick.
+const OPEN_ALL_LINES = 3000;
+const linesOf = (f: DiffFile) => f.hunks.reduce((n, h) => n + h.lines.length, 0);
+
+function RepoDiff({ id, data }: { id: string; data: DiffResponse }) {
+  const defaults = useMemo(() => {
+    const total = data.files.reduce((n, f) => n + linesOf(f), 0);
+    return Object.fromEntries(data.files.map((f) => [f.path, total <= OPEN_ALL_LINES && !isGenerated(f.path)]));
+  }, [data]);
+  const [overrides, setOverrides] = useState<Record<string, boolean>>({});
+  const isOpen = (path: string) => overrides[path] ?? defaults[path] ?? false;
+  const anchor = (i: number) => `${id}-${data.repo}-${data.chunk ?? "stack"}-${i}`.replace(/[^\w-]/g, "_");
+
+  if (data.files.length === 0) return <p className="text-sm text-muted-foreground">No changes in this range.</p>;
+  return (
+    <div className="flex flex-col gap-3">
+      <ul className="flex flex-col rounded-lg border text-sm">
+        {data.files.map((f, i) => (
+          <li key={f.path} className="border-b last:border-b-0">
+            <button
+              type="button"
+              className="flex w-full items-center gap-2 px-3 py-1 text-left hover:bg-accent"
+              onClick={() => {
+                setOverrides((o) => ({ ...o, [f.path]: true }));
+                requestAnimationFrame(() => document.getElementById(anchor(i))?.scrollIntoView({ block: "start" }));
+              }}
+            >
+              <FileText className="size-3.5 shrink-0 text-muted-foreground" />
+              <span className="min-w-0 truncate font-mono text-xs">{f.path}</span>
+              <span className={`shrink-0 text-xs ${STATUS_STYLE[f.status]}`}>{f.status}</span>
+              <span className="ml-auto" />
+              <Counts additions={f.additions} deletions={f.deletions} />
+            </button>
+          </li>
+        ))}
+      </ul>
+      {data.truncated && (
+        <p className="text-sm text-muted-foreground">Diff too large: the last files are not shown.</p>
+      )}
+      {data.files.map((f, i) => (
+        <FileDiff
+          key={f.path}
+          file={f}
+          id={anchor(i)}
+          open={isOpen(f.path)}
+          onToggle={() => setOverrides((o) => ({ ...o, [f.path]: !isOpen(f.path) }))}
+        />
+      ))}
+    </div>
+  );
+}
+
+export function CodeTab({ p, target, onTarget }: CodeTabProps) {
+  const [manual, setManual] = useState(0);
+  const requests = useMemo(() => diffRequests(p, target), [p, target]);
+  const involved = new Set(requests.flatMap((r) => (r.chunk ? [r.chunk] : p.chunks.filter((c) => c.repo === r.repo).map((c) => c.name))));
+  const refreshKey = `${manual}:${JSON.stringify(p.chunks.filter((c) => involved.has(c.name)).map((c) => [c.branch, c.status]))}`;
+  const results = useDiff(p.id, requests, refreshKey);
+  const multi = p.repos.length > 1;
+
+  const chunk = target.chunk ? p.chunks.find((c) => c.name === target.chunk) : undefined;
+  const pr = chunk?.pr ? prNumber(chunk.pr) : undefined;
+  const datas = results.flatMap((r) => ("data" in r ? [r.data] : []));
+  const additions = datas.reduce((n, d) => n + d.additions, 0);
+  const deletions = datas.reduce((n, d) => n + d.deletions, 0);
+  const loading = results.some((r) => "loading" in r);
+
+  return (
+    <div className="flex flex-col gap-4">
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm">
+        <span className="font-medium">{chunk ? `${pr ? `PR #${pr} · ` : ""}${chunk.name}` : "Whole stack"}</span>
+        {!multi && datas[0] && <code className="rounded bg-muted px-1.5 py-0.5 text-xs text-muted-foreground">{datas[0].range}</code>}
+        {datas.length > 0 && <Counts additions={additions} deletions={deletions} />}
+        {datas.length > 0 && <span className="text-xs text-muted-foreground">{datas.reduce((n, d) => n + d.files.length, 0)} files</span>}
+        <span className="ml-auto flex items-center gap-2">
+          {chunk && (
+            <Button size="sm" variant="ghost" onClick={() => onTarget({})}>
+              Whole stack
+            </Button>
+          )}
+          <Button size="sm" variant="outline" onClick={() => setManual((n) => n + 1)} disabled={loading}>
+            {loading ? <Loader2 className="animate-spin" /> : <RefreshCw />} Refresh
+          </Button>
+        </span>
+      </div>
+      {requests.length === 0 && (
+        <p className="text-sm text-muted-foreground">No branch yet: nothing to compare.</p>
+      )}
+      {requests.map((req, i) => {
+        const r = results[i]!;
+        return (
+          <div key={`${req.repo}:${req.chunk ?? ""}`} className="flex flex-col gap-3">
+            {multi && (
+              <h4 className="flex items-center gap-2 text-sm font-medium">
+                {repoName(req.repo)}
+                {"data" in r && <code className="rounded bg-muted px-1.5 py-0.5 text-xs font-normal text-muted-foreground">{r.data.range}</code>}
+              </h4>
+            )}
+            {"loading" in r ? (
+              <p className="flex items-center gap-2 text-sm text-muted-foreground">
+                <Loader2 className="size-4 animate-spin" /> Loading diff…
+              </p>
+            ) : "error" in r ? (
+              <p className="flex items-center gap-2 rounded-lg border bg-muted/50 px-3 py-2 text-sm text-muted-foreground">
+                <AlertCircle className="size-4 shrink-0" /> {r.error}
+              </p>
+            ) : (
+              <RepoDiff id={p.id} data={r.data} />
+            )}
+          </div>
+        );
+      })}
     </div>
   );
 }

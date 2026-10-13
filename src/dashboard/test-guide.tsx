@@ -1,5 +1,6 @@
 import Markdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
+import { markdownHighlight } from "./highlight";
 
 // Tailwind preflight resets lists and headings, so the guide styles them here.
 // react-markdown also passes a `node` prop: drop it so it does not reach the DOM.
@@ -27,7 +28,9 @@ export function TestGuide({ guide }: { guide: string }) {
   return (
     <div className="rounded-lg border px-4 py-3 text-sm leading-relaxed">
       {/* GFM turns the bare test URLs into links. */}
-      <Markdown remarkPlugins={[remarkGfm]} components={guideComponents}>{guide}</Markdown>
+      <Markdown remarkPlugins={[remarkGfm]} rehypePlugins={[markdownHighlight]} components={guideComponents}>
+        {guide}
+      </Markdown>
     </div>
   );
 }
