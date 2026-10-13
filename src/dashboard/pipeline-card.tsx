@@ -1,4 +1,4 @@
-import { ChevronDown, FolderGit2, GitMerge } from "lucide-react";
+import { ChevronDown, FolderGit2, GitMerge, Zap } from "lucide-react";
 import { useState, type KeyboardEvent } from "react";
 import type { DashboardState } from "../state.ts";
 import { ActionButton } from "./action-button";
@@ -80,12 +80,12 @@ export function PipelineCard({ p }: { p: DashboardState }) {
           </div>
           <div className="flex shrink-0 flex-col items-end gap-2">
             <div className="flex items-center gap-1.5">
+              <AgentLogo p={p} />
               {p.mode === "quick" && (
                 <Badge variant="secondary" className="bg-pink-500/15 text-pink-700 dark:text-pink-400">
-                  Quick
+                  <Zap /> Quick
                 </Badge>
               )}
-              <AgentLogo p={p} />
               {allMerged && (
                 <Badge variant="secondary" className="bg-violet-500/15 text-violet-700 dark:text-violet-400">
                   <GitMerge /> Merged
