@@ -76,30 +76,50 @@ function Steps({ steps }: { steps: State["steps"] }) {
   );
 }
 
-function StopButton({ id }: { id: string }) {
+// Once the agents are done, the only thing left to stop is the test server.
+const ACTIONS = {
+  stopPipeline: {
+    endpoint: "stop",
+    icon: Square,
+    button: "Stop pipeline",
+    title: "Stop this pipeline?",
+    description: "The agents stop after their current step, and the test server stops now.",
+    confirm: "Stop",
+  },
+  stopServer: {
+    endpoint: "stop",
+    icon: Square,
+    button: "Stop test server",
+    title: "Stop the test server?",
+    description: "The test server stops. The code, branches and PRs stay in place.",
+    confirm: "Stop",
+  },
+};
+
+function ActionButton({ id, action }: { id: string; action: keyof typeof ACTIONS }) {
+  const { endpoint, icon: Icon, button, title, description, confirm } = ACTIONS[action];
   const [error, setError] = useState<string>();
-  const stop = async () => {
-    const res = await fetch(`/api/pipelines/${encodeURIComponent(id)}/stop`, { method: "POST" });
+  const run = async () => {
+    setError(undefined);
+    const res = await fetch(`/api/pipelines/${encodeURIComponent(id)}/${endpoint}`, { method: "POST" });
     if (!res.ok) setError((await res.json()).error);
   };
   return (
     <AlertDialog>
+      {error && <span className="text-xs text-destructive">{error}</span>}
       <AlertDialogTrigger asChild>
-        <Button variant="outline" size="sm" className="ml-auto">
-          <Square /> Stop pipeline
+        <Button variant="outline" size="sm">
+          <Icon /> {button}
         </Button>
       </AlertDialogTrigger>
-      {error && <span className="text-xs text-destructive">{error}</span>}
       <AlertDialogContent>
         <AlertDialogHeader>
-          <AlertDialogTitle>Stop this pipeline?</AlertDialogTitle>
-          <AlertDialogDescription>
-            The agents stop after their current step, and the test server stops now.
-          </AlertDialogDescription>
+          <AlertDialogTitle>{title}</AlertDialogTitle>
+          <AlertDialogDescription>{description}</AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter>
           <AlertDialogCancel>Cancel</AlertDialogCancel>
-          <AlertDialogAction onClick={stop}>Stop</AlertDialogAction>
+          <AlertDialogAction onClick={run}>{confirm}</AlertDialogAction>
         </AlertDialogFooter>
       </AlertDialogContent>
     </AlertDialog>
@@ -174,7 +194,13 @@ function PipelineCard({ p }: { p: State }) {
         <span className="truncate font-mono" title={p.repo}>{p.repo.replace(/^\/home\/[^/]+/, "~")}</span>
         <span>·</span>
         <span className="whitespace-nowrap">updated {timeAgo(p.updatedAt)}</span>
-        {p.status !== "stopped" && <StopButton id={p.id} />}
+        <div className="ml-auto flex items-center gap-2">
+          {p.status === "ready" ? (
+            p.preview && <ActionButton id={p.id} action="stopServer" />
+          ) : p.status === "running" || p.status === "waiting_for_user" || (p.status === "failed" && p.preview) ? (
+            <ActionButton id={p.id} action="stopPipeline" />
+          ) : null}
+        </div>
       </CardFooter>
     </Card>
   );
