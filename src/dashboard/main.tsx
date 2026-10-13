@@ -64,10 +64,9 @@ function App() {
   const selectRepo = (value: string) => {
     const next = value === ALL ? null : value;
     setRepo(next);
-    const url = new URL(location.href);
-    if (next) url.searchParams.set("repo", next);
-    else url.searchParams.delete("repo");
-    history.replaceState(null, "", url);
+    // Keep "/" readable in the URL so a bookmarked repo stays legible.
+    const query = next ? `?repo=${encodeURIComponent(next).replaceAll("%2F", "/")}` : "";
+    history.replaceState(null, "", location.pathname + query);
   };
 
   return (
