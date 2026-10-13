@@ -133,6 +133,12 @@ export function PipelineDetail({ p, onBack }: { p: DashboardState; onBack: () =>
       <div className="flex flex-col gap-3 px-6 pt-5">
         <div className="flex flex-wrap items-center gap-2">
           <h3 className="mr-auto text-sm font-semibold">Pull request stack</h3>
+          {/* Only a way back: on the whole stack already, there is nothing to switch to. */}
+          {target.chunk !== undefined && (
+            <Button variant="outline" size="sm" onClick={() => select({})}>
+              <Layers /> Whole stack
+            </Button>
+          )}
           {multi && merging && p.merge && (
             <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
               <Loader2 className="size-3.5 animate-spin" /> Merging {repoName(p.merge.repo)}…
@@ -143,16 +149,6 @@ export function PipelineDetail({ p, onBack }: { p: DashboardState; onBack: () =>
               id={p.id} repo={p.repos[0].path} chunks={p.chunks} base={p.repos[0].base} merge={p.merge}
               busy={false} finished={done}
             />
-          )}
-          {p.chunks.some((c) => c.branch) && (
-            <Button
-              variant={target.chunk === undefined ? "outline" : "ghost"}
-              size="sm"
-              aria-pressed={target.chunk === undefined}
-              onClick={() => select({})}
-            >
-              <Layers /> Whole stack
-            </Button>
           )}
         </div>
         {stack}
