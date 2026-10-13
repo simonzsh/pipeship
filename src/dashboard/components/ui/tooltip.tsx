@@ -15,14 +15,14 @@ function TooltipTrigger(props: ComponentProps<typeof TooltipPrimitive.Trigger>) 
   return <TooltipPrimitive.Trigger data-slot="tooltip-trigger" {...props} />;
 }
 
-function TooltipContent({ className, sideOffset = 6, ...props }: ComponentProps<typeof TooltipPrimitive.Content>) {
+function TooltipContent({ className, sideOffset = 4, ...props }: ComponentProps<typeof TooltipPrimitive.Content>) {
   return (
     <TooltipPrimitive.Portal>
       <TooltipPrimitive.Content
         data-slot="tooltip-content"
         sideOffset={sideOffset}
         className={cn(
-          "z-50 max-w-sm rounded-md border bg-popover px-3 py-2 text-xs text-popover-foreground shadow-md",
+          "z-50 rounded-md border bg-popover px-2 py-1 text-xs text-popover-foreground shadow-sm",
           className,
         )}
         {...props}

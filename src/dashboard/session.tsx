@@ -84,18 +84,7 @@ export function AgentLogo({ p }: { p: State }) {
         </button>
       </TooltipTrigger>
       <TooltipContent onClick={(e) => e.stopPropagation()}>
-        {!canResume ? (
-          `${name} session`
-        ) : copied ? (
-          <span className="flex items-center gap-1.5 font-medium text-emerald-600 dark:text-emerald-400">
-            <Check className="size-3.5" /> Copied, paste it in a terminal
-          </span>
-        ) : (
-          <div className="flex flex-col gap-1.5">
-            <span className="font-medium">Click to copy the command to resume the {name} session</span>
-            <code className="break-all rounded bg-muted px-1.5 py-1 font-mono text-[11px] text-muted-foreground">{cmd}</code>
-          </div>
-        )}
+        {!canResume ? `${name} session` : copied ? "Copied" : "Copy resume command"}
       </TooltipContent>
     </Tooltip>
   );
