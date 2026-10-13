@@ -68,7 +68,7 @@ export function MergeButton({ id, chunks, base, merge }: { id: string; chunks: C
   // Merged PRs are skipped by the engine, so the dialog lists only the rest.
   const todo = chunks.filter((c) => c.pr && c.status !== "merged");
   const mode: Mode = todo.length < 2 ? "base" : choice;
-  // One PR left (e.g. after a combine): the button says where it goes, in another colour.
+  // One PR left (e.g. after a combine): a plain Merge button, in another colour.
   const single = todo.length < 2;
   const baseName = base ?? "the base branch";
   const tone = single ? "bg-violet-600 hover:bg-violet-700" : "bg-emerald-600 hover:bg-emerald-700";
@@ -118,7 +118,7 @@ export function MergeButton({ id, chunks, base, merge }: { id: string; chunks: C
       {!error && merge && <MergeFailure merge={merge} />}
       <AlertDialogTrigger asChild>
         <Button size="xs" className={`${tone} text-white`}>
-          <GitMerge /> {single ? `Merge into ${baseName}` : "Merge stack"}
+          <GitMerge /> {single ? "Merge" : "Merge stack"}
         </Button>
       </AlertDialogTrigger>
       <AlertDialogContent>
