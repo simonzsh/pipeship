@@ -18,7 +18,7 @@ You are the orchestrator. Run each heavy step in a subagent with a clean context
 pipeship new --repo <path> --title <t> --source <s> [--ref <r>] [--url <u>] [--mode quick] [--skip a,b]
 pipeship get <id>                      # read state: check stopRequested and skipped steps
 pipeship step <id> <step> running|done|skipped|failed
-pipeship status <id> waiting_for_user|running|failed
+pipeship status <id> waiting_for_user|running|ready|failed
 pipeship chunk <id> <name> [--worktree p] [--branch b] [--status s] [--pr url]
 pipeship recipe <repo>                 # the saved recipe to start the app, or "none"
 pipeship preview <id> <worktree> [--recipe file]   # starts the app, prints the URL
@@ -105,7 +105,7 @@ If the repo has no remote, skip this step and tell the user.
 
 ## Step 7 — preview
 
-If the repo has no app to run, mark this step `skipped`.
+If the repo has no app to run, mark this step `skipped`: once every step is done or skipped, the pipeline becomes `ready` on its own.
 
 Run `pipeship preview <id> <top worktree>`, with `--recipe <dir>/recipe.json` if step 1 wrote a draft. It copies local files, installs, starts the app on a free port, waits until it answers, and marks the pipeline `ready`. A draft recipe that works is saved, so later pipelines in this repo skip this work. Give the user the URL.
 

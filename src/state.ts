@@ -127,6 +127,9 @@ export function setStep(id: string, name: StepName, status: StepStatus): State {
     }
     if (status === "done" || status === "failed") step.endedAt = now;
     if (status === "failed") s.status = "failed";
+    // A skipped preview never reaches the code that marks the pipeline ready.
+    const finished = s.steps.every((x) => x.status === "done" || x.status === "skipped");
+    if (finished && (s.status === "running" || s.status === "waiting_for_user")) s.status = "ready";
   });
 }
 

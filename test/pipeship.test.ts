@@ -40,6 +40,21 @@ test("steps and chunks update the state", () => {
   expect(() => setStep(id, "nope" as never, "done")).toThrow("unknown step");
 });
 
+test("the pipeline is ready once every step is done or skipped", () => {
+  const { id } = createPipeline({ repo, title: "t", source: "text", skip: ["preview"] });
+  for (const name of ["map", "questions", "plan", "implement", "review"] as const) setStep(id, name, "done");
+  expect(readState(id).status).toBe("running");
+  setStep(id, "stack", "done");
+  expect(readState(id).status).toBe("ready");
+});
+
+test("a failed pipeline stays failed when its last step ends", () => {
+  const { id } = createPipeline({ repo, title: "t", source: "text", mode: "quick" });
+  setStep(id, "review", "failed");
+  for (const name of ["map", "questions", "implement", "review", "stack", "preview"] as const) setStep(id, name, "done");
+  expect(readState(id).status).toBe("failed");
+});
+
 test("preview starts the app, copies local files, and stop kills it", async () => {
   writeFileSync(join(repo, ".env.local"), "SECRET=1");
   const worktree = mkdtempSync(join(root, "wt-"));
