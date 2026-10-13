@@ -1,5 +1,5 @@
 #!/usr/bin/env bun
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, openSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { parseArgs } from "node:util";
@@ -14,7 +14,7 @@ import {
 const USAGE = `pipeship — state, test environments and dashboard for the /pipeship skill
 
   new --repo <path> --title <text> [--source <name>] [--ref <id> [--url <url>]]... [--name <words>] [--mode full|quick] [--skip a,b]
-                               records the calling agent session (harness, id, cwd) when one is found
+                               records the calling agent session (harness, id, cwd) when one is found, and the base branch
                                repeat --ref/--url for each ticket; the nth --url belongs to the nth --ref
                                --name: a 2 or 3 word id for a plain-text ticket; refs win
   get <id>                     print the state (JSON)
@@ -79,8 +79,12 @@ async function stopDashboard(): Promise<string> {
 async function main() {
   switch (command) {
     case "new": {
+      const repo = resolve(need(values.repo, "--repo"));
+      // Empty on a detached HEAD or outside a git repo: base stays unset.
+      const base = spawnSync("git", ["-C", repo, "branch", "--show-current"], { encoding: "utf8" }).stdout?.trim();
       const state = createPipeline({
-        repo: resolve(need(values.repo, "--repo")),
+        repo,
+        base: base || undefined,
         title: need(values.title, "--title"),
         name: values.name,
         source: values.source,

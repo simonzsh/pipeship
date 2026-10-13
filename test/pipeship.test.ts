@@ -563,3 +563,19 @@ test("a plain-text ticket has no source", () => {
   const linear = createPipeline({ repo, title: "t", source: "linear", links: [{ ref: "ABC-9" }] });
   expect(readState(linear.id).ticket.source).toBe("linear");
 });
+
+test("new records the base branch, and leaves it unset on a detached HEAD", () => {
+  const git = (...args: string[]) => spawnSync("git", ["-C", repo, "-c", "user.name=t", "-c", "user.email=t@t", ...args], { encoding: "utf8" });
+  const created = (name: string) => {
+    const r = spawnSync("bun", [join(import.meta.dir, "../src/cli.ts"), "new", "--repo", repo, "--title", "t", "--name", name], {
+      encoding: "utf8",
+      env: process.env,
+    });
+    return readState(JSON.parse(r.stdout).id);
+  };
+  git("init", "-q", "-b", "main");
+  git("commit", "-q", "--allow-empty", "-m", "init");
+  expect(created("on-branch").base).toBe("main");
+  git("checkout", "-q", "--detach");
+  expect(created("detached").base).toBeUndefined();
+});
