@@ -1,6 +1,7 @@
 import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import { findT3Thread, type T3Thread } from "./session.ts";
 
 export const STEPS = ["map", "questions", "plan", "implement", "review", "stack", "preview"] as const;
 export type StepName = (typeof STEPS)[number];
@@ -175,13 +176,29 @@ export function listStates(): State[] {
     .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
 }
 
-export type DashboardState = State & { testGuide?: string };
+export type DashboardState = State & { testGuide?: string; t3Thread?: T3Thread };
 
-// The guide is read for the API only: it never goes into state.json.
+// The dashboard polls every second: keep found threads, and retry a miss after a minute
+// (T3 Code may write the session cursor after the pipeline starts).
+const t3Threads = new Map<string, { thread?: T3Thread; at: number }>();
+function cachedT3Thread(session: Session): T3Thread | undefined {
+  const hit = t3Threads.get(session.id);
+  if (hit && (hit.thread || Date.now() - hit.at < 60_000)) return hit.thread;
+  const thread = findT3Thread(session);
+  t3Threads.set(session.id, { thread, at: Date.now() });
+  return thread;
+}
+
+// The guide and the T3 Code thread are read for the API only: they never go into state.json.
 export function listDashboardStates(): DashboardState[] {
   return listStates().map((s) => {
     const file = join(pipelineDir(s.id), "test.md");
-    return existsSync(file) ? { ...s, testGuide: readFileSync(file, "utf8") } : s;
+    const t3Thread = s.session && cachedT3Thread(s.session);
+    return {
+      ...s,
+      ...(existsSync(file) && { testGuide: readFileSync(file, "utf8") }),
+      ...(t3Thread && { t3Thread }),
+    };
   });
 }
 

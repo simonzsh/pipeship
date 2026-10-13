@@ -110,3 +110,37 @@ export function detectSession(opts: { env?: Env; startPid?: number; readProc?: R
   const found = harness === "claude" ? claudeCwd(homes.claude, id) : codexCwd(homes.codex, id);
   return { harness, id, cwd: found ?? opts.cwd ?? process.cwd() };
 }
+
+export interface T3Thread { environmentId: string; threadId: string }
+
+export function t3Home(env: Env = process.env): string {
+  return env.T3CODE_HOME ?? join(homedir(), ".t3");
+}
+
+// T3 Code gives the agent no thread id: find the thread whose provider cursor resumes this session.
+// Internal T3 Code schema, so any read error means "no thread".
+export function findT3Thread(session: Session, home = t3Home()): T3Thread | undefined {
+  const dir = join(home, "userdata");
+  const db = join(dir, "state.sqlite");
+  if (!ID_RE.test(session.id) || !existsSync(db)) return undefined;
+  try {
+    const environmentId = readFileSync(join(dir, "environment-id"), "utf8").trim();
+    if (!ID_RE.test(environmentId)) return undefined;
+    const field = session.harness === "claude" ? "$.resume" : "$.threadId";
+    const conn = new Database(db, { readonly: true });
+    try {
+      const row = conn
+        .query(
+          `SELECT r.thread_id AS threadId FROM provider_session_runtime r
+           JOIN projection_threads t ON t.thread_id = r.thread_id
+           WHERE json_extract(r.resume_cursor_json, ?) = ? AND t.deleted_at IS NULL LIMIT 1`,
+        )
+        .get(field, session.id) as { threadId?: string } | null;
+      return row?.threadId && ID_RE.test(row.threadId) ? { environmentId, threadId: row.threadId } : undefined;
+    } finally {
+      conn.close();
+    }
+  } catch {
+    return undefined;
+  }
+}

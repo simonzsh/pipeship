@@ -90,6 +90,8 @@ The dashboard on http://localhost:4400 lists pipelines live, with their steps, P
 
 Each card shows the logo of the agent that runs the pipeline (Claude Code or Codex). Click it to copy the command that reopens the session in its folder. Pipeship stores the harness, the session id and the folder, never a pid or a token.
 
+When the session runs in [T3 Code](https://github.com/pingdotgg/t3code), the card also shows a link that opens its thread in the T3 Code desktop app (`t3code://threads/<environmentId>/<threadId>`, T3 Code 0.0.46 or later). The dashboard finds the thread in T3 Code's local database (`$T3CODE_HOME`, default `~/.t3`), read-only.
+
 The pipeline starts the dashboard for you. To start or stop it yourself, use `/pipeship:dashboard` and `/pipeship:dashboard stop` in Claude Code, or `$dashboard` and `$dashboard stop` in Codex (from a terminal: `scripts/pipeship dashboard [stop]`). Stopping it leaves the pipelines and their test servers running.
 
 The page is React, Tailwind and [shadcn/ui](https://ui.shadcn.com) components (`src/dashboard/`). Bun builds it in memory when the dashboard starts: no Vite, no build step.

@@ -13,11 +13,13 @@ import {
 } from "../src/merge.ts";
 import { spawn, spawnSync } from "node:child_process";
 import { Database } from "bun:sqlite";
-import { detectSession, type ReadProc } from "../src/session.ts";
+import { detectSession, findT3Thread, type ReadProc } from "../src/session.ts";
 import { groupByStatus } from "../src/dashboard/groups.ts";
+import { t3ThreadLink } from "../src/dashboard/session.tsx";
 
 const root = mkdtempSync(join(tmpdir(), "pipeship-test-"));
 process.env.PIPESHIP_HOME = join(root, "home");
+process.env.T3CODE_HOME = join(root, "t3"); // never read the real T3 Code database
 afterAll(() => rmSync(root, { recursive: true, force: true }));
 
 let repo: string;
@@ -259,6 +261,39 @@ test("pipelines record their session, and old state files without one still load
   delete old.session;
   writeFileSync(path, JSON.stringify(old));
   expect(readState(plain.id).session).toBeUndefined();
+});
+
+function fakeT3Home(rows: { thread: string; provider: string; cursor: object; deleted?: boolean }[]) {
+  const dir = mkdtempSync(join(root, "t3-"));
+  mkdirSync(join(dir, "userdata"));
+  writeFileSync(join(dir, "userdata", "environment-id"), "affd9b7d-69f6-438e-8932-c374ef17ed06\n");
+  const db = new Database(join(dir, "userdata", "state.sqlite"));
+  db.run("CREATE TABLE provider_session_runtime (thread_id TEXT, provider_name TEXT, resume_cursor_json TEXT)");
+  db.run("CREATE TABLE projection_threads (thread_id TEXT, deleted_at TEXT)");
+  for (const r of rows) {
+    db.run("INSERT INTO provider_session_runtime VALUES (?, ?, ?)", [r.thread, r.provider, JSON.stringify(r.cursor)]);
+    db.run("INSERT INTO projection_threads VALUES (?, ?)", [r.thread, r.deleted ? "2026-10-01" : null]);
+  }
+  db.close();
+  return dir;
+}
+
+test("a session is matched to the T3 Code thread that runs it", () => {
+  const t3 = fakeT3Home([
+    { thread: "2b0c8b67-4a50-43db-ad6a-1ee58fc13c67", provider: "claudeAgent", cursor: { threadId: "2b0c8b67-4a50-43db-ad6a-1ee58fc13c67", resume: CLAUDE_ID } },
+    { thread: "11111111-2222-4333-8444-555555555555", provider: "codex", cursor: { threadId: CODEX_ID } },
+    { thread: "99999999-2222-4333-8444-555555555555", provider: "claudeAgent", cursor: { resume: "dddddddd-2eaf-4c0e-b494-97ea2a18163f" }, deleted: true },
+  ]);
+  const environmentId = "affd9b7d-69f6-438e-8932-c374ef17ed06";
+  expect(findT3Thread({ harness: "claude", id: CLAUDE_ID, cwd: "/w" }, t3)).toEqual({ environmentId, threadId: "2b0c8b67-4a50-43db-ad6a-1ee58fc13c67" });
+  expect(findT3Thread({ harness: "codex", id: CODEX_ID, cwd: "/w" }, t3)).toEqual({ environmentId, threadId: "11111111-2222-4333-8444-555555555555" });
+  // The harness picks the cursor field: a claude id never matches a codex thread.
+  expect(findT3Thread({ harness: "claude", id: CODEX_ID, cwd: "/w" }, t3)).toBeUndefined();
+  expect(findT3Thread({ harness: "claude", id: "dddddddd-2eaf-4c0e-b494-97ea2a18163f", cwd: "/w" }, t3)).toBeUndefined();
+  expect(findT3Thread({ harness: "claude", id: CLAUDE_ID, cwd: "/w" }, join(root, "no-t3"))).toBeUndefined();
+  expect(t3ThreadLink({ environmentId, threadId: "2b0c8b67-4a50-43db-ad6a-1ee58fc13c67" })).toBe(
+    "t3code://threads/affd9b7d-69f6-438e-8932-c374ef17ed06/2b0c8b67-4a50-43db-ad6a-1ee58fc13c67",
+  );
 });
 
 const svc = (name: string, kind: string, extra: Partial<Service> = {}): Service => ({
