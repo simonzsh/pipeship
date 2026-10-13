@@ -10,11 +10,6 @@ Feature pipeline for Claude Code. Give it a ticket or an issue from any source; 
 
 Modes: `full` (default, all 7 steps) and `quick` (one chunk, blocking questions only). `--skip` removes steps; you can also say "skip the review" during the run.
 
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset="docs/dashboard-dark.png">
-  <img alt="The pipeship dashboard: one card per pipeline with its status, steps, test URL and stacked PRs" src="docs/dashboard-light.png" width="720">
-</picture>
-
 ## Install
 
 Requires [Bun](https://bun.sh), git and `gh`. In Claude Code:
@@ -46,6 +41,11 @@ You do not configure anything: on the first pipeline in a repo, Claude reads the
 The page is React, Tailwind and [shadcn/ui](https://ui.shadcn.com) components (`src/dashboard/`). Bun builds it in memory when the dashboard starts: no Vite, no build step. Stop the dashboard with `scripts/pipeship dashboard stop`.
 
 State lives in `~/.pipeship/pipelines/<id>/` (`state.json`, `ticket.md`, `map.md`, `plan.md`, worktrees, `preview.log`).
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/dashboard-dark.png">
+  <img alt="The pipeship dashboard: one card per pipeline with its status, steps, test URL and stacked PRs" src="docs/dashboard-light.png" width="720">
+</picture>
 
 ## Develop
 
