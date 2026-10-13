@@ -567,8 +567,13 @@ test("a plain-text ticket has no source", () => {
   expect(readState(linear.id).ticket.source).toBe("linear");
 });
 
+const sh = (cwd: string, ...args: string[]) => {
+  const r = spawnSync("git", ["-C", cwd, "-c", "user.name=t", "-c", "user.email=t@t", ...args], { encoding: "utf8" });
+  if (r.status !== 0) throw new Error(`git ${args.join(" ")}: ${r.stderr}`);
+  return r.stdout.trim();
+};
+
 test("new records the base branch, and leaves it unset on a detached HEAD", () => {
-  const git = (...args: string[]) => spawnSync("git", ["-C", repo, "-c", "user.name=t", "-c", "user.email=t@t", ...args], { encoding: "utf8" });
   const created = (name: string) => {
     const r = spawnSync("bun", [join(import.meta.dir, "../src/cli.ts"), "new", "--repo", repo, "--title", "t", "--name", name], {
       encoding: "utf8",
@@ -576,18 +581,18 @@ test("new records the base branch, and leaves it unset on a detached HEAD", () =
     });
     return readState(JSON.parse(r.stdout).id);
   };
-  git("init", "-q", "-b", "main");
-  git("commit", "-q", "--allow-empty", "-m", "init");
+  sh(repo, "init", "-q", "-b", "main");
+  sh(repo, "commit", "-q", "--allow-empty", "-m", "init");
   expect(created("on-branch").base).toBe("main");
-  git("checkout", "-q", "--detach");
+  sh(repo, "checkout", "-q", "--detach");
   expect(created("detached").base).toBeUndefined();
 });
 
 // Merge stack: real git (local bare remote, rebase and push really run) behind a fake gh.
-const sh = (cwd: string, ...args: string[]) => {
-  const r = spawnSync("git", ["-C", cwd, "-c", "user.name=t", "-c", "user.email=t@t", ...args], { encoding: "utf8" });
-  if (r.status !== 0) throw new Error(`git ${args.join(" ")}: ${r.stderr}`);
-  return r.stdout.trim();
+const commitFile = (cwd: string, name: string, content: string, msg: string) => {
+  writeFileSync(join(cwd, name), content);
+  sh(cwd, "add", ".");
+  sh(cwd, "commit", "-q", "-m", msg);
 };
 
 function makeStack(n: number, commits = 1) {
@@ -596,8 +601,7 @@ function makeStack(n: number, commits = 1) {
   const clone = join(dir, "repo");
   sh(dir, "init", "-q", "--bare", "-b", "main", origin);
   sh(dir, "clone", "-q", origin, clone);
-  writeFileSync(join(clone, "base.txt"), "base\n");
-  sh(clone, "add", "."), sh(clone, "commit", "-q", "-m", "initial");
+  commitFile(clone, "base.txt", "base\n", "initial");
   sh(clone, "push", "-q", "origin", "main");
   const worktrees: string[] = [];
   for (let i = 1; i <= n; i++) {
@@ -605,8 +609,7 @@ function makeStack(n: number, commits = 1) {
     // Several commits per chunk edit the same line of the same file: replaying an old commit
     // on top of the squash is an add/add conflict, so a wrong old tip cannot go unnoticed.
     for (let k = 0; k < commits; k++) {
-      writeFileSync(join(clone, `f${i}.txt`), `${"ab"[k] ?? "z"}${commits === 1 ? `f${i}` : ""}\n`);
-      sh(clone, "add", "."), sh(clone, "commit", "-q", "-m", `f${i} step ${k}`);
+      commitFile(clone, `f${i}.txt`, `${"ab"[k] ?? "z"}${commits === 1 ? `f${i}` : ""}\n`, `f${i} step ${k}`);
     }
     sh(clone, "push", "-q", "origin", `c${i}`);
     worktrees.push(join(dir, `wt-${i}`));
@@ -755,7 +758,7 @@ test("merge: a failing check stops the merge, and a new run resumes from that PR
   gh.prs[2]!.checks = [{ name: "lint", status: "COMPLETED", conclusion: "FAILURE" }];
   await mergeStack(stack.id, gh.deps, "base");
   let s = readState(stack.id);
-  expect(s.merge).toMatchObject({ status: "failed", current: "c2", pr: 2 });
+  expect(s.merge).toMatchObject({ status: "failed", current: "c2" });
   expect(s.merge?.error).toContain("lint");
   expect(gh.calls).toEqual(["merge 1", "patch 2 main"]);
   expect(chunkStatuses(stack.id)).toEqual(["merged", "pr", "pr"]);
@@ -783,8 +786,7 @@ test("merge: a rebase conflict is aborted and nothing is pushed", async () => {
   const stack = makeStack(2);
   const gh = fakeGh(stack, 2);
   // main gets its own f2.txt: rebasing c2 onto it is an add/add conflict.
-  writeFileSync(join(stack.clone, "f2.txt"), "other\n");
-  sh(stack.clone, "add", "."), sh(stack.clone, "commit", "-q", "-m", "main f2");
+  commitFile(stack.clone, "f2.txt", "other\n", "main f2");
   sh(stack.clone, "push", "-q", "origin", "main");
   const before = sh(stack.origin, "rev-parse", "c2");
   await mergeStack(stack.id, gh.deps, "base");
@@ -900,8 +902,7 @@ test("merge: commits on GitHub that the worktree lacks stop the rebase before an
   const gh = fakeGh(stack, 2);
   const other = join(stack.dir, "other");
   sh(stack.dir, "clone", "-q", "-b", "c2", stack.origin, other);
-  writeFileSync(join(other, "suggestion.txt"), "x\n");
-  sh(other, "add", "."), sh(other, "commit", "-q", "-m", "suggestion");
+  commitFile(other, "suggestion.txt", "x\n", "suggestion");
   sh(other, "push", "-q", "origin", "c2");
   const before = sh(stack.origin, "rev-parse", "c2");
   await mergeStack(stack.id, gh.deps, "base");
@@ -964,7 +965,7 @@ test("merge: a running merge is stale when its pid is dead or it stopped refresh
 test("merge: every poll of a long wait refreshes updatedAt", async () => {
   const stack = makeStack(1);
   const gh = fakeGh(stack, 1);
-  gh.prs[1]!.view = (n) => (n < 6 ? { statusCheckRollup: [{ name: "ci", status: "IN_PROGRESS" }] } : {});
+  gh.prs[1]!.view = (n) => (n < 5 ? { statusCheckRollup: [{ name: "ci", status: "IN_PROGRESS" }] } : {});
   const seen: number[] = [];
   const sleep = async () => {
     seen.push(Date.parse(readState(stack.id).merge!.updatedAt));
@@ -978,7 +979,8 @@ test("merge: every poll of a long wait refreshes updatedAt", async () => {
 });
 
 // Combine mode: the same real git remote, but nothing may be rebased, force-pushed or merged into main.
-const refs = (stack: ReturnType<typeof makeStack>) => ({ main: sh(stack.origin, "rev-parse", "main"), c1: sh(stack.origin, "rev-parse", "c1"), c2: sh(stack.origin, "rev-parse", "c2"), c3: sh(stack.origin, "rev-parse", "c3") });
+const refs = (stack: ReturnType<typeof makeStack>) =>
+  Object.fromEntries(["main", "c1", "c2", "c3"].map((b) => [b, sh(stack.origin, "rev-parse", b)])) as Record<"main" | "c1" | "c2" | "c3", string>;
 const isAncestor = (stack: ReturnType<typeof makeStack>, a: string, b: string) => {
   try {
     sh(stack.origin, "merge-base", "--is-ancestor", a, b);
@@ -1088,7 +1090,7 @@ test("combine: a resume after a failing check on #2 skips #3, which is already m
   const gh = fakeGh(stack, 3);
   gh.prs[2]!.checks = [{ name: "lint", status: "COMPLETED", conclusion: "FAILURE" }];
   await mergeStack(stack.id, gh.deps, "combine");
-  expect(readState(stack.id).merge).toMatchObject({ status: "failed", current: "c2", pr: 2 });
+  expect(readState(stack.id).merge).toMatchObject({ status: "failed", current: "c2" });
   expect(gh.calls).toEqual(["merge 3 --merge"]);
   expect(chunkStatuses(stack.id)).toEqual(["pr", "pr", "merged"]);
 

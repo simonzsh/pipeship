@@ -14,11 +14,19 @@ const STATUS: Record<Status, { label: string; icon: LucideIcon; className: strin
 const AGENT_STOPPED = { label: "Agent stopped", icon: Unplug, className: "bg-red-500/15 text-red-700 dark:text-red-400" };
 
 // A chunk's status is free text from the skill: "done", "pr", "merged" and "failed" are final, anything else is in progress.
-export function ChunkStatusIcon({ status }: { status: string }) {
-  if (status === "done" || status === "pr") return <CheckCircle2 className="size-4 text-emerald-600 dark:text-emerald-400" aria-label={status} />;
-  if (status === "merged") return <GitMerge className="size-4 text-violet-600 dark:text-violet-400" aria-label={status} />;
-  if (status === "failed") return <XCircle className="size-4 text-red-600 dark:text-red-400" aria-label={status} />;
-  return <Loader2 className="size-4 animate-spin text-blue-600 dark:text-blue-400" aria-label={status} />;
+// "merging" comes from the dashboard while a merge runs on that chunk: violet, so it does not look like an agent coding.
+export function ChunkStatusIcon({ status, title }: { status: string; title?: string }) {
+  const icon = chunkIcon(status, title ?? status);
+  // A title attribute on an <svg> shows no tooltip: the wrapper carries it.
+  return title ? <span title={title} className="inline-flex">{icon}</span> : icon;
+}
+
+function chunkIcon(status: string, label: string) {
+  if (status === "done" || status === "pr") return <CheckCircle2 className="size-4 text-emerald-600 dark:text-emerald-400" aria-label={label} />;
+  if (status === "merged") return <GitMerge className="size-4 text-violet-600 dark:text-violet-400" aria-label={label} />;
+  if (status === "failed") return <XCircle className="size-4 text-red-600 dark:text-red-400" aria-label={label} />;
+  if (status === "merging") return <Loader2 className="size-4 animate-spin text-violet-600 dark:text-violet-400" aria-label={label} />;
+  return <Loader2 className="size-4 animate-spin text-blue-600 dark:text-blue-400" aria-label={label} />;
 }
 
 export function StatusBadge({ status, agentStopped }: { status: Status; agentStopped?: boolean }) {

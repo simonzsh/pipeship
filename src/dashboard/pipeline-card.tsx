@@ -121,9 +121,7 @@ export function PipelineCard({ p }: { p: PipelineView }) {
         <span>·</span>
         <span className="whitespace-nowrap">updated {timeAgo(p.updatedAt)}</span>
         <div className="ml-auto flex items-center gap-2">
-          {(merging || (finished && prChunks.length > 0 && !allMerged)) && (
-            <MergeButton id={p.id} chunks={p.chunks} base={p.base} merge={p.merge} />
-          )}
+          <MergeButton id={p.id} chunks={p.chunks} base={p.base} merge={p.merge} finished={finished} />
           {p.status === "ready" ? (
             p.preview && <ActionButton id={p.id} action="stopServer" />
           ) : p.status === "running" || p.status === "waiting_for_user" || (p.status === "failed" && p.preview) ? (

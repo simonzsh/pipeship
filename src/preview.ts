@@ -450,7 +450,7 @@ export async function deletePipeline(id: string, opts: { force?: boolean } = {})
   git(state.repo, "worktree", "prune");
 }
 
-function git(cwd: string, ...args: string[]) {
+export function git(cwd: string, ...args: string[]) {
   const result = spawnSync("git", ["-C", cwd, ...args], { encoding: "utf8" });
   return { status: result.status, stdout: result.stdout ?? "" };
 }

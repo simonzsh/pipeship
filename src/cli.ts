@@ -1,9 +1,9 @@
 #!/usr/bin/env bun
-import { spawn, spawnSync } from "node:child_process";
+import { spawn } from "node:child_process";
 import { existsSync, mkdirSync, openSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { parseArgs } from "node:util";
-import { deletePipeline, findRecipe, isAlive, killGroup, loadRecipe, previewLines, startPreview, stopPipeline } from "./preview.ts";
+import { deletePipeline, findRecipe, git, isAlive, killGroup, loadRecipe, previewLines, startPreview, stopPipeline } from "./preview.ts";
 import { detectSession } from "./session.ts";
 import { DEFAULT_PORT, isDashboardUp, serve } from "./server.ts";
 import {
@@ -81,7 +81,7 @@ async function main() {
     case "new": {
       const repo = resolve(need(values.repo, "--repo"));
       // Empty on a detached HEAD or outside a git repo: base stays unset.
-      const base = spawnSync("git", ["-C", repo, "branch", "--show-current"], { encoding: "utf8" }).stdout?.trim();
+      const base = git(repo, "branch", "--show-current").stdout.trim();
       const state = createPipeline({
         repo,
         base,
