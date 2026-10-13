@@ -22,7 +22,7 @@ import { detectSession, findT3Thread, type ReadProc } from "../src/session.ts";
 import { groupByStatus } from "../src/dashboard/groups.ts";
 import { t3ThreadLink } from "../src/dashboard/session.tsx";
 import { buildSearch, parseUrl } from "../src/dashboard/url.ts";
-import { allMerged, displaySteps, finished, timeAgo } from "../src/dashboard/pipeline-info.ts";
+import { allMerged, displaySteps, finished, formatElapsed, timeAgo } from "../src/dashboard/pipeline-info.ts";
 import { diffRequests, diffUrl } from "../src/dashboard/diff-requests.ts";
 import { highlightLines, languageOf } from "../src/dashboard/highlight.tsx";
 
@@ -1744,4 +1744,18 @@ test("waiting_for_user needs a running step", () => {
   setStatus(id, "waiting_for_user");
   expect(readState(id).status).toBe("waiting_for_user");
   expect(() => setStatus(id, "nope" as never)).toThrow("unknown status");
+});
+
+test("formatElapsed shows seconds, minutes and hours", () => {
+  const now = Date.parse("2026-01-01T01:00:00Z");
+  const ago = (s: number) => new Date(now - s * 1000).toISOString();
+  expect(formatElapsed(ago(42), now)).toBe("42s");
+  expect(formatElapsed(ago(272), now)).toBe("4m32");
+  expect(formatElapsed(ago(3840), now)).toBe("1h04");
+});
+
+test("displaySteps puts the question on the waiting step only", () => {
+  const steps = [{ name: "map" as const, status: "done" as const }, { name: "questions" as const, status: "running" as const }];
+  const out = displaySteps({ steps, status: "waiting_for_user", waitingFor: "3 questions" });
+  expect(out.map((s) => s.note)).toEqual([undefined, "3 questions"]);
 });

@@ -1,4 +1,6 @@
+import { useEffect, useState } from "react";
 import type { StepStatus } from "../state.ts";
+import { formatElapsed } from "./pipeline-info";
 import { cn } from "./utils";
 
 // "waiting" is a running step whose pipeline waits for the user: amber like the "Waiting for you" badge.
@@ -13,7 +15,24 @@ const STEP_DOT: Record<DotStatus, string> = {
   skipped: "border border-dashed border-muted-foreground/50",
 };
 
-export function Steps({ steps, compact }: { steps: { name: string; status: DotStatus }[]; compact?: boolean }) {
+export interface DisplayStep {
+  name: string;
+  status: DotStatus;
+  startedAt?: string;
+  note?: string; // shown under a waiting step: the question to answer
+}
+
+// Ticks every second, so it only mounts under a running step.
+function Elapsed({ since }: { since: string }) {
+  const [now, setNow] = useState(Date.now());
+  useEffect(() => {
+    const timer = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(timer);
+  }, []);
+  return <>{formatElapsed(since, now)}</>;
+}
+
+export function Steps({ steps, compact }: { steps: DisplayStep[]; compact?: boolean }) {
   if (compact) {
     return (
       <div className="flex items-center gap-1.5">
@@ -26,7 +45,7 @@ export function Steps({ steps, compact }: { steps: { name: string; status: DotSt
   // A link is green up to the furthest step reached, so skipped steps do not break the line.
   const reached = steps.findLastIndex((s) => s.status !== "pending" && s.status !== "skipped");
   return (
-    <div className="grid grid-cols-7">
+    <div className="grid grid-cols-7 items-start">
       {steps.map((step, i) => (
         <div key={step.name} className="relative flex flex-col items-center gap-1.5" title={`${step.name}: ${step.status}`}>
           {i < steps.length - 1 && (
@@ -48,6 +67,14 @@ export function Steps({ steps, compact }: { steps: { name: string; status: DotSt
           >
             {step.name}
           </span>
+          {step.status === "running" && step.startedAt && (
+            <span className="text-[11px] tabular-nums text-muted-foreground">
+              <Elapsed since={step.startedAt} />
+            </span>
+          )}
+          {step.status === "waiting" && step.note && (
+            <span className="text-center text-[11px] leading-tight font-medium text-amber-700 dark:text-amber-400">{step.note}</span>
+          )}
         </div>
       ))}
     </div>

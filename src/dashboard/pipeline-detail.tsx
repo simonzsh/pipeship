@@ -2,7 +2,7 @@ import { ArrowLeft, FolderGit2, GitMerge, Loader2, Zap } from "lucide-react";
 import { useState } from "react";
 import { repoName, repoStacks } from "../repos.ts";
 import type { DashboardState } from "../state.ts";
-import { ActionButton } from "./action-button";
+import { ActionsMenu } from "./action-button";
 import { CodeTab, type DiffTarget } from "./code-tab";
 import { Badge } from "./components/ui/badge";
 import { Button } from "./components/ui/button";
@@ -12,11 +12,11 @@ import { allMerged, displaySteps, finished, timeAgo } from "./pipeline-info";
 import { PreviewPanel } from "./preview-panel";
 import { AgentLogo, T3ThreadButton } from "./session";
 import { StackTree } from "./stack-tree";
-import { StatusBadge, statusConfig } from "./status";
+import { StatusBadge } from "./status";
 import { Steps } from "./steps";
 import { TestGuide } from "./test-guide";
 import { TicketIcon } from "./ticket-icon";
-import { cn, shortRepo } from "./utils";
+import { shortRepo } from "./utils";
 
 export function PipelineDetail({ p, onBack }: { p: DashboardState; onBack: () => void }) {
   const [target, setTarget] = useState<DiffTarget>({});
@@ -78,10 +78,10 @@ export function PipelineDetail({ p, onBack }: { p: DashboardState; onBack: () =>
         <Button variant="ghost" size="sm" onClick={onBack} className="-ml-2 hidden w-fit max-[899px]:inline-flex">
           <ArrowLeft /> Pipelines
         </Button>
-        <div className="flex items-start justify-between gap-4 max-[599px]:flex-col">
-          <div className="flex min-w-0 flex-col gap-2">
-            <h2 className="text-lg font-semibold leading-tight">{p.ticket.title}</h2>
-            <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
+        <div className="flex flex-col gap-2">
+          <div className="flex items-start justify-between gap-4 max-[599px]:flex-col">
+            <h2 className="min-w-0 text-lg font-semibold leading-tight">{p.ticket.title}</h2>
+            <div className="flex shrink-0 flex-wrap items-center gap-2">
               <StatusBadge status={p.status} />
               {p.mode === "quick" && (
                 <Badge variant="secondary" className="bg-pink-500/15 text-pink-700 dark:text-pink-400">
@@ -93,6 +93,11 @@ export function PipelineDetail({ p, onBack }: { p: DashboardState; onBack: () =>
                   <GitMerge /> Merged
                 </Badge>
               )}
+              <ActionsMenu p={p} merging={merging} />
+            </div>
+          </div>
+          <div className="flex items-center justify-between gap-4 max-[599px]:flex-col max-[599px]:items-start">
+            <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
               {/* A plain-text ticket has no link to show. */}
               {showTicket && (
                 <span className="flex items-center gap-1.5 text-sm">
@@ -116,19 +121,10 @@ export function PipelineDetail({ p, onBack }: { p: DashboardState; onBack: () =>
               )}
               <span className="whitespace-nowrap">· updated {timeAgo(p.updatedAt)}</span>
             </div>
-            {p.status === "waiting_for_user" && p.waitingFor && (
-              <p className={cn("text-sm font-medium", statusConfig(p.status).text)}>{p.waitingFor}</p>
-            )}
-          </div>
-          <div className="flex shrink-0 flex-wrap items-center gap-2">
-            {p.session?.t3Thread && <T3ThreadButton thread={p.session.t3Thread} />}
-            <AgentLogo p={p} />
-            {p.status === "ready" ? (
-              p.preview && <ActionButton id={p.id} action="stopServer" />
-            ) : p.status === "running" || p.status === "waiting_for_user" || (p.status === "failed" && p.preview) ? (
-              <ActionButton id={p.id} action="stopPipeline" hasServers={!!p.preview} />
-            ) : null}
-            {!merging && done && <ActionButton id={p.id} action="delete" />}
+            <div className="flex shrink-0 flex-wrap items-center gap-2">
+              {p.session?.t3Thread && <T3ThreadButton thread={p.session.t3Thread} />}
+              <AgentLogo p={p} />
+            </div>
           </div>
         </div>
 
