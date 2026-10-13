@@ -8,7 +8,8 @@ import { repoName } from "./repos.ts";
 import { detectSession, findT3Thread } from "./session.ts";
 import { DEFAULT_PORT, isDashboardUp, serve } from "./server.ts";
 import {
-  STEPS, addRepo, createPipeline, home, listStates, pipelineDir, readState, setMode, setStep, updateState, upsertChunk,
+  STEPS, addRepo, createPipeline, home, listStates, pipelineDir, readState, setMode, setStatus, setStep, updateState, upsertChunk,
+  waitForUser,
   type ChunkInput, type Mode, type Status, type StepName, type StepStatus,
 } from "./state.ts";
 
@@ -23,7 +24,9 @@ const USAGE = `pipeship — state, test environments and dashboard for the /pipe
   list                         list pipelines
   step <id> <step> <status>    steps: ${STEPS.join(", ")}; status: pending, running, done, skipped, failed
   mode <id> quick|full         switch the mode; quick also skips the pending steps quick skips
-  status <id> <status>         running, waiting_for_user, ready, failed, stopped
+  wait <id> <step> [--reason <text>]   pause for the user on this step: the step runs, the pipeline waits;
+                               --reason is the question, shown on the dashboard card
+  status <id> <status>         running, waiting_for_user, ready, failed, stopped; waiting_for_user needs a running step
   repo <id> <path>             add a repo and record its base (its current branch); does nothing if it is already there
   chunk <id> <name> [--repo r] [--worktree p] [--branch b] [--status s] [--pr url]
                                --repo (name or path) is required for a new chunk when the pipeline has several repos
@@ -41,7 +44,7 @@ const { positionals, values } = parseArgs({
     repo: { type: "string", multiple: true }, title: { type: "string" }, name: { type: "string" }, source: { type: "string" },
     ref: { type: "string", multiple: true }, url: { type: "string", multiple: true }, mode: { type: "string" }, skip: { type: "string" },
     worktree: { type: "string" }, branch: { type: "string" }, status: { type: "string" }, pr: { type: "string" },
-    port: { type: "string" }, recipe: { type: "string" }, force: { type: "boolean" }, help: { type: "boolean", short: "h" },
+    port: { type: "string" }, recipe: { type: "string" }, reason: { type: "string" }, force: { type: "boolean" }, help: { type: "boolean", short: "h" },
   },
 });
 const [command, ...args] = positionals;
@@ -134,10 +137,11 @@ async function main() {
     case "mode":
       setMode(need(args[0], "<id>"), need(args[1], "<mode>") as Mode);
       return print("ok");
+    case "wait":
+      waitForUser(need(args[0], "<id>"), need(args[1], "<step>") as StepName, values.reason);
+      return print("ok");
     case "status":
-      updateState(need(args[0], "<id>"), (s) => {
-        s.status = need(args[1], "<status>") as Status;
-      });
+      setStatus(need(args[0], "<id>"), need(args[1], "<status>") as Status);
       return print("ok");
     case "chunk": {
       if ((values.repo?.length ?? 0) > 1) throw new Error("chunk takes one --repo");

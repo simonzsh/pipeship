@@ -12,11 +12,11 @@ import { allMerged, displaySteps, finished, timeAgo } from "./pipeline-info";
 import { PreviewPanel } from "./preview-panel";
 import { AgentLogo, T3ThreadButton } from "./session";
 import { StackTree } from "./stack-tree";
-import { StatusBadge } from "./status";
+import { StatusBadge, statusConfig } from "./status";
 import { Steps } from "./steps";
 import { TestGuide } from "./test-guide";
 import { TicketIcon } from "./ticket-icon";
-import { shortRepo } from "./utils";
+import { cn, shortRepo } from "./utils";
 
 export function PipelineDetail({ p, onBack }: { p: DashboardState; onBack: () => void }) {
   const [target, setTarget] = useState<DiffTarget>({});
@@ -116,6 +116,9 @@ export function PipelineDetail({ p, onBack }: { p: DashboardState; onBack: () =>
               )}
               <span className="whitespace-nowrap">· updated {timeAgo(p.updatedAt)}</span>
             </div>
+            {p.status === "waiting_for_user" && p.waitingFor && (
+              <p className={cn("text-sm font-medium", statusConfig(p.status).text)}>{p.waitingFor}</p>
+            )}
           </div>
           <div className="flex shrink-0 flex-wrap items-center gap-2">
             {p.session?.t3Thread && <T3ThreadButton thread={p.session.t3Thread} />}

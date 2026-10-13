@@ -3,7 +3,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync, existsSync, readFileSync
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
-  addRepo, createPipeline, listStates, pipelineDir, readState, setMode, setStep, updateState, upsertChunk,
+  addRepo, createPipeline, listStates, pipelineDir, readState, setMode, setStatus, setStep, updateState, upsertChunk, waitForUser,
 } from "../src/state.ts";
 import { chunksOf, diffRange, repoName, repoStacks, sharesRepo, topChunk } from "../src/repos.ts";
 import {
@@ -1719,4 +1719,29 @@ test("diffRequests: whole stack skips repos without branches, a chunk targets it
   expect(diffRequests(p, { chunk: "c2" })).toEqual([{ repo: "/r/web", chunk: "c2" }]);
   expect(diffRequests(p, { chunk: "nope" })).toEqual([]);
   expect(diffUrl("a b", { repo: "/r/api", chunk: "c1" })).toBe("/api/pipelines/a%20b/diff?repo=%2Fr%2Fapi&chunk=c1");
+});
+
+test("wait marks its step running and shows the question until the step moves on", () => {
+  const { id } = createPipeline({ repos: [{ path: repo }], title: "t", source: "text" });
+  waitForUser(id, "stack", "Push the branches and open the PRs?");
+  let state = readState(id);
+  expect(state.status).toBe("waiting_for_user");
+  expect(state.step).toBe("stack");
+  expect(state.steps.find((s) => s.name === "stack")!.status).toBe("running");
+  expect(state.waitingFor).toBe("Push the branches and open the PRs?");
+
+  setStep(id, "stack", "done");
+  state = readState(id);
+  expect(state.status).toBe("running");
+  expect(state.waitingFor).toBeUndefined();
+  expect(() => waitForUser(id, "stack")).toThrow("nothing to wait on");
+});
+
+test("waiting_for_user needs a running step", () => {
+  const { id } = createPipeline({ repos: [{ path: repo }], title: "t", source: "text" });
+  expect(() => setStatus(id, "waiting_for_user")).toThrow("no step is running");
+  setStep(id, "questions", "running");
+  setStatus(id, "waiting_for_user");
+  expect(readState(id).status).toBe("waiting_for_user");
+  expect(() => setStatus(id, "nope" as never)).toThrow("unknown status");
 });

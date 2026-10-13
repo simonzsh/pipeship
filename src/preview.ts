@@ -479,10 +479,11 @@ export async function startPreview(id: string, worktree?: string, draft?: string
     copyFileSync(draft, saved);
   }
   return updateState(id, (s) => {
-    s.status = "ready";
     const step = s.steps.find((x) => x.name === "preview")!;
     step.status = "done";
     step.endedAt = new Date().toISOString();
+    // A step waiting for the user (e.g. stack waiting for approval) keeps the pipeline waiting.
+    if (s.status !== "waiting_for_user") s.status = "ready";
   });
 }
 
@@ -518,6 +519,7 @@ export async function stopPipeline(id: string): Promise<State> {
   await stopPreview(id);
   return updateState(id, (s) => {
     s.status = "stopped";
+    delete s.waitingFor;
   });
 }
 
