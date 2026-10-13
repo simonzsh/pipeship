@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { AlertCircle, ChevronDown, ChevronRight, ChevronsDownUp, ChevronsUpDown, Loader2, RefreshCw } from "lucide-react";
 import type { DashboardState } from "../state.ts";
 import { repoName } from "../repos.ts";
-import type { DiffErrorBody, DiffFile, DiffHunk, DiffResponse } from "../diff.ts";
+import type { DiffErrorBody, DiffFile, DiffHunk, DiffResponse, LineKind } from "../diff.ts";
 import { Button } from "./components/ui/button";
 import { highlightLines, languageOf } from "./highlight";
 import { diffRequests, diffUrl, type DiffRequest, type DiffTarget } from "./diff-requests";
@@ -18,13 +18,21 @@ export interface CodeTabProps {
 type Result = { loading: true } | { data: DiffResponse } | { error: string };
 
 // Refetch on manual refresh or when a chunk's branch/status changes, not on every SSE tick.
-function useDiff(id: string, requests: DiffRequest[], refreshKey: string): Result[] {
+// Previous data stays on screen while a URL refetches, so open files and highlighting survive.
+function useDiff(id: string, requests: DiffRequest[], refreshKey: string): { results: Result[]; fetching: boolean } {
   const [results, setResults] = useState<Record<string, Result>>({});
+  const [fetching, setFetching] = useState(false);
   const urls = requests.map((r) => diffUrl(id, r));
   const urlsKey = urls.join("\n");
   useEffect(() => {
     const ctl = new AbortController();
-    setResults(Object.fromEntries(urls.map((u) => [u, { loading: true } as Result])));
+    setFetching(true);
+    setResults((prev) => Object.fromEntries(urls.flatMap((u) => (prev[u] && "data" in prev[u] ? [[u, prev[u]]] : []))));
+    let pending = urls.length;
+    const done = () => {
+      if (--pending === 0 && !ctl.signal.aborted) setFetching(false);
+    };
+    if (pending === 0) setFetching(false);
     for (const url of urls) {
       fetch(url, { signal: ctl.signal, cache: "no-store" })
         .then(async (res) => {
@@ -35,16 +43,18 @@ function useDiff(id: string, requests: DiffRequest[], refreshKey: string): Resul
               ? { data: body as DiffResponse }
               : { error: (body as DiffErrorBody | null)?.error ?? `Request failed (${res.status})` };
           setResults((prev) => ({ ...prev, [url]: r }));
+          done();
         })
         .catch((e) => {
           if (ctl.signal.aborted) return;
           setResults((prev) => ({ ...prev, [url]: { error: e instanceof Error ? e.message : String(e) } }));
+          done();
         });
     }
     return () => ctl.abort();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [urlsKey, refreshKey]);
-  return urls.map((u) => results[u] ?? { loading: true });
+  return { results: urls.map((u) => results[u] ?? ({ loading: true } as Result)), fetching };
 }
 
 const STATUS_STYLE: Record<DiffFile["status"], string> = {
@@ -64,12 +74,12 @@ function Counts({ additions, deletions }: { additions: number; deletions: number
   );
 }
 
-const ROW: Record<string, string> = {
+const ROW: Record<LineKind, string> = {
   add: "bg-emerald-500/10",
   del: "bg-red-500/10",
   context: "",
 };
-const GUTTER: Record<string, string> = {
+const GUTTER: Record<LineKind, string> = {
   add: "bg-emerald-500/20 text-emerald-700 dark:text-emerald-300",
   del: "bg-red-500/20 text-red-700 dark:text-red-300",
   context: "text-muted-foreground",
@@ -135,7 +145,7 @@ function FileDiff({ file, open, onToggle }: { file: DiffFile; open: boolean; onT
         type="button"
         onClick={onToggle}
         aria-expanded={open}
-        className={`sticky top-(--detail-header,0px) z-10 flex w-full items-center gap-2 bg-card px-6 py-2 text-left text-sm hover:bg-[color-mix(in_oklab,var(--card),var(--foreground)_4%)] ${open ? "border-b" : ""}`}
+        className={`sticky top-0 z-10 flex w-full items-center gap-2 bg-card px-6 py-2 text-left text-sm hover:bg-[color-mix(in_oklab,var(--card),var(--foreground)_4%)] ${open ? "border-b" : ""}`}
       >
         {open ? <ChevronDown className="size-4 shrink-0 text-muted-foreground" /> : <ChevronRight className="size-4 shrink-0 text-muted-foreground" />}
         <FilePath path={renamed ? `${file.oldPath} → ${file.newPath}` : file.path} />
@@ -173,7 +183,7 @@ function FileDiff({ file, open, onToggle }: { file: DiffFile; open: boolean; onT
 }
 
 // `all` is the last "expand/collapse all" click; it overrides every per-file choice made before it.
-type All = { open: boolean; n: number } | null;
+type All = { open: boolean } | null;
 
 function RepoDiff({ data, all }: { data: DiffResponse; all: All }) {
   const [overrides, setOverrides] = useState<Record<string, boolean>>({});
@@ -210,7 +220,7 @@ export function CodeTab({ p, target, onTarget }: CodeTabProps) {
   // A chunk's range starts at the previous chunk, so any chunk of the repo can move it.
   const repos = new Set(requests.map((r) => r.repo));
   const refreshKey = `${manual}:${JSON.stringify(p.chunks.filter((c) => repos.has(c.repo)).map((c) => [c.branch, c.status]))}`;
-  const results = useDiff(p.id, requests, refreshKey);
+  const { results, fetching } = useDiff(p.id, requests, refreshKey);
   const multi = p.repos.length > 1;
 
   const chunk = target.chunk ? p.chunks.find((c) => c.name === target.chunk) : undefined;
@@ -218,7 +228,6 @@ export function CodeTab({ p, target, onTarget }: CodeTabProps) {
   const datas = results.flatMap((r) => ("data" in r ? [r.data] : []));
   const additions = datas.reduce((n, d) => n + d.additions, 0);
   const deletions = datas.reduce((n, d) => n + d.deletions, 0);
-  const loading = results.some((r) => "loading" in r);
   const allOpen = all?.open ?? true;
 
   return (
@@ -241,12 +250,12 @@ export function CodeTab({ p, target, onTarget }: CodeTabProps) {
         {datas.length > 0 && <span className="text-xs text-muted-foreground">{datas.reduce((n, d) => n + d.files.length, 0)} files</span>}
         <span className="ml-auto flex items-center gap-2">
           {datas.length > 0 && (
-            <Button size="sm" variant="outline" onClick={() => setAll((a) => ({ open: !allOpen, n: (a?.n ?? 0) + 1 }))}>
+            <Button size="sm" variant="outline" onClick={() => setAll({ open: !allOpen })}>
               {allOpen ? <ChevronsDownUp /> : <ChevronsUpDown />} {allOpen ? "Collapse all" : "Expand all"}
             </Button>
           )}
-          <Button size="sm" variant="outline" onClick={() => setManual((n) => n + 1)} disabled={loading}>
-            {loading ? <Loader2 className="animate-spin" /> : <RefreshCw />} Refresh
+          <Button size="sm" variant="outline" onClick={() => setManual((n) => n + 1)} disabled={fetching}>
+            {fetching ? <Loader2 className="animate-spin" /> : <RefreshCw />} Refresh
           </Button>
         </span>
       </div>

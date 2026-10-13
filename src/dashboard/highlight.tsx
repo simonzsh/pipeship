@@ -2,7 +2,7 @@ import { createElement, type ReactNode } from "react";
 import { common, createLowlight } from "lowlight";
 import rehypeHighlight from "rehype-highlight";
 
-export const lowlight = createLowlight(common);
+const lowlight = createLowlight(common);
 
 const BY_EXT: Record<string, string> = {
   ts: "typescript", tsx: "typescript", mts: "typescript", cts: "typescript",
@@ -61,14 +61,15 @@ function renderHast(node: HNode, key: number): ReactNode {
 // Highlights the whole block so multi-line tokens (comments, strings) stay coloured on every line.
 export function highlightLines(code: string, lang: string | undefined): ReactNode[][] {
   const plain = code.split("\n");
-  if (!lang) return plain.map((l) => [l]);
+  const fallback = plain.map((l) => [l]);
+  if (!lang) return fallback;
   try {
     const tree = lowlight.highlight(lang, code) as unknown as { children: HNode[] };
     const lines = splitLines(tree.children);
-    if (lines.length !== plain.length) return plain.map((l) => [l]);
+    if (lines.length !== plain.length) return fallback;
     return lines.map((l) => l.map(renderHast));
   } catch {
-    return plain.map((l) => [l]);
+    return fallback;
   }
 }
 
