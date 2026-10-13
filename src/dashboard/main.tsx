@@ -1,7 +1,7 @@
 import { CircleDashed, Terminal } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { createRoot } from "react-dom/client";
-import type { DashboardState, Status } from "../state.ts";
+import type { DashboardState } from "../state.ts";
 import { Card, CardDescription, CardTitle } from "./components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "./components/ui/select";
 import { groupByStatus } from "./groups";
@@ -30,13 +30,6 @@ function EmptyState() {
 const ALL = "__all__"; // Radix forbids "" as an item value.
 
 const shortRepo = (path: string) => path.replace(/^\/(?:home|Users)\/[^/]+/, "~");
-
-const COUNTED: [Status, string][] = [
-  ["running", "running"],
-  ["waiting_for_user", "waiting for you"],
-  ["ready", "ready to test"],
-  ["failed", "failed"],
-];
 
 function App() {
   const [pipelines, setPipelines] = useState<DashboardState[]>();
@@ -68,14 +61,14 @@ function App() {
   // An unknown repo in the URL falls back to all repos; the URL is left as is.
   const selected = repos.some(([r]) => r === repo) ? repo : null;
   const shown = selected ? pipelines?.filter((p) => p.repo === selected) : pipelines;
-  // Only states that are present: "3 pipelines · 1 running · 2 ready to test".
+  const groups = shown ? groupByStatus(shown, STATUS_ORDER) : [];
+  // Only states that are present, stopped ones left out: "3 pipelines · 1 waiting for you · 2 running".
   const summary = shown
     ? [
         `${shown.length} ${shown.length === 1 ? "pipeline" : "pipelines"}`,
-        ...COUNTED.flatMap(([status, label]) => {
-          const n = shown.filter((p) => p.status === status).length;
-          return n ? [`${n} ${label}`] : [];
-        }),
+        ...groups
+          .filter((g) => g.status !== "stopped")
+          .map((g) => `${g.items.length} ${statusConfig(g.status).label.toLowerCase()}`),
       ].join(" · ")
     : "Loading…";
 
@@ -123,20 +116,19 @@ function App() {
       </header>
 
       {pipelines?.length === 0 && <EmptyState />}
-      {shown &&
-        groupByStatus(shown, STATUS_ORDER).map((g) => {
-          const { group, dot, text } = statusConfig(g.status);
-          return (
-            <section key={g.status} className="flex flex-col gap-6">
-              <div className="flex items-center gap-3">
-                <span className={cn("size-2 rounded-full", dot)} />
-                <h2 className={cn("text-sm font-medium", text)}>{group} · {g.items.length}</h2>
-                <div className="h-px flex-1 bg-border" />
-              </div>
-              {g.items.map((p) => <PipelineCard key={p.id} p={p} />)}
-            </section>
-          );
-        })}
+      {groups.map((g) => {
+        const { group, dot, text } = statusConfig(g.status);
+        return (
+          <section key={g.status} className="flex flex-col gap-6">
+            <div className="flex items-center gap-3">
+              <span className={cn("size-2 rounded-full", dot)} />
+              <h2 className={cn("text-sm font-medium", text)}>{group} · {g.items.length}</h2>
+              <div className="h-px flex-1 bg-border" />
+            </div>
+            {g.items.map((p) => <PipelineCard key={p.id} p={p} />)}
+          </section>
+        );
+      })}
       {!pipelines && (
         <div className="flex justify-center py-14 text-muted-foreground">
           <CircleDashed className="size-5 animate-spin" />

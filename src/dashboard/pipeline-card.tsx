@@ -52,8 +52,8 @@ export function PipelineCard({ p }: { p: DashboardState }) {
       <div
         className={cn(
           "flex flex-col gap-5 py-5",
-          hasDetails && "cursor-pointer transition-colors hover:bg-accent",
           statusConfig(p.status).tint,
+          hasDetails && "cursor-pointer transition-colors hover:bg-accent",
         )}
         {...(hasDetails && toggle)}
       >

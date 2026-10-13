@@ -18,7 +18,7 @@ const STATUS: Record<Status, StatusConfig> = {
     label: "Waiting for you",
     icon: MessageCircleQuestion,
     badge: "bg-amber-500/20 text-amber-800 ring-1 ring-inset ring-amber-500/40 dark:text-amber-300",
-    tint: "bg-amber-500/5 hover:bg-amber-500/10",
+    tint: "bg-amber-500/5",
     dot: "bg-amber-500",
     text: "text-amber-700 dark:text-amber-400",
     group: "Waiting",
@@ -27,7 +27,7 @@ const STATUS: Record<Status, StatusConfig> = {
     label: "Ready to test",
     icon: CheckCircle2,
     badge: "bg-emerald-500/20 text-emerald-800 ring-1 ring-inset ring-emerald-500/40 dark:text-emerald-300",
-    tint: "bg-emerald-500/5 hover:bg-emerald-500/10",
+    tint: "bg-emerald-500/5",
     dot: "bg-emerald-500",
     text: "text-emerald-700 dark:text-emerald-400",
     group: "Ready for testing",
@@ -36,7 +36,7 @@ const STATUS: Record<Status, StatusConfig> = {
     label: "Running",
     icon: Loader2,
     badge: "bg-blue-500/20 text-blue-800 ring-1 ring-inset ring-blue-500/40 dark:text-blue-300 [&>svg]:animate-spin",
-    tint: "bg-blue-500/5 hover:bg-blue-500/10",
+    tint: "bg-blue-500/5",
     dot: "bg-blue-500",
     text: "text-blue-700 dark:text-blue-400",
     group: "In progress",
@@ -45,7 +45,7 @@ const STATUS: Record<Status, StatusConfig> = {
     label: "Failed",
     icon: XCircle,
     badge: "bg-red-500/20 text-red-800 ring-1 ring-inset ring-red-500/40 dark:text-red-300",
-    tint: "bg-red-500/5 hover:bg-red-500/10",
+    tint: "bg-red-500/5",
     dot: "bg-red-500",
     text: "text-red-700 dark:text-red-400",
     group: "Failed",
@@ -54,7 +54,7 @@ const STATUS: Record<Status, StatusConfig> = {
     label: "Stopped",
     icon: Square,
     badge: "bg-muted text-muted-foreground ring-1 ring-inset ring-border",
-    tint: "bg-muted/40 hover:bg-muted",
+    tint: "bg-muted/40",
     dot: "bg-muted-foreground/60",
     text: "text-muted-foreground",
     group: "Stopped",
@@ -63,9 +63,9 @@ const STATUS: Record<Status, StatusConfig> = {
 
 export const STATUS_ORDER = Object.keys(STATUS) as Status[];
 
-// A hand-edited state.json can hold any string: fall back to the last (stopped) style.
+// A hand-edited state.json can hold any string: like groupByStatus, fall back to the last status.
 export function statusConfig(status: string): StatusConfig {
-  return STATUS[status as Status] ?? STATUS.stopped;
+  return STATUS[status as Status] ?? STATUS[STATUS_ORDER[STATUS_ORDER.length - 1]!];
 }
 
 // A chunk's status is free text from the skill: "done", "pr", "merged" and "failed" are final, anything else is in progress.
