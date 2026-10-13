@@ -88,8 +88,11 @@ export function StartPreviewButton({ id, starting }: { id: string; starting: boo
   const run = async () => {
     setError(undefined);
     setPending(true);
-    setError(await postAction(id, "preview/start"));
-    setPending(false);
+    const err = await postAction(id, "preview/start");
+    setError(err);
+    // The live state polls every second: keep "Starting…" until it reports the start.
+    if (err) setPending(false);
+    else setTimeout(() => setPending(false), 1500);
   };
   const busy = pending || starting;
   return (
