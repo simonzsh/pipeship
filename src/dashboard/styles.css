@@ -82,3 +82,22 @@
     cursor: pointer;
   }
 }
+
+/* highlight.js tokens, GitHub palette. No background: the container owns it. */
+.hljs-comment, .hljs-quote { color: #6e7781; font-style: italic; }
+.hljs-keyword, .hljs-selector-tag, .hljs-doctag, .hljs-type { color: #cf222e; }
+.hljs-string, .hljs-regexp, .hljs-addition { color: #0a3069; }
+.hljs-number, .hljs-literal, .hljs-attr, .hljs-attribute, .hljs-variable, .hljs-template-variable, .hljs-selector-attr, .hljs-selector-class, .hljs-selector-id, .hljs-meta { color: #0550ae; }
+.hljs-title, .hljs-title.class_, .hljs-title.function_, .hljs-section { color: #8250df; }
+.hljs-built_in, .hljs-symbol, .hljs-bullet, .hljs-name, .hljs-tag { color: #116329; }
+.hljs-params, .hljs-subst { color: inherit; }
+.hljs-deletion { color: #82071e; }
+.hljs-emphasis { font-style: italic; }
+.hljs-strong { font-weight: 600; }
+.dark .hljs-comment, .dark .hljs-quote { color: #8b949e; }
+.dark .hljs-keyword, .dark .hljs-selector-tag, .dark .hljs-doctag, .dark .hljs-type { color: #ff7b72; }
+.dark .hljs-string, .dark .hljs-regexp, .dark .hljs-addition { color: #a5d6ff; }
+.dark .hljs-number, .dark .hljs-literal, .dark .hljs-attr, .dark .hljs-attribute, .dark .hljs-variable, .dark .hljs-template-variable, .dark .hljs-selector-attr, .dark .hljs-selector-class, .dark .hljs-selector-id, .dark .hljs-meta { color: #79c0ff; }
+.dark .hljs-title, .dark .hljs-title.class_, .dark .hljs-title.function_, .dark .hljs-section { color: #d2a8ff; }
+.dark .hljs-built_in, .dark .hljs-symbol, .dark .hljs-bullet, .dark .hljs-name, .dark .hljs-tag { color: #7ee787; }
+.dark .hljs-deletion { color: #ffa198; }
