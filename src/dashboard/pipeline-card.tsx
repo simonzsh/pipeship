@@ -51,25 +51,27 @@ export function PipelineCard({ p }: { p: PipelineView }) {
         <CardHeader>
           <div className="flex min-w-0 flex-col gap-1.5">
             <CardTitle className="truncate">{p.ticket.title}</CardTitle>
-            <CardDescription className="flex flex-wrap items-center gap-x-2 gap-y-1">
-              <TicketIcon ticket={p.ticket} />
-              {p.ticket.source === "text" && <span className="font-medium text-foreground">Text</span>}
-              {p.ticket.links.map((link) =>
-                link.url ? (
-                  <a
-                    key={link.ref}
-                    href={link.url}
-                    target="_blank"
-                    onClick={(e) => e.stopPropagation()}
-                    className="font-medium text-foreground underline-offset-4 hover:underline"
-                  >
-                    {link.ref}
-                  </a>
-                ) : (
-                  <span key={link.ref} className="font-medium text-foreground">{link.ref}</span>
-                ),
-              )}
-            </CardDescription>
+            {/* A plain-text ticket has nothing to show under its title. */}
+            {(p.ticket.links.length > 0 || (p.ticket.source && p.ticket.source !== "text")) && (
+              <CardDescription className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                <TicketIcon ticket={p.ticket} />
+                {p.ticket.links.map((link) =>
+                  link.url ? (
+                    <a
+                      key={link.ref}
+                      href={link.url}
+                      target="_blank"
+                      onClick={(e) => e.stopPropagation()}
+                      className="font-medium text-foreground underline-offset-4 hover:underline"
+                    >
+                      {link.ref}
+                    </a>
+                  ) : (
+                    <span key={link.ref} className="font-medium text-foreground">{link.ref}</span>
+                  ),
+                )}
+              </CardDescription>
+            )}
           </div>
           <div className="flex shrink-0 flex-col items-end gap-2">
             <div className="flex items-center gap-1.5">

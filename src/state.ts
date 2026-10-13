@@ -42,7 +42,8 @@ export type PipelineView = State & { sessionState?: SessionState };
 export interface State {
   id: string;
   // One pipeline can cover several tickets of the same source.
-  ticket: { source: string; title: string; links: TicketLink[] };
+  // No source for a plain-text ticket.
+  ticket: { source?: string; title: string; links: TicketLink[] };
   repo: string;
   mode: Mode;
   status: Status;
@@ -88,7 +89,7 @@ export function createPipeline(opts: {
   repo: string;
   title: string;
   name?: string;
-  source: string;
+  source?: string;
   links?: TicketLink[];
   mode?: Mode;
   skip?: StepName[];
@@ -105,7 +106,7 @@ export function createPipeline(opts: {
   const skipped = new Set([...(mode === "quick" ? QUICK_SKIPS : []), ...(opts.skip ?? [])]);
   const state: State = {
     id,
-    ticket: { source: opts.source, title: opts.title, links },
+    ticket: { ...(opts.source && { source: opts.source }), title: opts.title, links },
     repo: opts.repo,
     mode,
     status: "running",

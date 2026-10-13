@@ -556,3 +556,10 @@ test("stop during a slow start leaves no service running", async () => {
   await Bun.sleep(300);
   expect(readState(id).preview).toBeUndefined();
 }, 30_000);
+
+test("a plain-text ticket has no source", () => {
+  const plain = createPipeline({ repo, title: "Fix the footer" });
+  expect(readState(plain.id).ticket).toEqual({ title: "Fix the footer", links: [] });
+  const linear = createPipeline({ repo, title: "t", source: "linear", links: [{ ref: "ABC-9" }] });
+  expect(readState(linear.id).ticket.source).toBe("linear");
+});

@@ -2,7 +2,8 @@ import { FileText } from "lucide-react";
 import { siGithub, siGitlab, siJira, siLinear, siNotion, type SimpleIcon } from "simple-icons";
 import type { State } from "../state.ts";
 
-// Icons ship with the page, matched on the source name or the URL's host. Other sources get a plain icon.
+// Icons ship with the page, matched on the source name or the URL's host. Other sources get a plain icon,
+// a plain-text ticket (no source, or the legacy "text") gets none.
 const KNOWN: { icon: SimpleIcon; source: string; host: string }[] = [
   { icon: siLinear, source: "linear", host: "linear.app" },
   { icon: siNotion, source: "notion", host: "notion.so" },
@@ -22,7 +23,7 @@ function hostOf(url: string | undefined): string | undefined {
 }
 
 export function TicketIcon({ ticket }: { ticket: State["ticket"] }) {
-  const source = ticket.source.toLowerCase();
+  const source = ticket.source?.toLowerCase();
   const host = hostOf(ticket.links.find((l) => l.url)?.url);
   const known = KNOWN.find((k) => k.source === source || host === k.host || host?.endsWith(`.${k.host}`));
 
@@ -34,6 +35,7 @@ export function TicketIcon({ ticket }: { ticket: State["ticket"] }) {
       </svg>
     );
   }
+  if (!source || source === "text") return null;
   return (
     <span title={ticket.source} className="flex">
       <FileText className={`${SIZE} text-muted-foreground`} aria-label={ticket.source} />

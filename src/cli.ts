@@ -13,7 +13,7 @@ import {
 
 const USAGE = `pipeship — state, test environments and dashboard for the /pipeship skill
 
-  new --repo <path> --title <text> --source <name> [--ref <id> [--url <url>]]... [--name <words>] [--mode full|quick] [--skip a,b]
+  new --repo <path> --title <text> [--source <name>] [--ref <id> [--url <url>]]... [--name <words>] [--mode full|quick] [--skip a,b]
                                records the calling agent session (harness, id, cwd) when one is found
                                repeat --ref/--url for each ticket; the nth --url belongs to the nth --ref
                                --name: a 2 or 3 word id for a plain-text ticket; refs win
@@ -83,7 +83,7 @@ async function main() {
         repo: resolve(need(values.repo, "--repo")),
         title: need(values.title, "--title"),
         name: values.name,
-        source: need(values.source, "--source"),
+        source: values.source,
         links: (values.ref ?? []).map((ref, i) => (values.url?.[i] ? { ref, url: values.url[i] } : { ref })),
         mode: (values.mode as Mode) ?? "full",
         skip: values.skip?.split(",").map((s) => s.trim()) as StepName[] | undefined,
