@@ -77,4 +77,8 @@
   body {
     @apply bg-background text-foreground antialiased;
   }
+  /* Tailwind v4 dropped the pointer on buttons: give it back to everything clickable. */
+  :is(a[href], button, [role="button"], [role="tab"], summary, label[for], select):not(:disabled, [aria-disabled="true"]) {
+    cursor: pointer;
+  }
 }

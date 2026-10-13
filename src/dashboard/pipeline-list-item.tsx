@@ -16,15 +16,18 @@ export function PipelineListItem({ p, selected, onSelect }: { p: DashboardState;
         "flex w-full flex-col gap-2 rounded-lg border px-3 py-2.5 text-left outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring/50",
         tint,
         hover,
-        selected ? "border-foreground/30 bg-card shadow-sm ring-1 ring-foreground/10" : "border-transparent",
+        // Selection shows as a border, so the status tint stays visible.
+        selected ? "border-foreground/30 shadow-sm ring-1 ring-foreground/10" : "border-transparent",
       )}
     >
-      <span className="truncate text-sm font-medium">{p.ticket.title}</span>
-      <span className="flex items-center gap-2">
-        <StatusBadge status={p.status} />
-        {refs && <span className="min-w-0 truncate text-xs text-muted-foreground">{refs}</span>}
+      <span className="truncate text-sm font-medium">
+        {refs && <span className="mr-1.5 text-xs font-normal text-muted-foreground">{refs}</span>}
+        {p.ticket.title}
       </span>
-      <Steps steps={displaySteps(p)} compact />
+      <span className="flex items-center justify-between gap-2">
+        <Steps steps={displaySteps(p)} compact />
+        <StatusBadge status={p.status} />
+      </span>
     </button>
   );
 }
