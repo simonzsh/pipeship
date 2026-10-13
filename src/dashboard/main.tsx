@@ -85,7 +85,9 @@ function App() {
                 <SelectValue />
               </SelectTrigger>
               <SelectContent align="end">
-                <SelectItem value={ALL}>All repos</SelectItem>
+                <SelectItem value={ALL}>
+                  All repos <span className="text-muted-foreground">{pipelines?.length}</span>
+                </SelectItem>
                 {repos.map(([r, n]) => (
                   <SelectItem key={r} value={r}>
                     {shortRepo(r)} <span className="text-muted-foreground">{n}</span>
