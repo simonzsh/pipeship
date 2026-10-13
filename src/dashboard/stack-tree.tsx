@@ -1,10 +1,10 @@
-import { GitBranch, GitPullRequest } from "lucide-react";
-import type { Chunk } from "../state.ts";
+import { GitBranch, GitPullRequest, Loader2, XCircle } from "lucide-react";
+import type { Chunk, MergeRun } from "../state.ts";
 import { Button } from "./components/ui/button";
 import { ChunkStatusIcon } from "./status";
 
 // The stack is linear: each PR targets the previous one, so depth is the index (plus one under the base root).
-export function StackTree({ base, chunks }: { base?: string; chunks: Chunk[] }) {
+export function StackTree({ base, chunks, merge }: { base?: string; chunks: Chunk[]; merge?: MergeRun }) {
   const offset = base ? 1 : 0;
   return (
     <ul className="flex flex-col rounded-lg border">
@@ -18,6 +18,8 @@ export function StackTree({ base, chunks }: { base?: string; chunks: Chunk[] }) 
       )}
       {chunks.map((c, i) => {
         const depth = i + offset;
+        // A finished merge ("done") leaves every row on its own status.
+        const mergeHere = merge && merge.status !== "done" && merge.current === c.name ? merge : undefined;
         return (
           <li key={c.name} className="flex items-center gap-3 px-3 py-2 text-sm" style={{ paddingLeft: depth > 0 ? `calc(0.75rem + ${depth - 1} * 1.75rem)` : undefined }}>
             {/* The 1rem cell starts under the parent's icon (indent step 1.75rem = cell + gap) and spans the row (-my-2 undoes py-2).
@@ -39,7 +41,15 @@ export function StackTree({ base, chunks }: { base?: string; chunks: Chunk[] }) 
               </code>
             )}
             <span className="ml-auto flex shrink-0 items-center gap-2">
-              {c.status && <ChunkStatusIcon status={c.status} />}
+              {mergeHere?.status === "running" ? (
+                <Loader2 className="size-4 animate-spin text-blue-600 dark:text-blue-400" aria-label="merging" />
+              ) : mergeHere?.status === "failed" ? (
+                <XCircle className="size-4 text-red-600 dark:text-red-400" aria-label="merge stopped" role="img">
+                  <title>{mergeHere.error}</title>
+                </XCircle>
+              ) : (
+                c.status && <ChunkStatusIcon status={c.status} />
+              )}
               {c.pr && (
                 <Button asChild variant="ghost" size="sm">
                   <a href={c.pr} target="_blank">

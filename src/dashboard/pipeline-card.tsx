@@ -1,9 +1,10 @@
-import { ChevronDown, FolderGit2 } from "lucide-react";
+import { ChevronDown, FolderGit2, GitMerge } from "lucide-react";
 import { useState, type KeyboardEvent } from "react";
 import type { PipelineView } from "../state.ts";
 import { ActionButton } from "./action-button";
 import { Badge } from "./components/ui/badge";
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "./components/ui/card";
+import { MergeButton, MergeLine } from "./merge-button";
 import { PreviewPanel } from "./preview-panel";
 import { AgentLogo, isAgentStopped } from "./session";
 import { StackTree } from "./stack-tree";
@@ -26,6 +27,9 @@ export function PipelineCard({ p }: { p: PipelineView }) {
   const hasDetails = p.chunks.length > 0 || p.preview !== undefined;
   const detailsLabel =
     p.chunks.length === 0 ? "Details" : p.chunks.length === 1 ? "1 branch" : `${p.chunks.length} branches`;
+  const prChunks = p.chunks.filter((c) => c.pr);
+  const allMerged = prChunks.length > 0 && prChunks.every((c) => c.status === "merged");
+  const merging = p.merge?.status === "running";
   const steps = p.steps.map((s) => ({
     name: s.name,
     status: s.status === "running" && p.status === "waiting_for_user" ? ("waiting" as const) : s.status,
@@ -81,6 +85,11 @@ export function PipelineCard({ p }: { p: PipelineView }) {
                 </Badge>
               )}
               <AgentLogo p={p} />
+              {allMerged && (
+                <Badge variant="secondary" className="bg-violet-500/15 text-violet-700 dark:text-violet-400">
+                  <GitMerge /> Merged
+                </Badge>
+              )}
               <StatusBadge status={p.status} agentStopped={isAgentStopped(p)} />
             </div>
             {hasDetails && (
@@ -94,13 +103,14 @@ export function PipelineCard({ p }: { p: PipelineView }) {
 
         <CardContent>
           <Steps steps={steps} />
+          {p.merge && <MergeLine merge={p.merge} />}
         </CardContent>
       </div>
 
       {open && (
         <CardContent className="flex flex-col gap-4 border-t py-5">
           {p.preview && <PreviewPanel preview={p.preview} />}
-          {p.chunks.length > 0 && <StackTree base={p.base} chunks={p.chunks} />}
+          {p.chunks.length > 0 && <StackTree base={p.base} chunks={p.chunks} merge={p.merge} />}
         </CardContent>
       )}
 
@@ -110,12 +120,13 @@ export function PipelineCard({ p }: { p: PipelineView }) {
         <span>·</span>
         <span className="whitespace-nowrap">updated {timeAgo(p.updatedAt)}</span>
         <div className="ml-auto flex items-center gap-2">
+          {prChunks.length > 0 && !allMerged && !merging && <MergeButton id={p.id} chunks={p.chunks} base={p.base} />}
           {p.status === "ready" ? (
             p.preview && <ActionButton id={p.id} action="stopServer" />
           ) : p.status === "running" || p.status === "waiting_for_user" || (p.status === "failed" && p.preview) ? (
             <ActionButton id={p.id} action="stopPipeline" hasServers={!!p.preview} />
           ) : null}
-          {(p.status === "ready" || p.status === "failed" || p.status === "stopped") && <ActionButton id={p.id} action="delete" />}
+          {!merging && (p.status === "ready" || p.status === "failed" || p.status === "stopped") && <ActionButton id={p.id} action="delete" />}
         </div>
       </CardFooter>
     </Card>

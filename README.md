@@ -86,7 +86,7 @@ A service that cannot take its port from the environment can set `"fixedPort": <
 
 ## Dashboard
 
-The dashboard on http://localhost:4400 lists pipelines live, with their steps, PRs and test URL. It can request a pipeline stop (the agents stop after their current step), stop the test servers, and delete a finished pipeline: its worktrees and files go, its branches and PRs stay. Light and dark themes follow your system, with a toggle.
+The dashboard on http://localhost:4400 lists pipelines live, with their steps, PRs and test URL. It can request a pipeline stop (the agents stop after their current step), stop the test servers, and delete a finished pipeline: its worktrees and files go, its branches and PRs stay. It can also merge a pipeline's PR stack in one click: it squash-merges the PRs bottom-up, rebasing and retargeting each next PR, and stops at the first one that cannot merge, with the reason on the card. Light and dark themes follow your system, with a toggle.
 
 Each card shows the logo of the agent that runs the pipeline (Claude Code or Codex). Click it to copy the command that reopens the session in its folder. When a running or waiting pipeline has lost its agent (session stopped, archived or deleted), its status shows "Agent stopped". Pipeship stores the harness, the session id and the folder, never a pid or a token.
 
