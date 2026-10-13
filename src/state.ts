@@ -21,6 +21,24 @@ export interface TicketLink {
   url?: string;
 }
 
+export type Harness = "claude" | "codex";
+
+// The agent session that runs the pipeline, recorded by `pipeship new`. No pid: it changes for the same Claude session.
+export interface Session {
+  harness: Harness;
+  id: string;
+  cwd: string;
+}
+
+// Computed by the dashboard server on read, never written to state.json.
+export type SessionStatus = "active" | "loaded" | "stopped" | "archived" | "deleted" | "unknown";
+export interface SessionState {
+  status: SessionStatus;
+  activity?: "busy" | "idle"; // Claude only, from the session registry
+}
+
+export type PipelineView = State & { sessionState?: SessionState };
+
 export interface State {
   id: string;
   // One pipeline can cover several tickets of the same source.
@@ -32,6 +50,7 @@ export interface State {
   steps: { name: StepName; status: StepStatus; startedAt?: string; endedAt?: string }[];
   chunks: Chunk[];
   preview?: { url: string; port: number; pid: number; worktree: string; log: string };
+  session?: Session;
   stopRequested: boolean;
   createdAt: string;
   updatedAt: string;
@@ -64,6 +83,7 @@ export function createPipeline(opts: {
   links?: TicketLink[];
   mode?: Mode;
   skip?: StepName[];
+  session?: Session;
 }): State {
   const now = new Date().toISOString();
   const links = opts.links ?? [];
@@ -83,6 +103,7 @@ export function createPipeline(opts: {
     step: STEPS[0],
     steps: STEPS.map((name) => ({ name, status: skipped.has(name) ? "skipped" : "pending" })),
     chunks: [],
+    ...(opts.session && { session: opts.session }),
     stopRequested: false,
     createdAt: now,
     updatedAt: now,
