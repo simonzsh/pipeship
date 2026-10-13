@@ -35,43 +35,38 @@ export function PipelineDetail({ p, onBack }: { p: DashboardState; onBack: () =>
     setTarget(t);
     setTab("code");
   };
-  const stack = (
+  // The tree of one repo's stack, or a hint when it has no branch yet.
+  const tree = (base: string | undefined, chunks: DashboardState["chunks"], merge: DashboardState["merge"]) => (
     <>
-      {multi ? (
-        stacks.map((st) => (
-          <div key={st.repo.path} className="flex flex-col gap-2">
-            <div className="flex items-center gap-2 text-sm">
-              <FolderGit2 className="size-4 shrink-0 text-muted-foreground" />
-              <span className="font-medium">{st.name}</span>
-              <span className="truncate font-mono text-xs text-muted-foreground" title={st.repo.path}>
-                {shortRepo(st.repo.path)}
-              </span>
-              <div className="ml-auto flex items-center gap-2">
-                <MergeButton
-                  id={p.id} repo={st.repo.path} chunks={st.chunks} base={st.repo.base} merge={st.merge}
-                  busy={busyFor(st.repo.path)} finished={done}
-                />
-              </div>
-            </div>
-            {st.chunks.length > 0 ? (
-              <StackTree base={st.repo.base} chunks={st.chunks} merge={st.merge} selected={target.chunk} onSelect={(chunk) => select({ chunk })} />
-            ) : (
-              <p className="text-xs text-muted-foreground">No branch yet</p>
-            )}
-            {st.merge && <CombinedNote merge={st.merge} chunks={st.chunks} />}
-          </div>
-        ))
+      {chunks.length > 0 ? (
+        <StackTree base={base} chunks={chunks} merge={merge} selected={target.chunk} onSelect={(chunk) => select({ chunk })} />
       ) : (
-        <>
-          {p.chunks.length > 0 ? (
-            <StackTree base={p.repos[0]?.base} chunks={p.chunks} merge={p.merge} selected={target.chunk} onSelect={(chunk) => select({ chunk })} />
-          ) : (
-            <p className="text-xs text-muted-foreground">No branch yet</p>
-          )}
-          {p.merge && <CombinedNote merge={p.merge} chunks={p.chunks} />}
-        </>
+        <p className="text-xs text-muted-foreground">No branch yet</p>
       )}
+      {merge && <CombinedNote merge={merge} chunks={chunks} />}
     </>
+  );
+  const stack = multi ? (
+    stacks.map((st) => (
+      <div key={st.repo.path} className="flex flex-col gap-2">
+        <div className="flex items-center gap-2 text-sm">
+          <FolderGit2 className="size-4 shrink-0 text-muted-foreground" />
+          <span className="font-medium">{st.name}</span>
+          <span className="truncate font-mono text-xs text-muted-foreground" title={st.repo.path}>
+            {shortRepo(st.repo.path)}
+          </span>
+          <div className="ml-auto flex items-center gap-2">
+            <MergeButton
+              id={p.id} repo={st.repo.path} chunks={st.chunks} base={st.repo.base} merge={st.merge}
+              busy={busyFor(st.repo.path)} finished={done}
+            />
+          </div>
+        </div>
+        {tree(st.repo.base, st.chunks, st.merge)}
+      </div>
+    ))
+  ) : (
+    tree(p.repos[0]?.base, p.chunks, p.merge)
   );
 
   return (

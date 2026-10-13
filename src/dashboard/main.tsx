@@ -77,7 +77,7 @@ function App() {
   const ordered = groups.flatMap((g) => g.items);
   const current = ordered.find((p) => p.id === pickSelected(ordered.map((p) => p.id), url.p));
   // On narrow screens a p in the URL shows the detail; without it, the list.
-  const detailOnly = url.p !== null;
+  const detailOnly = url.p !== null && current?.id === url.p;
 
   const selectRepo = (value: string) => {
     const next = { ...url, repo: value === ALL ? null : value };
@@ -169,4 +169,5 @@ function App() {
     </div>
   );
 }
+
 createRoot(document.getElementById("root")!).render(<App />);
