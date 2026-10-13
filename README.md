@@ -24,7 +24,7 @@ codex plugin add pipeship@pipeship
 
 The first run installs the dependencies, which takes a few seconds.
 
-To work on pipeship itself, clone the repo, run `bun install`, and link the skill instead: `ln -s "$PWD/skills/pipeship" ~/.claude/skills/pipeship`. Changes then apply at once.
+To work on pipeship itself, clone the repo, run `bun install`, and link the skill instead: `ln -s "$PWD/skills/ship" ~/.claude/skills/ship`. Changes then apply at once.
 
 ## Usage
 
@@ -32,12 +32,12 @@ Give pipeship a ticket: a reference (`ABC-123`), a URL (Linear, Notion, GitHub, 
 
 ### In Claude Code
 
-Type `/pipeship:pipeship` followed by the ticket (`/pipeship` if you use the dev link):
+Type `/pipeship:ship` followed by the ticket (`/ship` if you use the dev link):
 
 ```
-/pipeship:pipeship ABC-123
-/pipeship:pipeship quick https://github.com/org/repo/issues/42
-/pipeship:pipeship --skip questions,stack "Add a date filter to the orders page"
+/pipeship:ship ABC-123
+/pipeship:ship quick https://github.com/org/repo/issues/42
+/pipeship:ship --skip questions,stack "Add a date filter to the orders page"
 ```
 
 You can also ask in plain words: "ship ABC-123 with pipeship".
@@ -47,8 +47,8 @@ You can also ask in plain words: "ship ABC-123 with pipeship".
 In Codex, `$` calls a skill by name (type `$` to pick one from a list):
 
 ```
-$pipeship ABC-123
-$pipeship quick https://github.com/org/repo/issues/42
+$ship ABC-123
+$ship quick https://github.com/org/repo/issues/42
 ```
 
 You can also ask in plain words: "ship ABC-123 with pipeship". pipeship writes to `~/.pipeship`, starts background servers and pushes branches, so Codex's default sandbox asks for approval: approve these commands, or run Codex with a sandbox that allows them.

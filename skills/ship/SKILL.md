@@ -1,5 +1,5 @@
 ---
-name: pipeship
+name: ship
 description: Feature pipeline from a ticket to stacked PRs and a running test environment. Use ONLY when the user explicitly names pipeship (or a dictation variant like "pipe ship", "pipe chip", "pipechip") and asks to run a feature through it, e.g. "ship ABC-123 with pipeship". Never use it for ordinary feature, bug or code requests that do not name it.
 argument-hint: "[quick|full] [--skip step,step] <ticket ref, URL or text>"
 ---

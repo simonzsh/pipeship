@@ -100,7 +100,7 @@ Chaque étape tourne dans un sous-agent, avec un contexte propre. Chaque étape 
 Principe : simple, mais efficace et fonctionnel.
 
 ### Dans la V1
-- Le skill du pipeline avec les 7 étapes, lancé par `/pipeship`.
+- Le skill du pipeline avec les 7 étapes, lancé par `/pipeship:ship`.
 - Les modes `full` et `quick`, et l'option `--skip`.
 - Toute source de ticket que Claude peut lire, plus le texte collé.
 - Un fichier d'état par pipeline, écrit par le skill à chaque étape.
@@ -215,7 +215,7 @@ Chaque jalon est utilisable seul.
 
 ## 8. Questions ouvertes
 
-1. **Forme du pipeline.** Tranché le 2026-10-12 : un skill lancé par `/pipeship`, qui orchestre des sous-agents dans la session Claude. La pause de l'étape 2 se fait dans la conversation. Reste à voir si l'outil Workflow sert pour l'étape 4.
+1. **Forme du pipeline.** Tranché le 2026-10-12 : un skill lancé par `/pipeship:ship`, qui orchestre des sous-agents dans la session Claude. La pause de l'étape 2 se fait dans la conversation. Reste à voir si l'outil Workflow sert pour l'étape 4.
 2. **Source du ticket.** Tranché le 2026-10-12 : toute source. Voir « Source du ticket » (section 3).
 3. **Lancement du serveur du dashboard.** Tranché le 2026-10-12 : le skill lance `pipeship dashboard` au début de chaque pipeline. La commande ne fait rien si le dashboard tourne déjà.
 4. **Distribution publique.** Plugin Claude Code (skill + serveur) ? Package npm pour le serveur ?

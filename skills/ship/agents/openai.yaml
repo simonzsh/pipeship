@@ -1,6 +1,6 @@
 interface:
-  display_name: "pipeship"
+  display_name: "pipeship: ship"
   short_description: "From a ticket to stacked PRs and a running test app"
-  default_prompt: "Use $pipeship to ship ABC-123"
+  default_prompt: "Use $ship to ship ABC-123"
 policy:
   allow_implicit_invocation: true
