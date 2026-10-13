@@ -6,9 +6,17 @@ argument-hint: "[quick|full] [--skip step,step] <ticket ref, URL or text>"
 
 # pipeship
 
-Run the pipeline below on: `$ARGUMENTS`
+Run the pipeline below on the user's ticket: `$ARGUMENTS`
 
 You are the orchestrator. Run each heavy step in a subagent with a clean context. Each step writes its result to a file in the pipeline directory; the next step reads that file. Keep the user's session for decisions and questions only.
+
+## Claude Code and Codex
+
+This skill runs in both. Where they differ:
+- **Arguments**: Claude Code fills `$ARGUMENTS`. Codex leaves it as is: take the ticket and options from the user's message.
+- **Subagents**: use your harness's subagent tool (Claude Code: `Agent`; Codex: spawn sub-agents). To run subagents in parallel, start them together. If you have none, run the step yourself.
+- **Models**: `opus` and `sonnet` below are Claude Code model names. In another harness, use your strongest model for `opus` steps and your default model for `sonnet` steps.
+- **Codex sandbox**: pipeship writes outside the repo (`~/.pipeship`), starts background servers and pushes branches. If the sandbox blocks a command, ask the user to approve it or to relax the sandbox. Never work around it.
 
 ## Helper
 
@@ -39,7 +47,7 @@ Steps: `map`, `questions`, `plan`, `implement`, `review`, `stack`, `preview`.
 
 ## Step 0 — Start
 
-1. Parse `$ARGUMENTS` (if empty, use the user's request): an optional mode (`quick` or `full`, default `full`), an optional `--skip a,b`, and the ticket (reference, URL or text).
+1. Parse the arguments (if `$ARGUMENTS` is empty or was not replaced, use the user's request): an optional mode (`quick` or `full`, default `full`), an optional `--skip a,b`, and the ticket (reference, URL or text).
 2. **Read the ticket** with whatever tool this session has for its source: an MCP server (Linear, Notion, Jira…), `gh issue view`, or fetching the URL. Plain text is the ticket itself. A bare reference like `ABC-123` does not name its source: infer it from the tools you have, and ask if unsure. If no tool can read the source, ask the user to paste the ticket.
 3. The repo is the git root of the current directory. The base branch is the current branch. If the working tree has uncommitted changes, tell the user — they will not be in the worktrees.
 4. `pipeship new ...` with the ticket title, source (`linear`, `notion`, `github`, `jira`, `url`, `text`…), and one `--ref`/`--url` pair per ticket when the pipeline covers several (never join refs into one `--ref`). Note the `id` and `dir` it prints.
@@ -48,7 +56,7 @@ Steps: `map`, `questions`, `plan`, `implement`, `review`, `stack`, `preview`.
 
 ## Step 1 — map
 
-Subagent (Explore, model `sonnet`). Input: `ticket.md` and the repo. Output: `<dir>/map.md` with:
+Subagent (read-only, model `sonnet`; Claude Code: `Explore` type). Input: `ticket.md` and the repo. Output: `<dir>/map.md` with:
 - every file the ticket touches (modules, routes, models, UI, tests), with paths and one line on what each does today;
 - repo conventions to follow (structure, naming, test style, branch names from recent `git branch -r`);
 - the exact **check commands** (lint, typecheck, tests) from the repo config;
@@ -68,7 +76,7 @@ In `quick` mode, ask only **blocking** questions. If there are none, mark the st
 
 ## Step 3 — plan
 
-Subagent (Plan, model `opus`). Input: `ticket.md`, `map.md`. Output: `<dir>/plan.md` with:
+Subagent (model `opus`; Claude Code: `Plan` type). Input: `ticket.md`, `map.md`. Output: `<dir>/plan.md` with:
 1. **Contracts first**: the types, API routes and data formats shared between chunks. Fixed contracts are what make chunks independent.
 2. **Chunks**: independent pieces of work, each with its files and its done criteria. Do not split for nothing — a small ticket is one chunk; every split adds integration risk.
 3. **Stack order** by dependency: contracts, then back end, then front end.
@@ -85,7 +93,7 @@ For each chunk, in stack order:
    - If the branch already exists, add `-2`.
 2. `pipeship chunk <id> <chunk> --worktree <path> --branch <branch> --status coding`
 
-Then launch **one subagent per chunk (model `sonnet`), all in the same message** so they run in parallel. Each subagent gets: its worktree path (it works only there), `ticket.md`, `map.md`, `plan.md` (contracts + its chunk), the check commands. It must: implement its chunk against the contracts, make the checks pass, commit, and report what it did. Install dependencies in the worktree if the checks need them.
+Then launch **one subagent per chunk (model `sonnet`), started together** so they run in parallel. Each subagent gets: its worktree path (it works only there), `ticket.md`, `map.md`, `plan.md` (contracts + its chunk), the check commands. It must: implement its chunk against the contracts, make the checks pass, commit, and report what it did. Install dependencies in the worktree if the checks need them.
 
 When all are done, **restack**: in stack order, rebase each chunk branch onto the previous one (`git -C <worktree> rebase <previous branch>`). The last chunk branch is the **top of the stack** and contains the whole feature. Run the checks on the top. Update each chunk with `--status done`.
 

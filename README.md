@@ -1,28 +1,63 @@
 # pipeship
 
-Feature pipeline for Claude Code. Give it a ticket or an issue from any source; it maps the code, asks its questions in one batch, plans, implements chunks in parallel worktrees, cleans up the code, opens stacked PRs, and starts the app so you can test it at a URL.
-
-```
-/pipeship ABC-123
-/pipeship quick https://github.com/org/repo/issues/42
-/pipeship --skip questions,stack "Add a date filter to the orders page"
-```
-
-Modes: `full` (default, all 7 steps) and `quick` (one chunk, blocking questions only). `--skip` removes steps; you can also say "skip the review" during the run.
+Feature pipeline for Claude Code and Codex. Give it a ticket or an issue from any source; it maps the code, asks its questions in one batch, plans, implements chunks in parallel worktrees, cleans up the code, opens stacked PRs, and starts the app so you can test it at a URL.
 
 ## Install
 
-Requires [Bun](https://bun.sh), git and `gh`. In Claude Code:
+Requires [Bun](https://bun.sh), git and `gh`.
 
-```
-/plugin install pipeship --marketplace simonzsh/pipeship
+In Claude Code, from your shell, then start a new session:
+
+```sh
+claude plugin marketplace add simonzsh/pipeship
+claude plugin install pipeship@pipeship
 ```
 
-Or from your shell: `claude plugin marketplace add simonzsh/pipeship`, then `claude plugin install pipeship@pipeship`. The first run installs the dependencies, which takes a few seconds. Updates arrive with `claude plugin update pipeship@pipeship`, or automatically once you turn on auto-update for the marketplace in `/plugin`.
+Or in one step inside a session: `/plugin install pipeship --marketplace simonzsh/pipeship`. Updates arrive with `claude plugin update pipeship@pipeship`, or automatically once you turn on auto-update for the marketplace in `/plugin`.
+
+In Codex, from your shell, then start a new session:
+
+```sh
+codex plugin marketplace add simonzsh/pipeship
+codex plugin add pipeship@pipeship
+```
+
+The first run installs the dependencies, which takes a few seconds.
 
 To work on pipeship itself, clone the repo, run `bun install`, and link the skill instead: `ln -s "$PWD/skills/pipeship" ~/.claude/skills/pipeship`. Changes then apply at once.
 
-The skill runs when you type `/pipeship:pipeship` (or `/pipeship` with the dev link), or when you explicitly ask Claude to use pipeship ("ship ABC-123 with pipeship"). Claude does not start it for ordinary feature requests.
+## Usage
+
+Give pipeship a ticket: a reference (`ABC-123`), a URL (Linear, Notion, GitHub, Jira…) or plain text. It reads the ticket with the tools your session has, such as an MCP server or `gh`.
+
+### In Claude Code
+
+Type `/pipeship:pipeship` followed by the ticket (`/pipeship` if you use the dev link):
+
+```
+/pipeship:pipeship ABC-123
+/pipeship:pipeship quick https://github.com/org/repo/issues/42
+/pipeship:pipeship --skip questions,stack "Add a date filter to the orders page"
+```
+
+You can also ask in plain words: "ship ABC-123 with pipeship".
+
+### In Codex
+
+In Codex, `$` calls a skill by name (type `$` to pick one from a list):
+
+```
+$pipeship ABC-123
+$pipeship quick https://github.com/org/repo/issues/42
+```
+
+You can also ask in plain words: "ship ABC-123 with pipeship". pipeship writes to `~/.pipeship`, starts background servers and pushes branches, so Codex's default sandbox asks for approval: approve these commands, or run Codex with a sandbox that allows them.
+
+### Options
+
+- **Modes**: `full` (default, all 7 steps) and `quick` (one chunk, blocking questions only).
+- **`--skip`** removes steps, e.g. `--skip questions,stack`. You can also say "skip the review" during the run.
+- pipeship only starts when you name it. It does not run on ordinary feature requests.
 
 ## Test environment
 
@@ -53,3 +88,5 @@ State lives in `~/.pipeship/pipelines/<id>/` (`state.json`, `ticket.md`, `map.md
 bun test
 bun run typecheck
 ```
+
+To release, bump `version` in `package.json`, `.claude-plugin/plugin.json` and `.codex-plugin/plugin.json`, then push. Users only get an update when the version changes; a test checks that the three files agree.

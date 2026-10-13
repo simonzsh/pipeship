@@ -154,3 +154,10 @@ test("delete removes the worktrees and files, keeps the branch, and protects unc
   expect(git(repo, "worktree", "list").stdout).not.toContain(wt);
   expect(git(repo, "branch", "--list", "pipeship/test/main").stdout).toContain("pipeship/test/main");
 });
+
+test("package.json and both plugin manifests declare the same version", () => {
+  const version = (path: string) => JSON.parse(readFileSync(join(import.meta.dir, "..", path), "utf8")).version;
+  const expected = version("package.json");
+  expect(version(".claude-plugin/plugin.json")).toBe(expected);
+  expect(version(".codex-plugin/plugin.json")).toBe(expected);
+});

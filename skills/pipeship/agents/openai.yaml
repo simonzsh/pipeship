@@ -1,0 +1,6 @@
+interface:
+  display_name: "pipeship"
+  short_description: "From a ticket to stacked PRs and a running test app"
+  default_prompt: "Use $pipeship to ship ABC-123"
+policy:
+  allow_implicit_invocation: true
