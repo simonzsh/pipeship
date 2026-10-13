@@ -1,10 +1,11 @@
-import { ChevronDown, ExternalLink, FolderGit2, GitBranch, GitPullRequest, Globe } from "lucide-react";
+import { ChevronDown, FolderGit2, GitBranch, GitPullRequest } from "lucide-react";
 import { useState, type KeyboardEvent } from "react";
 import type { PipelineView } from "../state.ts";
 import { ActionButton } from "./action-button";
 import { Badge } from "./components/ui/badge";
 import { Button } from "./components/ui/button";
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "./components/ui/card";
+import { PreviewPanel } from "./preview-panel";
 import { AgentLogo, isAgentStopped } from "./session";
 import { ChunkStatusIcon, StatusBadge } from "./status";
 import { Steps } from "./steps";
@@ -96,19 +97,7 @@ export function PipelineCard({ p }: { p: PipelineView }) {
 
       {open && (
         <CardContent className="flex flex-col gap-4 border-t py-5">
-          {p.preview && (
-            <div className="flex items-center gap-3 rounded-lg border border-emerald-500/30 bg-emerald-500/5 px-3 py-2.5">
-              <Globe className="size-4 shrink-0 text-emerald-600 dark:text-emerald-400" />
-              <a href={p.preview.url} target="_blank" className="truncate font-mono text-sm hover:underline">
-                {p.preview.url}
-              </a>
-              <Button asChild size="sm" className="ml-auto">
-                <a href={p.preview.url} target="_blank">
-                  Open <ExternalLink />
-                </a>
-              </Button>
-            </div>
-          )}
+          {p.preview && <PreviewPanel preview={p.preview} />}
           {p.chunks.length > 0 && (
             <ul className="flex flex-col divide-y rounded-lg border">
               {p.chunks.map((c) => (
