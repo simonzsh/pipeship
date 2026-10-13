@@ -1,4 +1,4 @@
-import { Square, Trash2, type LucideIcon } from "lucide-react";
+import { Loader2, Play, Square, Trash2, type LucideIcon } from "lucide-react";
 import { useState } from "react";
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription,
@@ -31,7 +31,7 @@ const ACTIONS: Record<"stopPipeline" | "stopServer" | "delete", ActionDef> = {
     confirm: "Request stop",
   },
   stopServer: {
-    endpoint: "stop",
+    endpoint: "preview/stop",
     icon: Square,
     iconClass: "text-orange-600 dark:text-orange-400",
     button: "Stop preview",
@@ -78,5 +78,30 @@ export function ActionButton({ id, action, hasServers }: { id: string; action: k
         </AlertDialogFooter>
       </AlertDialogContent>
     </AlertDialog>
+  );
+}
+
+// No confirm dialog: starting loses nothing. The POST returns at once, so the label follows the preview too.
+export function StartPreviewButton({ id, starting }: { id: string; starting: boolean }) {
+  const [error, setError] = useState<string>();
+  const [pending, setPending] = useState(false);
+  const run = async () => {
+    setError(undefined);
+    setPending(true);
+    const err = await postAction(id, "preview/start");
+    setError(err);
+    // The live state polls every second: keep "Starting…" until it reports the start.
+    if (err) setPending(false);
+    else setTimeout(() => setPending(false), 1500);
+  };
+  const busy = pending || starting;
+  return (
+    <>
+      {error && <span className="text-xs text-destructive">{error}</span>}
+      <Button variant="outline" size="xs" disabled={busy} onClick={run}>
+        {busy ? <Loader2 className="animate-spin" /> : <Play className="text-emerald-600 dark:text-emerald-400" />}
+        {busy ? "Starting…" : "Start preview"}
+      </Button>
+    </>
   );
 }

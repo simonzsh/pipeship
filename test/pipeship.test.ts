@@ -8,7 +8,7 @@ import {
 import { chunksOf, diffRange, repoName, repoStacks, sharesRepo, topChunk } from "../src/repos.ts";
 import {
   DASHBOARD_PORT, deletePipeline, findRecipe, isAlive, mainService, normalizeRecipe, pickPorts, previewLines, resolveEnv,
-  savedRecipePath, startOrder, startPreview, stopPipeline, type Service,
+  requestPreviewStart, savedRecipePath, startOrder, startPreview, stopPipeline, stopPreview, type Service,
 } from "../src/preview.ts";
 import { diffTotals, parseDiff } from "../src/diff.ts";
 import { DiffError, gitDiff, pipelineDiff, resolveRef } from "../src/diff-git.ts";
@@ -1745,3 +1745,98 @@ test("waiting_for_user needs a running step", () => {
   expect(readState(id).status).toBe("waiting_for_user");
   expect(() => setStatus(id, "nope" as never)).toThrow("unknown status");
 });
+
+// A ready pipeline with a chunk worktree, so the preview routes can start it (no worktree argument).
+function readyPipeline(recipe: object) {
+  const wt = mkdtempSync(join(root, "wt-"));
+  writeFileSync(join(wt, ".pipeship.json"), JSON.stringify(recipe));
+  const { id } = createPipeline({ repos: [{ path: repo }], title: "t", source: "text" });
+  upsertChunk(id, { name: "c", branch: "c", worktree: wt });
+  setStatus(id, "ready");
+  return id;
+}
+
+const SERVER = { start: 'bun -e "Bun.serve({ port: Number(process.env.PORT), fetch: () => new Response(\'ok\') })"' };
+
+test("preview/start and preview/stop keep the pipeline ready", async () => {
+  const id = readyPipeline(SERVER);
+  const server = await serve(0);
+  const post = (action: string) => fetch(`http://localhost:${server.port}/api/pipelines/${id}/preview/${action}`, { method: "POST" });
+  try {
+    expect((await post("start")).status).toBe(202);
+    for (let i = 0; i < 100 && !(readState(id).preview?.services?.every((s) => s.pid)); i++) await Bun.sleep(100);
+    await Bun.sleep(300);
+    const up = readState(id);
+    const pid = up.preview!.services![0]!.pid!;
+    expect(isAlive(pid)).toBe(true);
+    expect(up.status).toBe("ready");
+    expect(up.previewError).toBeUndefined();
+
+    const res = await post("stop");
+    expect(res.status).toBe(200);
+    const stopped = readState(id);
+    expect(stopped.status).toBe("ready");
+    expect(stopped.stopRequested).toBe(false);
+    expect(stopped.preview).toBeUndefined();
+    expect(isAlive(pid)).toBe(false);
+  } finally {
+    server.stop(true);
+    await stopPreviewQuiet(id);
+  }
+}, 30_000);
+
+async function stopPreviewQuiet(id: string) {
+  await stopPipeline(id).catch(() => undefined);
+}
+
+test("preview/start answers 409 when not ready or already starting", async () => {
+  const slow = readyPipeline({ start: `bun -e "await Bun.sleep(1500); Bun.serve({ port: Number(process.env.PORT), fetch: () => new Response('ok') })"` });
+  const idle = readyPipeline(SERVER);
+  setStatus(idle, "running");
+  const server = await serve(0);
+  const post = async (id: string) => {
+    const res = await fetch(`http://localhost:${server.port}/api/pipelines/${id}/preview/start`, { method: "POST" });
+    return res.status;
+  };
+  try {
+    expect(await post(idle)).toBe(409);
+    expect(await post("nope")).toBe(404);
+    expect(await post(slow)).toBe(202);
+    expect(await post(slow)).toBe(409);
+    const listed = (await (await fetch(`http://localhost:${server.port}/api/pipelines`)).json()) as { id: string; previewStarting?: boolean }[];
+    expect(listed.find((p) => p.id === slow)?.previewStarting).toBe(true);
+    expect(listed.find((p) => p.id === idle)?.previewStarting).toBeUndefined();
+  } finally {
+    server.stop(true);
+    await stopPreviewQuiet(slow);
+  }
+}, 30_000);
+
+test("a failed start records previewError and the next start clears it", async () => {
+  const id = readyPipeline({ start: "echo boom; exit 1" });
+  await requestPreviewStart(id).done;
+  expect(readState(id).previewError).toMatch(/boom/);
+  expect(readState(id).status).toBe("ready");
+
+  writeFileSync(join(readState(id).chunks[0]!.worktree!, ".pipeship.json"), JSON.stringify(SERVER));
+  const run = requestPreviewStart(id);
+  expect(run.state.previewError).toBeUndefined();
+  await run.done;
+  try {
+    expect(readState(id).previewError).toBeUndefined();
+    expect(readState(id).preview).toBeDefined();
+  } finally {
+    await stopPreviewQuiet(id);
+  }
+}, 30_000);
+
+test("a stop during a start is not recorded as previewError", async () => {
+  const id = readyPipeline({ start: `bun -e "await Bun.sleep(2000); Bun.serve({ port: Number(process.env.PORT), fetch: () => new Response('ok') })"` });
+  const run = requestPreviewStart(id);
+  await Bun.sleep(500);
+  await stopPreview(id);
+  await run.done;
+  expect(readState(id).previewError).toBeUndefined();
+  expect(readState(id).preview).toBeUndefined();
+  expect(readState(id).status).toBe("ready");
+}, 30_000);
