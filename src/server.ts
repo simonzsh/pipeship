@@ -1,6 +1,6 @@
 import tailwind from "bun-plugin-tailwind";
 import { withSessionState } from "./session.ts";
-import { errorMessage, failStaleMerges, MergeError, parseMergeMode, startMerge } from "./merge.ts";
+import { errorMessage, failStaleMerges, MergeError, startMerge } from "./merge.ts";
 import { listStates } from "./state.ts";
 import { deletePipeline, stopPipeline } from "./preview.ts";
 
@@ -47,8 +47,8 @@ export async function serve(port = DEFAULT_PORT) {
       "/api/pipelines/:id/merge": {
         POST: async (req) => {
           try {
-            const mode = parseMergeMode(await req.json().catch(() => null));
-            return Response.json(startMerge(req.params.id, {}, mode).state, { status: 202 });
+            const body = (await req.json().catch(() => null)) as { mode?: unknown } | null;
+            return Response.json(startMerge(req.params.id, {}, body?.mode).state, { status: 202 });
           } catch (err) {
             const status = err instanceof MergeError ? err.status : 500;
             return Response.json({ error: errorMessage(err) }, { status });

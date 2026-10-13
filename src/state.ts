@@ -23,7 +23,7 @@ export type MergeStatus = "running" | "done" | "failed";
 export type MergeMode = "combine" | "base";
 export interface MergeRun {
   status: MergeStatus;
-  mode: MergeMode; // "combine" folds the stack into the bottom PR; "base" merges each PR into the base branch
+  mode: MergeMode; // "combine" folds the stack into the bottom PR; "base" squash-merges the last PR into the base branch
   pid?: number; // process that runs the merge (the dashboard server)
   current?: string; // name of the chunk being merged, or the one that stopped the merge
   message?: string; // progress, e.g. "waiting for checks on #12 (2 pending)"
@@ -31,7 +31,6 @@ export interface MergeRun {
   startedAt: string;
   updatedAt: string; // refreshed on every progress write
   endedAt?: string;
-  oldTips?: Record<string, string>; // chunk name -> head before its rebase; the next rebase needs it after a resume
 }
 
 export interface TicketLink {
