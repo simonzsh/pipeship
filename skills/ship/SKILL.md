@@ -45,7 +45,7 @@ Steps: `map`, `questions`, `plan`, `implement`, `review`, `stack`, `preview`.
 - **Never skip a step another step needs**: the test environment needs a worktree; PRs need commits.
 - On failure: `pipeship step <id> <step> failed`, explain what failed, and ask the user what to do.
 - While this pipeline runs, it replaces process skills such as brainstorming, writing-plans, using-git-worktrees, subagent-driven-development and finishing-a-development-branch. Do not invoke them. The `simplify` and `code-review` skills in step 5 are fine.
-- If the dashboard shows *Agent stopped*, the user can resume with the command copied from the agent logo on the card, then continue from the first step that is not done or skipped (`pipeship get <id>`).
+- If the dashboard shows *Agent stopped*, the user can resume with the command copied from the agent logo in the pipeline header, then continue from the first step that is not done or skipped (`pipeship get <id>`).
 - Every server you start outside `pipeship preview` must be stopped before you finish (`kill <PID>`, never `pkill -f`).
 
 ## Step 0 — Start
@@ -132,7 +132,7 @@ Run the changed code, front end or back end. An API, MCP or engine change needs 
 1. **Start.** First run `pipeship recipe <repo>...` again with the final repo list. If the list changed since step 1, update the `repo` names in the draft. Then run `pipeship preview <id>`. It uses each repo's top worktree. Add `--recipe <dir>/recipe.json` if there is a draft. It copies local files, installs, starts each service of the recipe on its own free port (back ends first, then fronts), waits until each answers, and marks the pipeline `ready`. A draft recipe that works is saved, so later pipelines in this repo skip this work. Give the user the URLs it prints (the first is the main front). Services the app needs (a local database, a queue) belong in a `start` command of the recipe, so the dashboard's "Stop preview" button stops them with the app (see "Test environment recipe"). Other one-off setup is fine to run yourself; test data follows the data rule of step 7.
 2. **Verify.** Use the changed behaviour the way its client does, and write what you called and what came back to `<dir>/verify.md`: a UI change in a browser (the preview tools of your harness), an HTTP API with `curl`, an MCP or other protocol with a real client. Cover the main path and one failure path. If you cannot exercise it (no test data, a missing service), say so in the summary. Never claim it works from unit tests alone.
 3. **Fix.** If verification fails, fix the code in the worktree of the chunk that owns it, commit, restack and re-run the checks. Push only if step 6 opened PRs.
-4. **Test guide.** After verify, write `<dir>/test.md` for the user, in the user's language. The dashboard shows it under the test URLs, so the user can test without leaving the dashboard. `verify.md` stays your evidence; `test.md` is the user's guide. Keep it short:
+4. **Test guide.** After verify, write `<dir>/test.md` for the user, in the user's language. The dashboard shows it in the pipeline's Test tab, so the user can test without leaving the dashboard. `verify.md` stays your evidence; `test.md` is the user's guide. Keep it short:
    - the direct URL of the changed page, not only the root;
    - how to log in if the app needs it (which local account), never a secret;
    - 3 to 5 steps, each with its expected result;
@@ -146,7 +146,7 @@ If the preview fails to start, it prints the log tail: diagnose, fix the recipe 
 
 ## End
 
-Give the user a short summary: the test URL, the PRs in stack order (per repo), what the verification covered (or why it was skipped), and anything to check by hand. Point to the test guide: the user finds it on the dashboard card, under the test URLs. The test servers keep running on purpose; the user stops them with the dashboard's "Stop preview" button.
+Give the user a short summary: the test URL, the PRs in stack order (per repo), what the verification covered (or why it was skipped), and anything to check by hand. Point to the test guide: the user finds it in the pipeline's Test tab. The test servers keep running on purpose; the user stops them with the dashboard's "Stop preview" button.
 
 ## Test environment recipe
 
