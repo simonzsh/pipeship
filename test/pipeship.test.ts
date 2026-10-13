@@ -1589,11 +1589,16 @@ test("pipelineDiff runs real git per chunk and for the whole stack", async () =>
   // Local branch deleted, origin copy kept: falls back to origin/c1.
   sh(stack.clone, "worktree", "remove", "--force", stack.worktrees[0]!);
   sh(stack.clone, "branch", "-D", "c1");
-  expect(await resolveRef(stack.clone, "c1")).toBe("origin/c1");
+  expect(await resolveRef(stack.clone, "c1")).toBe("refs/remotes/origin/c1");
+  expect(await resolveRef(stack.clone, "c3")).toBe("refs/heads/c3");
   expect(await resolveRef(stack.clone, "nope")).toBeUndefined();
   const viaOrigin = await pipelineDiff(stack.id, null, "c1");
   expect(viaOrigin.range).toBe("main...origin/c1");
   expect(viaOrigin.files.map((f) => f.path)).toEqual(["f1.txt"]);
+
+  // A tag named like a branch must not win over the branch.
+  sh(stack.clone, "tag", "c2", "main");
+  expect((await pipelineDiff(stack.id, null, "c2")).files.map((f) => f.path)).toEqual(["f2.txt"]);
 
   // A branch that exists nowhere.
   upsertChunk(stack.id, { name: "ghost", branch: "feat/ghost", status: "pr" });
@@ -1635,6 +1640,7 @@ test("the diff route answers 200, 404, 400 and 409", async () => {
     expect(ok.body.files[0]).toMatchObject({ path: "f2.txt", status: "added" });
     expect((await get(`${stack.id}/diff`)).body.files).toHaveLength(2);
 
+    expect((await get("..%2Fx/diff")).status).toBe(404);
     expect(await get("nope/diff")).toEqual({ status: 404, body: { error: "unknown pipeline: nope", code: "not_found" } });
     expect((await get(`${stack.id}/diff?chunk=zzz`)).status).toBe(404);
     expect(await get(`${multi.id}/diff`)).toMatchObject({ status: 400, body: { code: "bad_request" } });

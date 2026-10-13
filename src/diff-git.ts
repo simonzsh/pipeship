@@ -28,14 +28,15 @@ async function runGit(cwd: string, args: string[]): Promise<{ code: number; out:
 }
 
 // Local branch first, then the remote one (a branch can be pushed and its local copy deleted).
+// Returns the full ref so a tag with the same name cannot win in the diff range.
 export async function resolveRef(cwd: string, branch: string): Promise<string | undefined> {
   for (const ref of [`refs/heads/${branch}`, `refs/remotes/origin/${branch}`]) {
-    if ((await runGit(cwd, ["rev-parse", "--verify", "--quiet", `${ref}^{commit}`])).code === 0) {
-      return ref.replace(/^refs\/(heads|remotes)\//, "");
-    }
+    if ((await runGit(cwd, ["rev-parse", "--verify", "--quiet", `${ref}^{commit}`])).code === 0) return ref;
   }
   return undefined;
 }
+
+const shortRef = (ref: string) => ref.replace(/^refs\/(heads|remotes)\//, "");
 
 export async function gitDiff(
   cwd: string, from: string, to: string, limits = DIFF_LIMITS,
@@ -112,7 +113,7 @@ export async function pipelineDiff(
   const files = parseDiff(text, { maxLinesPerFile: limits.maxLinesPerFile });
   const { additions, deletions } = diffTotals(files);
   return {
-    repo: repo.path, name, chunk, from: range.from, to: range.to, range: `${refs[0]}...${refs[1]}`,
+    repo: repo.path, name, chunk, from: range.from, to: range.to, range: refs.map(shortRef).join("..."),
     files, additions, deletions, truncated,
   };
 }

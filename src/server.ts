@@ -37,6 +37,10 @@ export async function serve(port = DEFAULT_PORT) {
       "/api/health": () => Response.json({ app: "pipeship" }),
       "/api/pipelines": () => Response.json(listDashboardStates()),
       "/api/pipelines/:id/diff": async (req) => {
+        // Ids come from slug(): reject anything else before it reaches the filesystem.
+        if (!/^[a-z0-9][a-z0-9-]*$/i.test(req.params.id)) {
+          return Response.json({ error: `unknown pipeline: ${req.params.id}`, code: "not_found" } satisfies DiffErrorBody, { status: 404 });
+        }
         const q = new URL(req.url).searchParams;
         try {
           return Response.json(await pipelineDiff(req.params.id, q.get("repo"), q.get("chunk")), {
