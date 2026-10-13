@@ -62,8 +62,7 @@ Subagent (read-only, model `sonnet`; Claude Code: `Explore` type). Input: `ticke
 - the exact **check commands** (lint, typecheck, tests) from the repo config;
 - how to start the app: run `pipeship recipe <repo>`. If it prints `none` and the repo has anything that serves requests (a web app, an API, an MCP server, a worker with a health route), write a draft recipe to `<dir>/recipe.json` (see "Test environment recipe"). Back-end only changes count: do not conclude "no preview needed" because the change has no UI. Say "nothing to run" only for a pure library, a CLI that cannot start, or a docs-only change. List what the app needs to run (database, env files, seed data, other services) and how to get test data locally.
 
-In `quick` mode, keep the map short: only the files to change.
-In `quick` mode, do the map yourself in the main session, not in a subagent: on a small ticket a subagent costs as much as the work. Still write `<dir>/map.md`, with the check commands and how to start the app.
+In `quick` mode, do the map yourself in the main session, not in a subagent: on a small ticket a subagent costs as much as the work. Keep the map short: only the files to change, the check commands and how to start the app.
 
 ## Step 2 — questions (human pause)
 
