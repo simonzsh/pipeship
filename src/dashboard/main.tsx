@@ -1,8 +1,7 @@
-import { CircleDashed, Terminal } from "lucide-react";
+import { CircleDashed, Workflow } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { createRoot } from "react-dom/client";
 import type { DashboardState } from "../state.ts";
-import { Card, CardDescription, CardTitle } from "./components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "./components/ui/select";
 import { groupByStatus } from "./groups";
 import { PipelineCard } from "./pipeline-card";
@@ -12,18 +11,16 @@ import { cn } from "./utils";
 
 function EmptyState() {
   return (
-    <Card className="items-center py-14 text-center">
-      <div className="rounded-full bg-muted p-3">
-        <Terminal className="size-5 text-muted-foreground" />
-      </div>
-      <div className="flex flex-col gap-1">
-        <CardTitle>No pipeline yet</CardTitle>
-        <CardDescription>
+    <div className="flex flex-col items-center gap-4 py-14 text-center">
+      <Workflow className="size-8 text-muted-foreground" />
+      <div className="flex flex-col gap-2">
+        <p className="font-semibold">No pipeline yet</p>
+        <p className="text-sm text-muted-foreground">
           Run <code className="rounded bg-muted px-1.5 py-0.5">/pipeship:ship &lt;ticket&gt;</code> in Claude Code or{" "}
           <code className="rounded bg-muted px-1.5 py-0.5">$ship &lt;ticket&gt;</code> in Codex.
-        </CardDescription>
+        </p>
       </div>
-    </Card>
+    </div>
   );
 }
 
