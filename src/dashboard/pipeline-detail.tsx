@@ -1,4 +1,4 @@
-import { ArrowLeft, FolderGit2, GitMerge, Layers, Loader2, Zap } from "lucide-react";
+import { ArrowLeft, FolderGit2, GitMerge, Loader2, Zap } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { repoName, repoStacks } from "../repos.ts";
 import type { DashboardState } from "../state.ts";
@@ -16,7 +16,7 @@ import { StatusBadge } from "./status";
 import { Steps } from "./steps";
 import { TestGuide } from "./test-guide";
 import { TicketIcon } from "./ticket-icon";
-import { cn, shortRepo } from "./utils";
+import { shortRepo } from "./utils";
 
 export function PipelineDetail({ p, onBack }: { p: DashboardState; onBack: () => void }) {
   const [target, setTarget] = useState<DiffTarget>({});
@@ -49,7 +49,7 @@ export function PipelineDetail({ p, onBack }: { p: DashboardState; onBack: () =>
   const tree = (base: string | undefined, chunks: DashboardState["chunks"], merge: DashboardState["merge"]) => (
     <>
       {chunks.length > 0 ? (
-        <StackTree base={base} chunks={chunks} merge={merge} selected={target.chunk} onSelect={(chunk) => select({ chunk })} />
+        <StackTree base={base} chunks={chunks} merge={merge} selected={target.chunk} onSelect={(chunk) => select({ chunk })} onSelectBase={() => select({})} />
       ) : (
         <p className="text-xs text-muted-foreground">No branch yet</p>
       )}
@@ -145,12 +145,6 @@ export function PipelineDetail({ p, onBack }: { p: DashboardState; onBack: () =>
       <div className="flex flex-col gap-3 px-6 pt-5">
         <div className="flex flex-wrap items-center gap-2">
           <h3 className="mr-auto text-sm font-semibold">Pull request stack</h3>
-          {/* Only a way back, so hidden on the whole stack. It keeps its space so the page does not jump. */}
-          {p.chunks.some((c) => c.branch) && (
-            <Button variant="outline" size="sm" onClick={() => select({})} className={cn(target.chunk === undefined && "invisible")}>
-              <Layers /> Whole stack
-            </Button>
-          )}
           {multi && merging && p.merge && (
             <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
               <Loader2 className="size-3.5 animate-spin" /> Merging {repoName(p.merge.repo)}…
@@ -172,7 +166,7 @@ export function PipelineDetail({ p, onBack }: { p: DashboardState; onBack: () =>
         </TabsContent>
         {/* The diff spans the whole column; the code tab pads its own text rows. */}
         <TabsContent value="code" className="-mx-6">
-          <CodeTab p={p} target={target} />
+          <CodeTab p={p} target={target} onTarget={setTarget} />
         </TabsContent>
       </Tabs>
     </div>
