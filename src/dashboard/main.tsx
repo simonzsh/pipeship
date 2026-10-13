@@ -4,9 +4,11 @@ import { createRoot } from "react-dom/client";
 import type { DashboardState } from "../state.ts";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "./components/ui/select";
 import { groupByStatus } from "./groups";
-import { PipelineCard } from "./pipeline-card";
+import { PipelineDetail } from "./pipeline-detail";
+import { PipelineListItem } from "./pipeline-list-item";
 import { STATUS_ORDER, statusConfig } from "./status";
 import { ThemeToggle } from "./theme";
+import { buildSearch, parseUrl, pickSelected, type UrlState } from "./url";
 import { cn, shortRepo } from "./utils";
 
 function EmptyState() {
@@ -28,7 +30,8 @@ const ALL = "__all__"; // Radix forbids "" as an item value.
 
 function App() {
   const [pipelines, setPipelines] = useState<DashboardState[]>();
-  const [repo, setRepo] = useState(() => new URLSearchParams(location.search).get("repo"));
+  const [url, setUrl] = useState<UrlState>(() => parseUrl(location.search));
+  const repo = url.repo;
   const [live, setLive] = useState(false);
   const [, tick] = useState(0);
 
@@ -42,9 +45,12 @@ function App() {
     };
     // Re-render now and then so "updated x min ago" stays true.
     const timer = setInterval(() => tick((n) => n + 1), 30_000);
+    const onPop = () => setUrl(parseUrl(location.search));
+    addEventListener("popstate", onPop);
     return () => {
       events.close();
       clearInterval(timer);
+      removeEventListener("popstate", onPop);
     };
   }, []);
 
@@ -67,17 +73,26 @@ function App() {
       ].join(" · ")
     : "Loading…";
 
+  // The selection follows the displayed order: groups first, then each group's items.
+  const ordered = groups.flatMap((g) => g.items);
+  const current = ordered.find((p) => p.id === pickSelected(ordered.map((p) => p.id), url.p));
+  // On narrow screens a p in the URL shows the detail; without it, the list.
+  const detailOnly = url.p !== null;
+
   const selectRepo = (value: string) => {
-    const next = value === ALL ? null : value;
-    setRepo(next);
-    // Keep "/" readable in the URL so a bookmarked repo stays legible.
-    const query = next ? `?repo=${encodeURIComponent(next).replaceAll("%2F", "/")}` : "";
-    history.replaceState(null, "", location.pathname + query);
+    const next = { ...url, repo: value === ALL ? null : value };
+    setUrl(next);
+    history.replaceState(null, "", location.pathname + buildSearch(next));
+  };
+  const selectPipeline = (p: string | null) => {
+    const next = { ...url, p };
+    setUrl(next);
+    history.pushState(null, "", location.pathname + buildSearch(next));
   };
 
   return (
-    <div className="mx-auto flex max-w-3xl flex-col gap-6 px-4 py-10">
-      <header className="flex items-center gap-3">
+    <div className="flex h-dvh flex-col">
+      <header className="flex items-center gap-3 border-b px-4 py-3 sm:px-6">
         <div className="flex flex-col">
           <h1 className="text-xl font-semibold tracking-tight">pipeship</h1>
           <p className="text-sm text-muted-foreground">
@@ -110,27 +125,48 @@ function App() {
         <ThemeToggle />
       </header>
 
-      {pipelines?.length === 0 && <EmptyState />}
-      {groups.map((g) => {
-        const { group, dot, text } = statusConfig(g.status);
-        return (
-          <section key={g.status} className="flex flex-col gap-6">
-            <div className="flex items-center gap-3">
-              <span className={cn("size-2 rounded-full", dot)} />
-              <h2 className={cn("text-sm font-medium", text)}>{group} · {g.items.length}</h2>
-              <div className="h-px flex-1 bg-border" />
-            </div>
-            {g.items.map((p) => <PipelineCard key={p.id} p={p} />)}
-          </section>
-        );
-      })}
       {!pipelines && (
         <div className="flex justify-center py-14 text-muted-foreground">
           <CircleDashed className="size-5 animate-spin" />
         </div>
       )}
+      {pipelines && ordered.length === 0 && (
+        <div className="overflow-y-auto px-4">
+          <EmptyState />
+        </div>
+      )}
+      {current && (
+        <div className="flex min-h-0 flex-1">
+          <aside
+            className={cn(
+              "w-80 shrink-0 overflow-y-auto border-r px-3 py-4 max-[899px]:w-full max-[899px]:border-r-0",
+              detailOnly && "max-[899px]:hidden",
+            )}
+          >
+            <div className="flex flex-col gap-5">
+              {groups.map((g) => {
+                const { group, dot, text } = statusConfig(g.status);
+                return (
+                  <section key={g.status} className="flex flex-col gap-1.5">
+                    <div className="flex items-center gap-2 px-1">
+                      <span className={cn("size-1.5 rounded-full", dot)} />
+                      <h2 className={cn("text-xs font-medium", text)}>{group} · {g.items.length}</h2>
+                      <div className="h-px flex-1 bg-border" />
+                    </div>
+                    {g.items.map((p) => (
+                      <PipelineListItem key={p.id} p={p} selected={p.id === current.id} onSelect={() => selectPipeline(p.id)} />
+                    ))}
+                  </section>
+                );
+              })}
+            </div>
+          </aside>
+          <main className={cn("min-w-0 flex-1 overflow-y-auto", !detailOnly && "max-[899px]:hidden")}>
+            <PipelineDetail key={current.id} p={current} onBack={() => selectPipeline(null)} />
+          </main>
+        </div>
+      )}
     </div>
   );
 }
-
 createRoot(document.getElementById("root")!).render(<App />);

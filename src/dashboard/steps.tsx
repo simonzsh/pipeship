@@ -13,7 +13,16 @@ const STEP_DOT: Record<DotStatus, string> = {
   skipped: "border border-dashed border-muted-foreground/50",
 };
 
-export function Steps({ steps }: { steps: { name: string; status: DotStatus }[] }) {
+export function Steps({ steps, compact }: { steps: { name: string; status: DotStatus }[]; compact?: boolean }) {
+  if (compact) {
+    return (
+      <div className="flex items-center gap-1.5">
+        {steps.map((step) => (
+          <span key={step.name} title={`${step.name}: ${step.status}`} className={cn("size-2 rounded-full", STEP_DOT[step.status])} />
+        ))}
+      </div>
+    );
+  }
   // A link is green up to the furthest step reached, so skipped steps do not break the line.
   const reached = steps.findLastIndex((s) => s.status !== "pending" && s.status !== "skipped");
   return (

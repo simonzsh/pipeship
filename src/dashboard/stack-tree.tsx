@@ -1,8 +1,9 @@
+import type { KeyboardEvent } from "react";
 import { GitBranch, GitPullRequest } from "lucide-react";
 import type { Chunk, MergeRun } from "../state.ts";
 import { Button } from "./components/ui/button";
 import { ChunkStatusIcon } from "./status";
-import { prNumber } from "./utils";
+import { cn, prNumber } from "./utils";
 
 // "#12" for a GitHub PR URL; other hosts keep the plain label.
 const prLabel = (url: string) => {
@@ -11,7 +12,13 @@ const prLabel = (url: string) => {
 };
 
 // The stack is linear: each PR targets the previous one, so depth is the index (plus one under the base root).
-export function StackTree({ base, chunks, merge }: { base?: string; chunks: Chunk[]; merge?: MergeRun }) {
+export function StackTree({ base, chunks, merge, selected, onSelect }: {
+  base?: string;
+  chunks: Chunk[];
+  merge?: MergeRun;
+  selected?: string; // selected chunk name
+  onSelect?: (chunk: string) => void; // rows with a branch are clickable
+}) {
   const offset = base ? 1 : 0;
   return (
     <ul className="flex flex-col rounded-lg border">
@@ -27,8 +34,29 @@ export function StackTree({ base, chunks, merge }: { base?: string; chunks: Chun
         const depth = i + offset;
         // A finished merge ("done") leaves every row on its own status.
         const mergeHere = merge && merge.status !== "done" && merge.current === c.name ? merge : undefined;
+        // A chunk without a branch has no diff to show.
+        const pick = onSelect && c.branch ? () => onSelect(c.name) : undefined;
+        const isSelected = selected === c.name;
         return (
-          <li key={c.name} className="flex items-center gap-3 px-3 py-2 text-sm" style={{ paddingLeft: depth > 0 ? `calc(0.75rem + ${depth - 1} * 1.75rem)` : undefined }}>
+          <li
+            key={c.name}
+            className={cn(
+              "flex items-center gap-3 px-3 py-2 text-sm",
+              pick && "cursor-pointer outline-none transition-colors hover:bg-accent/60 focus-visible:bg-accent/60",
+              isSelected && "bg-accent",
+            )}
+            {...(pick && {
+              role: "button",
+              tabIndex: 0,
+              "aria-pressed": isSelected,
+              onClick: pick,
+              onKeyDown: (e: KeyboardEvent) => {
+                if (e.target !== e.currentTarget || (e.key !== "Enter" && e.key !== " ")) return;
+                e.preventDefault();
+                pick();
+              },
+            })}
+            style={{ paddingLeft: depth > 0 ? `calc(0.75rem + ${depth - 1} * 1.75rem)` : undefined }}>
             {/* The 1rem cell starts under the parent's icon (indent step 1.75rem = cell + gap) and spans the row (-my-2 undoes py-2).
                 The elbow rises into the row above, ends 0.25rem under the parent's icon, and runs to 0.25rem before ours. */}
             {depth > 0 && (
@@ -58,7 +86,7 @@ export function StackTree({ base, chunks, merge }: { base?: string; chunks: Chun
               )}
               {c.pr && (
                 <Button asChild variant="ghost" size="sm">
-                  <a href={c.pr} target="_blank">
+                  <a href={c.pr} target="_blank" onClick={(e) => e.stopPropagation()}>
                     <GitPullRequest /> {prLabel(c.pr)}
                   </a>
                 </Button>

@@ -21,6 +21,8 @@ import { Database } from "bun:sqlite";
 import { detectSession, findT3Thread, type ReadProc } from "../src/session.ts";
 import { groupByStatus } from "../src/dashboard/groups.ts";
 import { t3ThreadLink } from "../src/dashboard/session.tsx";
+import { buildSearch, parseUrl, pickSelected } from "../src/dashboard/url.ts";
+import { allMerged, displaySteps, finished, timeAgo } from "../src/dashboard/pipeline-info.ts";
 
 const root = mkdtempSync(join(tmpdir(), "pipeship-test-"));
 process.env.PIPESHIP_HOME = join(root, "home");
@@ -1652,4 +1654,43 @@ test("the diff route answers 200, 404, 400 and 409", async () => {
   } finally {
     server.stop(true);
   }
+});
+
+test("parseUrl and buildSearch round-trip", () => {
+  expect(parseUrl("")).toEqual({ p: null, repo: null });
+  expect(parseUrl("?p=a-1&repo=/home/me/app")).toEqual({ p: "a-1", repo: "/home/me/app" });
+  expect(buildSearch({ p: null, repo: null })).toBe("");
+  expect(buildSearch({ p: "a-1", repo: null })).toBe("?p=a-1");
+  expect(buildSearch({ p: "a-1", repo: "/home/me/app" })).toBe("?p=a-1&repo=/home/me/app");
+  expect(parseUrl(buildSearch({ p: "x y", repo: "/a&b" }))).toEqual({ p: "x y", repo: "/a&b" });
+  expect(buildSearch({ p: "", repo: "r" })).toBe("?repo=r");
+});
+
+test("pickSelected falls back to the first pipeline", () => {
+  expect(pickSelected(["a", "b"], "b")).toBe("b");
+  expect(pickSelected(["a", "b"], "zzz")).toBe("a");
+  expect(pickSelected(["a", "b"], null)).toBe("a");
+  expect(pickSelected([], "a")).toBeUndefined();
+});
+
+test("timeAgo uses the given clock", () => {
+  const now = Date.parse("2026-01-02T00:00:00Z");
+  expect(timeAgo("2026-01-02T00:00:00Z", now)).toBe("just now");
+  expect(timeAgo("2026-01-01T23:50:00Z", now)).toBe("10 min ago");
+  expect(timeAgo("2026-01-01T21:00:00Z", now)).toBe("3 h ago");
+  expect(timeAgo("2025-12-30T00:00:00Z", now)).toBe("3 d ago");
+});
+
+test("displaySteps shows a running step as waiting while the user is needed", () => {
+  const steps = [{ name: "map" as const, status: "done" as const }, { name: "plan" as const, status: "running" as const }];
+  expect(displaySteps({ steps, status: "running" })[1]!.status).toBe("running");
+  expect(displaySteps({ steps, status: "waiting_for_user" }).map((s) => s.status)).toEqual(["done", "waiting"]);
+});
+
+test("allMerged and finished", () => {
+  expect(allMerged({ chunks: [] })).toBe(false);
+  expect(allMerged({ chunks: [{ name: "a", pr: "u", status: "merged" }] as never })).toBe(true);
+  expect(allMerged({ chunks: [{ name: "a", pr: "u", status: "merged" }, { name: "b", pr: "v", status: "pr" }] as never })).toBe(false);
+  expect(finished({ status: "ready" })).toBe(true);
+  expect(finished({ status: "running" })).toBe(false);
 });
