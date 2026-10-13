@@ -93,6 +93,12 @@ test("preview starts the app, copies local files, and stop kills it", async () =
   expect(stopped.status).toBe("stopped");
   expect(stopped.stopRequested).toBe(true);
   expect(isAlive(pid)).toBe(false);
+
+  // A stopped pipeline can start its test environment again.
+  const again = await startPreview(id, worktree);
+  expect(await (await fetch(again.preview!.url)).text()).toBe("hello");
+  await stopPipeline(id);
+  expect(isAlive(again.preview!.pid!)).toBe(false);
 }, 30_000);
 
 test("preview fails clearly when the server crashes", async () => {

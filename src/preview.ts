@@ -306,11 +306,11 @@ export async function startPreview(id: string, worktree: string, draft?: string)
     url: `http://localhost:${ports[svc.name]}`,
     log: join(pipelineDir(id), `preview-${svc.name}.log`),
   }));
-  const write = (mainPid?: number) =>
-    updateState(id, (s) => {
-      s.preview = { url: mainUrl, port: ports[main.name]!, pid: mainPid, worktree, log: installLog, services: planned };
-    });
-  write();
+  const preview = (mainPid?: number) =>
+    ({ url: mainUrl, port: ports[main.name]!, pid: mainPid, worktree, log: installLog, services: planned });
+  updateState(id, (s) => {
+    s.preview = preview();
+  });
 
   const started: PreviewService[] = [];
   // Roll back: kill what started (reverse), clear the preview, and report what would not die.
@@ -348,8 +348,7 @@ export async function startPreview(id: string, worktree: string, draft?: string)
 
     for (const svc of order) {
       // A stop during a slow install or readiness wait must not leave a service behind.
-      const now = readState(id);
-      if (now.stopRequested || !now.preview) throw new Error("stopped while starting");
+      if (!readState(id).preview) throw new Error("stopped while starting");
       const plan = planned.find((p) => p.name === svc.name)!;
       const fd = openSync(plan.log, "w");
       try {
@@ -371,11 +370,14 @@ export async function startPreview(id: string, worktree: string, draft?: string)
       started.push(plan);
 
       // Save each pid as soon as it exists, so "stop" works even during a slow start.
-      write((started.find((x) => x.name === main.name) ?? started[0]!).pid);
+      // A stop clears the preview: never bring it back, the check below then aborts.
+      const mainPid = (started.find((x) => x.name === main.name) ?? started[0]!).pid;
+      updateState(id, (s) => {
+        if (s.preview) s.preview = preview(mainPid);
+      });
       await waitReady(svc, plan.port, plan.pid!, plan.log);
     }
-    const last = readState(id);
-    if (last.stopRequested || !last.preview) throw new Error("stopped while starting");
+    if (!readState(id).preview) throw new Error("stopped while starting");
   } catch (err) {
     return abort(err as Error);
   }
