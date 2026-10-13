@@ -1,7 +1,7 @@
 import { CircleDashed, Terminal } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { createRoot } from "react-dom/client";
-import type { State } from "../state.ts";
+import type { State, Status } from "../state.ts";
 import { Card, CardDescription, CardTitle } from "./components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "./components/ui/select";
 import { PipelineCard } from "./pipeline-card";
@@ -28,6 +28,13 @@ function EmptyState() {
 const ALL = "__all__"; // Radix forbids "" as an item value.
 
 const shortRepo = (path: string) => path.replace(/^\/(?:home|Users)\/[^/]+/, "~");
+
+const COUNTED: [Status, string][] = [
+  ["running", "running"],
+  ["waiting_for_user", "waiting for you"],
+  ["ready", "ready to test"],
+  ["failed", "failed"],
+];
 
 function App() {
   const [pipelines, setPipelines] = useState<State[]>();
@@ -59,7 +66,16 @@ function App() {
   // An unknown repo in the URL falls back to all repos; the URL is left as is.
   const selected = repos.some(([r]) => r === repo) ? repo : null;
   const shown = selected ? pipelines?.filter((p) => p.repo === selected) : pipelines;
-  const active = shown?.filter((p) => p.status !== "stopped").length ?? 0;
+  // Only states that are present: "3 pipelines · 1 running · 2 ready to test".
+  const summary = shown
+    ? [
+        `${shown.length} ${shown.length === 1 ? "pipeline" : "pipelines"}`,
+        ...COUNTED.flatMap(([status, label]) => {
+          const n = shown.filter((p) => p.status === status).length;
+          return n ? [`${n} ${label}`] : [];
+        }),
+      ].join(" · ")
+    : "Loading…";
 
   const selectRepo = (value: string) => {
     const next = value === ALL ? null : value;
@@ -75,7 +91,7 @@ function App() {
         <div className="flex flex-col">
           <h1 className="text-xl font-semibold tracking-tight">pipeship</h1>
           <p className="text-sm text-muted-foreground">
-            {shown ? `${shown.length} pipelines · ${active} active` : "Loading…"}
+            {summary}
           </p>
         </div>
         <div className="ml-auto flex min-w-0 items-center gap-3">
