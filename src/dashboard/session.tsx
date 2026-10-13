@@ -65,8 +65,10 @@ const CHATGPT = { title: "ChatGPT", path: "M9.205 8.658v-2.26c0-.19.072-.333.238
 
 function HarnessIcon({ harness }: { harness: Harness }) {
   const icon = harness === "claude" ? siClaude : CHATGPT;
+  // Claude in its brand orange; the ChatGPT logo is black or white, so it follows the text colour.
+  const color = harness === "claude" ? `#${siClaude.hex}` : undefined;
   return (
-    <svg role="img" viewBox="0 0 24 24" fill="currentColor" className="size-3.5 shrink-0 text-foreground">
+    <svg role="img" viewBox="0 0 24 24" fill="currentColor" className="size-3.5 shrink-0 text-foreground" style={{ color }}>
       <title>{icon.title}</title>
       <path d={icon.path} />
     </svg>
