@@ -12,13 +12,14 @@ Modes: `full` (default, all 7 steps) and `quick` (one chunk, blocking questions 
 
 ## Install
 
-Requires [Bun](https://bun.sh), git and `gh`. From the repo root, link the skill into your Claude Code skills:
+Requires [Bun](https://bun.sh), git and `gh`. From the repo root, install the dependencies and link the skill into your Claude Code skills:
 
 ```sh
+bun install
 ln -s "$PWD/skills/pipeship" ~/.claude/skills/pipeship
 ```
 
-There is no build and no runtime dependency: the skill runs `src/cli.ts` from this repo, so changes apply at once. `bun install` is only needed to develop (see below).
+There is no build step: the skill runs `src/cli.ts` from this repo, so changes apply at once.
 
 The skill runs when you type `/pipeship`, or when you explicitly ask Claude to use pipeship ("ship ABC-123 with pipeship"). Claude does not start it for ordinary feature requests.
 
@@ -34,14 +35,15 @@ You do not configure anything: on the first pipeline in a repo, Claude reads the
 
 ## Dashboard
 
-`bun src/cli.ts dashboard` starts it in the background on http://localhost:4400 (the skill does it for you). It lists pipelines live, with their steps, PRs and test URL, and a "Stop pipeline" button. Stop the dashboard with `bun src/cli.ts dashboard stop`.
+`bun src/cli.ts dashboard` starts it in the background on http://localhost:4400 (the skill does it for you). It lists pipelines live, with their steps, PRs and test URL, and a "Stop pipeline" button. Light and dark themes follow your system, with a toggle.
+
+The page is React, Tailwind and [shadcn/ui](https://ui.shadcn.com) components (`src/dashboard/`). Bun builds it in memory when the dashboard starts: no Vite, no build step. Stop the dashboard with `bun src/cli.ts dashboard stop`.
 
 State lives in `~/.pipeship/pipelines/<id>/` (`state.json`, `ticket.md`, `map.md`, `plan.md`, worktrees, `preview.log`).
 
 ## Develop
 
 ```sh
-bun install
 bun test
 bun run typecheck
 ```

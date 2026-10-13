@@ -47,13 +47,15 @@ async function startDashboard(): Promise<string> {
   if (await isDashboardUp(port)) return url;
   mkdirSync(home(), { recursive: true });
   const out = openSync(join(home(), "dashboard.log"), "a");
+  // Run from ~/.pipeship, not the caller's project: the dashboard outlives the session that starts it.
   const child = spawn(process.execPath, [import.meta.path, "serve", "--port", String(port)], {
+    cwd: home(),
     detached: true,
     stdio: ["ignore", out, out],
   });
   child.unref();
   writeFileSync(join(home(), "dashboard.pid"), String(child.pid));
-  for (let i = 0; i < 50; i++) {
+  for (let i = 0; i < 100; i++) {
     if (await isDashboardUp(port)) return url;
     await Bun.sleep(100);
   }
@@ -120,7 +122,7 @@ async function main() {
     case "dashboard":
       return print(args[0] === "stop" ? await stopDashboard() : await startDashboard());
     case "serve":
-      serve(port);
+      await serve(port);
       return console.log(`pipeship dashboard on http://localhost:${port}`);
     default:
       print(USAGE);
