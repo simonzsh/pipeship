@@ -203,7 +203,7 @@ function RepoDiff({ data, all }: { data: DiffResponse; all: All }) {
   );
 }
 
-export function CodeTab({ p, target }: CodeTabProps) {
+export function CodeTab({ p, target, onTarget }: CodeTabProps) {
   const [manual, setManual] = useState(0);
   const [all, setAll] = useState<All>(null);
   const requests = useMemo(() => diffRequests(p, target), [p, target]);
@@ -224,7 +224,18 @@ export function CodeTab({ p, target }: CodeTabProps) {
   return (
     <div className="flex flex-col gap-4">
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1 px-6 text-sm">
-        <span className="font-medium">{chunk ? `${pr ? `PR #${pr} · ` : ""}${chunk.name}` : "Whole stack"}</span>
+        {/* Breadcrumb: "Whole stack" is the way back once a PR is picked. */}
+        {chunk ? (
+          <span className="flex items-center gap-1.5">
+            <button type="button" onClick={() => onTarget({})} className="text-muted-foreground underline-offset-4 hover:text-foreground hover:underline">
+              Whole stack
+            </button>
+            <ChevronRight className="size-3.5 text-muted-foreground" />
+            <span className="font-medium">{`${pr ? `PR #${pr} · ` : ""}${chunk.name}`}</span>
+          </span>
+        ) : (
+          <span className="font-medium">Whole stack</span>
+        )}
         {!multi && datas[0] && <code className="rounded bg-muted px-1.5 py-0.5 text-xs text-muted-foreground">{datas[0].range}</code>}
         {datas.length > 0 && <Counts additions={additions} deletions={deletions} />}
         {datas.length > 0 && <span className="text-xs text-muted-foreground">{datas.reduce((n, d) => n + d.files.length, 0)} files</span>}
