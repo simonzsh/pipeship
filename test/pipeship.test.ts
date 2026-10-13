@@ -602,11 +602,11 @@ function makeStack(n: number, commits = 1) {
   const worktrees: string[] = [];
   for (let i = 1; i <= n; i++) {
     sh(clone, "checkout", "-q", "-b", `c${i}`, i === 1 ? "main" : `c${i - 1}`);
-    // Several commits per chunk: a rebase from the wrong old tip would replay (and conflict on) them.
+    // Several commits per chunk edit the same line of the same file: replaying an old commit
+    // on top of the squash is an add/add conflict, so a wrong old tip cannot go unnoticed.
     for (let k = 0; k < commits; k++) {
-      const file = commits === 1 ? `f${i}.txt` : `f${i}${"ab"[k]}.txt`;
-      writeFileSync(join(clone, file), `${file}\n`);
-      sh(clone, "add", "."), sh(clone, "commit", "-q", "-m", `add ${file}`);
+      writeFileSync(join(clone, `f${i}.txt`), `${"ab"[k] ?? "z"}${commits === 1 ? `f${i}` : ""}\n`);
+      sh(clone, "add", "."), sh(clone, "commit", "-q", "-m", `f${i} step ${k}`);
     }
     sh(clone, "push", "-q", "origin", `c${i}`);
     worktrees.push(join(dir, `wt-${i}`));
@@ -839,6 +839,15 @@ test("classifyPr: failed checks beat pending ones, BLOCKED waits for pending che
   expect(classifyPr(pr({ statusCheckRollup: [{ name: "a", status: "COMPLETED", conclusion: "SKIPPED" }] })).kind).toBe("ready");
 });
 
+function expectReplayFree(stack: ReturnType<typeof makeStack>) {
+  const files = sh(stack.origin, "ls-tree", "--name-only", "main").split("\n");
+  expect(files).toEqual(["base.txt", "f1.txt", "f2.txt", "f3.txt"]);
+  for (const f of files.slice(1)) expect(sh(stack.origin, "show", `main:${f}`)).toBe("b");
+  expect(sh(stack.origin, "rev-list", "--count", "main")).toBe("4");
+  // The rebased c3 holds only its own two commits above main, not the old c1/c2 ones.
+  expect(sh(stack.origin, "rev-list", "--count", "main..c3")).toBe("2");
+}
+
 test("merge: 2 commits per chunk keep the pre-rebase tip, so nothing is replayed", async () => {
   const stack = makeStack(3, 2);
   const gh = fakeGh(stack, 3);
@@ -846,10 +855,7 @@ test("merge: 2 commits per chunk keep the pre-rebase tip, so nothing is replayed
   expect(readState(stack.id).merge).toMatchObject({ status: "done" });
   expect(readState(stack.id).merge?.oldTips).toBeUndefined();
   expect(gh.calls).toEqual(["merge 1", "patch 2 main", "merge 2", "patch 3 main", "merge 3"]);
-  expect(sh(stack.origin, "ls-tree", "--name-only", "main").split("\n")).toEqual(
-    ["base.txt", "f1a.txt", "f1b.txt", "f2a.txt", "f2b.txt", "f3a.txt", "f3b.txt"],
-  );
-  expect(sh(stack.origin, "rev-list", "--count", "main")).toBe("4");
+  expectReplayFree(stack);
 });
 
 test("merge: a resume after #2 merged still rebases #3 from the pre-rebase tip of #2", async () => {
@@ -857,17 +863,15 @@ test("merge: a resume after #2 merged still rebases #3 from the pre-rebase tip o
   const gh = fakeGh(stack, 3);
   gh.prs[3]!.viewFails = true;
   await mergeStack(stack.id, gh.deps);
-  const s = readState(stack.id);
-  expect(s.merge).toMatchObject({ status: "failed", current: "c3" });
+  
+  expect(readState(stack.id).merge).toMatchObject({ status: "failed", current: "c3" });
   expect(chunkStatuses(stack.id)).toEqual(["merged", "merged", "pr"]);
-  expect(Object.keys(s.merge!.oldTips!)).toEqual(["c2"]);
 
   gh.prs[3]!.viewFails = false;
   await mergeStack(stack.id, gh.deps);
   expect(readState(stack.id).merge?.status).toBe("done");
   expect(gh.calls).toEqual(["merge 1", "patch 2 main", "merge 2", "patch 3 main", "merge 3"]);
-  expect(sh(stack.origin, "ls-tree", "--name-only", "main").split("\n")).toHaveLength(7);
-  expect(sh(stack.origin, "rev-list", "--count", "main")).toBe("4");
+  expectReplayFree(stack);
 });
 
 test("merge: commits on GitHub that the worktree lacks stop the rebase before any push", async () => {
