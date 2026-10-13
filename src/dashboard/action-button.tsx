@@ -34,9 +34,9 @@ const ACTIONS: Record<"stopPipeline" | "stopServer" | "delete", ActionDef> = {
     endpoint: "stop",
     icon: Square,
     iconClass: "text-orange-600 dark:text-orange-400",
-    button: "Stop test servers",
-    title: "Stop the test servers?",
-    description: "The test servers stop. The code, branches and PRs stay in place.",
+    button: "Stop preview",
+    title: "Stop the preview?",
+    description: "The preview stops. The code, branches and PRs stay in place.",
     confirm: "Stop",
   },
   delete: {
