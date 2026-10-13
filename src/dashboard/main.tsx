@@ -95,7 +95,7 @@ function App() {
           </p>
         </div>
         <div className="ml-auto flex min-w-0 items-center gap-3">
-          {repos.length > 0 && (
+          {pipelines && (
             <Select value={selected ?? ALL} onValueChange={selectRepo}>
               <SelectTrigger size="sm" className="min-w-0 max-w-40 sm:max-w-64" aria-label="Filter by repo">
                 <SelectValue />
