@@ -100,7 +100,9 @@ For each chunk, in stack order:
 
 Then launch **one subagent per chunk (model `sonnet`), started together** so they run in parallel. Each subagent gets: its worktree path (it works only there), `ticket.md`, `map.md`, `plan.md` (contracts + its chunk), the check commands. It must: implement its chunk against the contracts, make the checks pass, commit, and report what it did. Install dependencies in the worktree if the checks need them.
 
-When all are done, **restack**: in stack order, rebase each chunk branch onto the previous one (`git -C <worktree> rebase <previous branch>`). The last chunk branch is the **top of the stack** and contains the whole feature. Run the checks on the top. With several repos, restack each repo on its own: each repo has its own top. Update each chunk with `--status done`.
+As soon as a subagent reports, run `pipeship chunk <id> <chunk> --status done`. Do not wait for the other chunks: the user follows each chunk live in the dashboard. If the chunk failed, use `--status failed`.
+
+When all are done, **restack**: in stack order, rebase each chunk branch onto the previous one (`git -C <worktree> rebase <previous branch>`). The last chunk branch is the **top of the stack** and contains the whole feature. Run the checks on the top. With several repos, restack each repo on its own: each repo has its own top. If the restack or the checks fail, set the chunks to fix back to `--status coding`.
 
 ## Step 5 — review
 
