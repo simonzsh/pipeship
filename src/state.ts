@@ -47,15 +47,6 @@ export interface Session {
   cwd: string;
 }
 
-// Computed by the dashboard server on read, never written to state.json.
-export type SessionStatus = "active" | "loaded" | "stopped" | "archived" | "deleted" | "unknown";
-export interface SessionState {
-  status: SessionStatus;
-  activity?: "busy" | "idle"; // Claude only, from the session registry
-}
-
-export type PipelineView = State & { sessionState?: SessionState };
-
 export interface State {
   id: string;
   // One pipeline can cover several tickets of the same source.

@@ -1,7 +1,7 @@
 import { CircleDashed, Terminal } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { createRoot } from "react-dom/client";
-import type { PipelineView, Status } from "../state.ts";
+import type { State, Status } from "../state.ts";
 import { Card, CardDescription, CardTitle } from "./components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "./components/ui/select";
 import { PipelineCard } from "./pipeline-card";
@@ -37,7 +37,7 @@ const COUNTED: [Status, string][] = [
 ];
 
 function App() {
-  const [pipelines, setPipelines] = useState<PipelineView[]>();
+  const [pipelines, setPipelines] = useState<State[]>();
   const [repo, setRepo] = useState(() => new URLSearchParams(location.search).get("repo"));
   const [live, setLive] = useState(false);
   const [, tick] = useState(0);
@@ -95,7 +95,7 @@ function App() {
           </p>
         </div>
         <div className="ml-auto flex min-w-0 items-center gap-3">
-          {repos.length > 0 && (
+          {pipelines && (
             <Select value={selected ?? ALL} onValueChange={selectRepo}>
               <SelectTrigger size="sm" className="min-w-0 max-w-40 sm:max-w-64" aria-label="Filter by repo">
                 <SelectValue />

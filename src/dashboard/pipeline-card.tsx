@@ -1,12 +1,12 @@
 import { ChevronDown, FolderGit2, GitMerge } from "lucide-react";
 import { useState, type KeyboardEvent } from "react";
-import type { PipelineView } from "../state.ts";
+import type { State } from "../state.ts";
 import { ActionButton } from "./action-button";
 import { Badge } from "./components/ui/badge";
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "./components/ui/card";
 import { CombinedNote, MergeButton } from "./merge-button";
 import { PreviewPanel } from "./preview-panel";
-import { AgentLogo, isAgentStopped } from "./session";
+import { AgentLogo } from "./session";
 import { StackTree } from "./stack-tree";
 import { StatusBadge } from "./status";
 import { Steps } from "./steps";
@@ -21,7 +21,7 @@ function timeAgo(iso: string): string {
   return `${Math.floor(seconds / 86400)} d ago`;
 }
 
-export function PipelineCard({ p }: { p: PipelineView }) {
+export function PipelineCard({ p }: { p: State }) {
   // Collapsed by default: the test environment and the branches only show once the card is opened.
   const [open, setOpen] = useState(false);
   const hasDetails = p.chunks.length > 0 || p.preview !== undefined;
@@ -91,7 +91,7 @@ export function PipelineCard({ p }: { p: PipelineView }) {
                   <GitMerge /> Merged
                 </Badge>
               )}
-              <StatusBadge status={p.status} agentStopped={isAgentStopped(p)} />
+              <StatusBadge status={p.status} />
             </div>
             {hasDetails && (
               <span className="flex items-center gap-1 text-xs text-muted-foreground">

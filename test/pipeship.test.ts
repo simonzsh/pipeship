@@ -13,7 +13,7 @@ import {
 } from "../src/merge.ts";
 import { spawn, spawnSync } from "node:child_process";
 import { Database } from "bun:sqlite";
-import { detectSession, lockHeld, procStart, sessionState, withSessionState, type ReadProc } from "../src/session.ts";
+import { detectSession, type ReadProc } from "../src/session.ts";
 
 const root = mkdtempSync(join(tmpdir(), "pipeship-test-"));
 process.env.PIPESHIP_HOME = join(root, "home");
@@ -246,65 +246,6 @@ test("claude is matched by CLAUDE_CODE_EXECPATH", () => {
   expect(detectSession({ env: { ...env, CLAUDE_CODE_EXECPATH: "/usr/bin/node" }, startPid: 100, readProc: read, homes })).toBeUndefined();
 });
 
-test.skipIf(process.platform !== "linux")("a claude session is active only while its registry entry matches a live process", () => {
-  const homes = fakeHomes();
-  const entry = (start: unknown) =>
-    writeFileSync(join(homes.claude, "sessions", `${process.pid}.json`), JSON.stringify({ pid: process.pid, sessionId: CLAUDE_ID, procStart: start, status: "busy", cwd: "/w" }));
-  writeFileSync(join(homes.claude, "sessions", `${process.pid}.abc.key`), "not read");
-  const session = { harness: "claude" as const, id: CLAUDE_ID, cwd: "/w" };
-
-  entry(procStart(process.pid));
-  expect(sessionState(session, homes)).toEqual({ status: "active", activity: "busy" });
-
-  entry("1");
-  mkdirSync(join(homes.claude, "projects", "-x"), { recursive: true });
-  writeFileSync(join(homes.claude, "projects", "-x", `${CLAUDE_ID}.jsonl`), "");
-  expect(sessionState(session, homes)).toEqual({ status: "stopped" });
-
-  entry(undefined);
-  expect(sessionState(session, homes)).toEqual({ status: "active", activity: "busy" });
-
-  entry(procStart(process.pid));
-  expect(sessionState(session, homes, { isAlive: () => false })).toEqual({ status: "stopped" });
-
-  rmSync(join(homes.claude, "projects"), { recursive: true });
-  expect(sessionState(session, homes, { isAlive: () => false })).toEqual({ status: "deleted" });
-  expect(sessionState({ ...session, id: "../../etc" }, homes)).toEqual({ status: "unknown" });
-});
-
-test("codex states come from the lock, the threads table and the rollouts", async () => {
-  const homes = fakeHomes();
-  const other = "01a135f8-b528-7c11-9204-49a8a1627a10";
-  const db = new Database(join(homes.codex, "state_5.sqlite"));
-  db.run("CREATE TABLE threads(id TEXT PRIMARY KEY, cwd TEXT, archived INTEGER)");
-  db.run("INSERT INTO threads VALUES (?, '/w', 0)", [CODEX_ID]);
-  db.run("INSERT INTO threads VALUES (?, '/w', 1)", [other]);
-  db.close();
-  const at = (id: string) => sessionState({ harness: "codex", id, cwd: "/w" }, homes);
-  expect(at(CODEX_ID)).toEqual({ status: "stopped" });
-  expect(at(other)).toEqual({ status: "archived" });
-
-  const orphan = "01a135f9-0000-7000-8000-000000000001";
-  expect(at(orphan)).toEqual({ status: "deleted" });
-  mkdirSync(join(homes.codex, "sessions", "2026", "10", "13"), { recursive: true });
-  writeFileSync(join(homes.codex, "sessions", "2026", "10", "13", `rollout-x-${orphan}.jsonl`), "");
-  expect(at(orphan)).toEqual({ status: "stopped" });
-
-  if (process.platform !== "linux" || !Bun.which("flock")) return;
-  mkdirSync(join(homes.codex, "thread-writer-locks"));
-  const lock = join(homes.codex, "thread-writer-locks", `${CODEX_ID}.lock`);
-  writeFileSync(lock, "");
-  expect(lockHeld(lock)).toBe(false);
-  expect(at(CODEX_ID)).toEqual({ status: "stopped" });
-  const child = spawn("flock", [lock, "sleep", "5"], { stdio: "ignore" });
-  try {
-    for (let i = 0; i < 50 && !lockHeld(lock); i++) await Bun.sleep(100);
-    expect(at(CODEX_ID)).toEqual({ status: "loaded" });
-  } finally {
-    child.kill();
-  }
-});
-
 test("pipelines record their session, and old state files without one still load", () => {
   const session = { harness: "codex" as const, id: CODEX_ID, cwd: "/w" };
   const withSession = createPipeline({ repo, title: "t", source: "text", session });
@@ -317,19 +258,6 @@ test("pipelines record their session, and old state files without one still load
   delete old.session;
   writeFileSync(path, JSON.stringify(old));
   expect(readState(plain.id).session).toBeUndefined();
-  expect(withSessionState([readState(plain.id)])[0]).not.toHaveProperty("sessionState");
-});
-
-test("the server never forwards registry secrets", () => {
-  const homes = fakeHomes();
-  writeFileSync(
-    join(homes.claude, "sessions", `${process.pid}.json`),
-    JSON.stringify({ pid: process.pid, sessionId: CLAUDE_ID, procStart: "1", status: "idle", cwd: "/w", peerToken: "secret", messagingSocketPath: "/tmp/secret.sock" }),
-  );
-  const state = createPipeline({ repo, title: "t", source: "text", session: { harness: "claude", id: CLAUDE_ID, cwd: "/w" } });
-  const out = JSON.stringify(withSessionState([state], { homes, now: Date.now() + 61_000 }));
-  expect(out).toContain("sessionState");
-  expect(out).not.toContain("secret");
 });
 
 const svc = (name: string, kind: string, extra: Partial<Service> = {}): Service => ({
