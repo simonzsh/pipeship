@@ -16,7 +16,8 @@ function EmptyState() {
       <div className="flex flex-col gap-1">
         <CardTitle>No pipeline yet</CardTitle>
         <CardDescription>
-          Run <code className="rounded bg-muted px-1.5 py-0.5">/pipeship &lt;ticket&gt;</code> in Claude Code.
+          Run <code className="rounded bg-muted px-1.5 py-0.5">/pipeship:ship &lt;ticket&gt;</code> in Claude Code or{" "}
+          <code className="rounded bg-muted px-1.5 py-0.5">$ship &lt;ticket&gt;</code> in Codex.
         </CardDescription>
       </div>
     </Card>
