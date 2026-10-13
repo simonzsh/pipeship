@@ -100,23 +100,6 @@ function App() {
           </p>
         </div>
         <div className="ml-auto flex min-w-0 items-center gap-3">
-          {pipelines && (
-            <Select value={selected ?? ALL} onValueChange={selectRepo}>
-              <SelectTrigger size="sm" className="min-w-0 max-w-40 sm:max-w-64" aria-label="Filter by repo">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent align="end">
-                <SelectItem value={ALL}>
-                  All repos <span className="text-muted-foreground">{pipelines?.length}</span>
-                </SelectItem>
-                {repos.map(([r, n]) => (
-                  <SelectItem key={r} value={r}>
-                    {shortRepo(r)} <span className="text-muted-foreground">{n}</span>
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          )}
           <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
             <span className={cn("size-2 rounded-full", live ? "bg-emerald-500" : "bg-muted-foreground/40")} />
             {live ? "Live" : "Offline"}
@@ -139,11 +122,29 @@ function App() {
         <div className="flex min-h-0 flex-1">
           <aside
             className={cn(
-              "w-80 shrink-0 overflow-y-auto border-r px-3 py-4 max-[899px]:w-full max-[899px]:border-r-0",
+              "flex w-80 shrink-0 flex-col border-r max-[899px]:w-full max-[899px]:border-r-0",
               detailOnly && "max-[899px]:hidden",
             )}
           >
-            <div className="flex flex-col gap-5">
+            {/* The filter only narrows this list, so it sits on top of it and does not scroll away. */}
+            <div className="border-b px-3 py-3">
+              <Select value={selected ?? ALL} onValueChange={selectRepo}>
+                <SelectTrigger size="sm" className="w-full" aria-label="Filter by repo">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent align="start">
+                  <SelectItem value={ALL}>
+                    All repos <span className="text-muted-foreground">{pipelines?.length}</span>
+                  </SelectItem>
+                  {repos.map(([r, n]) => (
+                    <SelectItem key={r} value={r}>
+                      {shortRepo(r)} <span className="text-muted-foreground">{n}</span>
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="flex min-h-0 flex-1 flex-col gap-5 overflow-y-auto px-3 py-4">
               {groups.map((g) => {
                 const { group, dot, text } = statusConfig(g.status);
                 return (
