@@ -3,6 +3,12 @@ import type { Chunk, MergeRun } from "../state.ts";
 import { Button } from "./components/ui/button";
 import { ChunkStatusIcon } from "./status";
 
+// "#12" for a GitHub PR URL; other hosts keep the plain label.
+const prLabel = (url: string) => {
+  const n = url.match(/\/pull\/(\d+)/)?.[1];
+  return n ? `#${n}` : "PR";
+};
+
 // The stack is linear: each PR targets the previous one, so depth is the index (plus one under the base root).
 export function StackTree({ base, chunks, merge }: { base?: string; chunks: Chunk[]; merge?: MergeRun }) {
   const offset = base ? 1 : 0;
@@ -53,7 +59,7 @@ export function StackTree({ base, chunks, merge }: { base?: string; chunks: Chun
               {c.pr && (
                 <Button asChild variant="ghost" size="sm">
                   <a href={c.pr} target="_blank">
-                    <GitPullRequest /> PR
+                    <GitPullRequest /> {prLabel(c.pr)}
                   </a>
                 </Button>
               )}

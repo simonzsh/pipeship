@@ -81,7 +81,7 @@ export function PipelineCard({ p }: { p: PipelineView }) {
           <div className="flex shrink-0 flex-col items-end gap-2">
             <div className="flex items-center gap-1.5">
               {p.mode === "quick" && (
-                <Badge variant="secondary" className="bg-violet-500/15 text-violet-700 dark:text-violet-400">
+                <Badge variant="secondary" className="bg-pink-500/15 text-pink-700 dark:text-pink-400">
                   Quick
                 </Badge>
               )}
