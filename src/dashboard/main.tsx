@@ -13,6 +13,7 @@ import { Badge } from "./components/ui/badge";
 import { Button } from "./components/ui/button";
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "./components/ui/card";
 import { ThemeToggle } from "./theme";
+import { TicketIcon } from "./ticket-icon";
 import { cn } from "./utils";
 
 const STATUS: Record<Status, { label: string; icon: LucideIcon; className: string }> = {
@@ -182,6 +183,8 @@ function PipelineCard({ p }: { p: State }) {
           <div className="flex min-w-0 flex-col gap-1.5">
             <CardTitle className="truncate">{p.ticket.title}</CardTitle>
             <CardDescription className="flex flex-wrap items-center gap-x-2 gap-y-1">
+              <TicketIcon ticket={p.ticket} />
+              {p.ticket.source === "text" && <span className="font-medium text-foreground">Text</span>}
               {p.ticket.links.map((link) =>
                 link.url ? (
                   <a
@@ -197,7 +200,6 @@ function PipelineCard({ p }: { p: State }) {
                   <span key={link.ref} className="font-medium text-foreground">{link.ref}</span>
                 ),
               )}
-              <span>{p.ticket.source}</span>
               <Badge variant="outline" className="text-muted-foreground">{p.mode}</Badge>
             </CardDescription>
           </div>
