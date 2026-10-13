@@ -147,7 +147,7 @@ You write the recipe; the user never has to. Read `package.json`, the lock file,
 ```
 
 - `start` must honour the port in `portEnv` (e.g. `next dev -p $PORT` if the framework ignores `PORT`).
-- Services the app needs must run in the foreground inside `start`, e.g. `docker compose up db & bun run dev`. pipeship stops the whole process group, so they stop with the app. A detached service (`docker compose up -d`) would outlive the pipeline.
+- Services the app needs must run in the foreground inside `start`, e.g. `docker compose up db & bun run dev`. pipeship stops the whole process group, so they stop with the app. A detached service (`docker compose up -d`) would outlive the pipeline. With `services`, a dependency such as a database can be its own service (`"ready": "tcp"`, `fixedPort` if its port cannot be set).
 - `copyFiles`: untracked local files the app needs (`.env`, `.env.local`…), copied from the main checkout into the worktree. List them with `git -C <repo> status --ignored --short`.
 - Every service is served as `http://localhost:<port>`. Never change the repo's config only for pipeship.
 
@@ -163,7 +163,7 @@ For a monorepo or a front with its own API, list one service per app. `install` 
     { "name": "api", "kind": "back", "start": "pnpm --filter api dev", "portEnv": "API_PORT", "readyPath": "/health" },
     { "name": "web", "kind": "front", "start": "pnpm --filter web exec next dev -p $PORT",
       "env": { "API_URL": "http://localhost:${api.port}" } },
-    { "name": "db", "kind": "infra", "start": "docker compose up db", "fixedPort": 5432 }
+    { "name": "db", "kind": "infra", "start": "docker compose up db", "ready": "tcp", "fixedPort": 5432 }
   ]
 }
 ```
@@ -173,5 +173,5 @@ For a monorepo or a front with its own API, list one service per app. `install` 
 - Never use the repo's global dev command (`turbo dev`, a root `pnpm dev`) when it starts apps on fixed ports.
 - A service gets another service's URL through `env`: `"API_URL": "http://localhost:${api.port}"`.
 - pipeship picks every port first: fronts from 3000, other kinds from 4000 (4400 is skipped).
-- Back ends and other kinds start first, then fronts. Each service must answer on its `readyPath` before the next one starts.
+- Back ends and other kinds start first, then fronts. Each service must answer on its `readyPath` before the next one starts (`"ready": "tcp"` only waits for a connection to its port, for a database or queue).
 - Never change the repo's config only for pipeship. If a port truly cannot be set, write `"fixedPort": <port>`. pipeship then refuses to start a second pipeline of this repo while one runs.

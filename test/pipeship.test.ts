@@ -88,7 +88,7 @@ test("preview starts the app, copies local files, and stop kills it", async () =
   expect(readFileSync(join(worktree, ".env.local"), "utf8")).toBe("SECRET=1");
   expect(await (await fetch(`http://localhost:${state.preview!.port}`)).text()).toBe("hello");
 
-  const pid = state.preview!.pid;
+  const pid = state.preview!.pid!;
   const stopped = await stopPipeline(id);
   expect(stopped.status).toBe("stopped");
   expect(stopped.stopRequested).toBe(true);
@@ -324,7 +324,7 @@ test("the server never forwards registry secrets", () => {
 });
 
 const svc = (name: string, kind: string, extra: Partial<Service> = {}): Service => ({
-  name, kind, start: "true", portEnv: "PORT", readyPath: "/", env: {}, ...extra,
+  name, kind, start: "true", portEnv: "PORT", readyPath: "/", ready: "http", env: {}, ...extra,
 });
 
 test("a dashboard port constant matches the server", () => {
@@ -373,12 +373,21 @@ test("recipe validation errors", () => {
   expect(bad({ services: [{ name: "a", kind: "back" }] })).toThrow('service "a": "start" is required');
   expect(bad({ services: [{ name: "a", start: "x" }] })).toThrow('service "a": "kind" is required');
   expect(bad({ services: [{ ...ok, fixedPort: 70000 }] })).toThrow('service "a": "fixedPort" must be a port number');
+  expect(bad({ services: [ok, { ...ok, name: "b", fixedPort: 5432 }, { ...ok, name: "c", fixedPort: 5432 }] })).toThrow(
+    'service "c": fixed port 5432 is already used by "b"',
+  );
+  expect(bad({ services: [{ ...ok, env: [] }] })).toThrow('service "a": "env" must be an object');
+  expect(bad({ services: [{ ...ok, env: "K=1" }] })).toThrow('service "a": "env" must be an object');
+  expect(bad({ services: ["x"] })).toThrow("r.json: service #1 must be an object");
+  expect(bad({ services: [{ ...ok, readyPath: "health" }] })).toThrow('service "a": "readyPath" must start with "/"');
+  expect(bad({ start: "x", readyPath: "health" })).toThrow('r.json: "readyPath" must start with "/"');
+  expect(bad({ services: [{ ...ok, ready: "udp" }] })).toThrow('service "a": "ready" must be "http" or "tcp"');
   expect(bad({ services: [{ ...ok, env: { K: 1 } }] })).toThrow('service "a": env "K" must be a string');
   expect(bad({ services: [{ ...ok, env: { K: "${nope.port}" } }] })).toThrow('env "K" refers to unknown service "nope"');
   expect(bad({ services: [{ ...ok, env: { K: "${a.port}" } }] })).toThrow('env "K" refers to its own port');
 
   expect(normalizeRecipe({ start: "bun dev" })).toEqual([
-    { name: "app", kind: "front", start: "bun dev", portEnv: "PORT", readyPath: "/", env: {} },
+    { name: "app", kind: "front", start: "bun dev", portEnv: "PORT", readyPath: "/", ready: "http", env: {} },
   ]);
   expect(normalizeRecipe({ services: [{ ...ok, fixedPort: 5432 }] })[0]!.portEnv).toBeUndefined();
 });
@@ -412,7 +421,7 @@ test("a multi-service recipe starts back ends first, wires ports, and stop kills
   expect(previewLines(preview)).toHaveLength(3);
 
   await stopPipeline(id);
-  expect(isAlive(first!.pid) || isAlive(second!.pid)).toBe(false);
+  expect(isAlive(first!.pid!) || isAlive(second!.pid!)).toBe(false);
   expect(readState(id).preview).toBeUndefined();
 }, 30_000);
 
@@ -435,7 +444,7 @@ test("a failed service stops the services already started", async () => {
   expect(readState(id).preview).toBeUndefined();
 }, 30_000);
 
-function fakePreview(id: string, pid: number, extra: object = {}) {
+function fakePreview(id: string, pid: number | undefined, extra: object = {}) {
   updateState(id, (s) => {
     s.preview = { url: "http://localhost:3000", port: 3000, pid, worktree: repo, log: "x", ...extra };
   });
@@ -464,6 +473,80 @@ test("a fixed-port recipe refuses a second live pipeline of the same repo", asyn
     await expect(startPreview(b.id, repo)).rejects.toThrow("live test environment");
   } finally {
     await stopPipeline(a.id);
+    await stopPipeline(b.id);
     if (isAlive(sleeper.pid)) process.kill(sleeper.pid);
   }
+}, 30_000);
+
+test("pickPorts skips reserved ports, fixed ones included", async () => {
+  expect(await pickPorts([svc("web", "front"), svc("api", "back")], async () => true, new Set([3000, 4000, 4001]))).toEqual({ web: 3001, api: 4002 });
+  const db = svc("db", "infra", { fixedPort: 5432, portEnv: undefined });
+  await expect(pickPorts([db], async () => true, new Set([5432]))).rejects.toThrow("fixed port 5432 is already in use");
 });
+
+test("a pipeline still starting blocks a fixed-port recipe", async () => {
+  const a = createPipeline({ repo, title: "a", name: "starting-a", source: "text" });
+  const b = createPipeline({ repo, title: "b", name: "starting-b", source: "text" });
+  fakePreview(a.id, undefined, { services: [{ name: "db", kind: "infra", port: 4999, url: "http://localhost:4999", log: "x" }] });
+  writeFileSync(join(repo, ".pipeship.json"), JSON.stringify({ services: [{ name: "db", kind: "infra", start: "sleep 60", fixedPort: 4998 }] }));
+  await expect(startPreview(b.id, repo)).rejects.toThrow("live test environment");
+});
+
+test("a start avoids the ports another pipeline has planned", async () => {
+  const a = createPipeline({ repo, title: "a", name: "reserve-a", source: "text" });
+  const b = createPipeline({ repo, title: "b", name: "reserve-b", source: "text" });
+  fakePreview(a.id, undefined, { port: 3000, services: [{ name: "app", kind: "front", port: 3000, url: "http://localhost:3000", log: "x" }] });
+  writeFileSync(
+    join(repo, ".pipeship.json"),
+    JSON.stringify({ start: `bun -e "Bun.serve({ port: Number(process.env.PORT), fetch: () => new Response('ok') })"` }),
+  );
+  try {
+    const state = await startPreview(b.id, repo);
+    expect(state.preview!.port).toBe(3001);
+  } finally {
+    await stopPipeline(b.id);
+  }
+}, 30_000);
+
+test("a tcp service is ready once its port accepts connections", async () => {
+  const db = `Bun.listen({ hostname: 'localhost', port: Number(process.env.DB_PORT), socket: { data() {} } }); setInterval(() => {}, 1e6)`;
+  writeFileSync(
+    join(repo, ".pipeship.json"),
+    JSON.stringify({ services: [{ name: "db", kind: "infra", start: `bun -e "${db}"`, portEnv: "DB_PORT", ready: "tcp", readyPath: "/ignored" }] }),
+  );
+  const { id } = createPipeline({ repo, title: "t", source: "text" });
+  try {
+    const state = await startPreview(id, repo);
+    expect(state.status).toBe("ready");
+    expect(state.preview!.services![0]!.pid).toBeDefined();
+  } finally {
+    await stopPipeline(id);
+  }
+}, 30_000);
+
+test("stop during a slow start leaves no service running", async () => {
+  const api = `await Bun.sleep(2000); Bun.serve({ port: Number(process.env.PORT), fetch: () => new Response('api') })`;
+  writeFileSync(
+    join(repo, ".pipeship.json"),
+    JSON.stringify({
+      services: [
+        { name: "api", kind: "back", start: `bun -e "${api}"` },
+        { name: "web", kind: "front", start: "sleep 60" },
+      ],
+    }),
+  );
+  const { id } = createPipeline({ repo, title: "t", source: "text" });
+  const pending = startPreview(id, repo).then(() => undefined, (e: Error) => e);
+  await Bun.sleep(500);
+  const during = readState(id).preview!.services!;
+  await stopPipeline(id);
+  expect(await pending).toBeInstanceOf(Error);
+  const after = readState(id);
+  expect(after.preview).toBeUndefined();
+  expect(after.status).toBe("stopped");
+  // The front service is never spawned, and the back one is dead.
+  expect(during.find((x) => x.name === "web")!.pid).toBeUndefined();
+  expect(isAlive(during.find((x) => x.name === "api")!.pid!)).toBe(false);
+  await Bun.sleep(300);
+  expect(readState(id).preview).toBeUndefined();
+}, 30_000);
