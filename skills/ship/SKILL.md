@@ -51,6 +51,7 @@ Steps: `map`, `questions`, `plan`, `implement`, `review`, `stack`, `preview`.
 2. **Read the ticket** with whatever tool this session has for its source: an MCP server (Linear, Notion, Jira…), `gh issue view`, or fetching the URL. Plain text is the ticket itself. A bare reference like `ABC-123` does not name its source: infer it from the tools you have, and ask if unsure. If no tool can read the source, ask the user to paste the ticket.
 3. The repo is the git root of the current directory. The base branch is the current branch. If the working tree has uncommitted changes, tell the user — they will not be in the worktrees.
 4. `pipeship new ...` with the ticket title, source (`linear`, `notion`, `github`, `jira`, `url`, `text`…), and one `--ref`/`--url` pair per ticket when the pipeline covers several (never join refs into one `--ref`). Note the `id` and `dir` it prints.
+   - For a plain-text ticket, pick a 2 or 3 word name that sums it up (`session-link`, `quick-mode`) and pass it with `--name`. Ticket refs win over the name.
 5. Write the full ticket text to `<dir>/ticket.md`. Later steps read only this file, never the original source.
 6. Run `pipeship dashboard` and give the user the URL.
 
@@ -88,7 +89,7 @@ When this step is skipped (`quick` mode), there is one chunk named after the tic
 For each chunk, in stack order:
 1. Branch `<ticket>/<chunk>`, worktree `<dir>/worktrees/<chunk>`:
    `git -C <repo> worktree add <dir>/worktrees/<chunk> -b <ticket>/<chunk> <base>`
-   - `<ticket>` is the first ticket ref in lowercase (`abc-123`), or 2 or 3 words of the title for a plain-text ticket. Keep chunk names short too (`api`, `ui`, `backfill`): e.g. `abc-123/api`.
+   - `<ticket>` is the first ticket ref in lowercase (`abc-123`), or the 2 or 3 word `--name` for a plain-text ticket. Keep chunk names short too (`api`, `ui`, `backfill`): e.g. `abc-123/api`.
    - If the repo has a branch naming convention (see `map.md`), follow it instead, e.g. `feat/abc-123-api`.
    - If the branch already exists, add `-2`.
 2. `pipeship chunk <id> <chunk> --worktree <path> --branch <branch> --status coding`

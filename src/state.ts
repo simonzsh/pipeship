@@ -53,12 +53,13 @@ function statePath(id: string): string {
 }
 
 function slug(text: string): string {
-  return text.toLowerCase().normalize("NFD").replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 30) || "ticket";
+  return text.toLowerCase().normalize("NFD").replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "ticket";
 }
 
 export function createPipeline(opts: {
   repo: string;
   title: string;
+  name?: string;
   source: string;
   links?: TicketLink[];
   mode?: Mode;
@@ -66,7 +67,9 @@ export function createPipeline(opts: {
 }): State {
   const now = new Date().toISOString();
   const links = opts.links ?? [];
-  const base = `${now.slice(0, 10)}-${slug(links.map((l) => l.ref).join("-") || opts.title)}`;
+  // No date in the id and no length cut: refs and names stay whole, the title gives its first 3 words.
+  const words = opts.title.toLowerCase().normalize("NFD").match(/[a-z0-9]+/g) ?? [];
+  const base = slug(links.map((l) => l.ref).join("-") || opts.name || words.slice(0, 3).join("-"));
   let id = base;
   for (let n = 2; existsSync(pipelineDir(id)); n++) id = `${base}-${n}`;
 

@@ -12,8 +12,9 @@ import {
 
 const USAGE = `pipeship — state, test environments and dashboard for the /pipeship skill
 
-  new --repo <path> --title <text> --source <name> [--ref <id> [--url <url>]]... [--mode full|quick] [--skip a,b]
+  new --repo <path> --title <text> --source <name> [--ref <id> [--url <url>]]... [--name <words>] [--mode full|quick] [--skip a,b]
                                repeat --ref/--url for each ticket; the nth --url belongs to the nth --ref
+                               --name: a 2 or 3 word id for a plain-text ticket; refs win
   get <id>                     print the state (JSON)
   list                         list pipelines
   step <id> <step> <status>    steps: ${STEPS.join(", ")}; status: pending, running, done, skipped, failed
@@ -29,7 +30,7 @@ const USAGE = `pipeship — state, test environments and dashboard for the /pipe
 const { positionals, values } = parseArgs({
   allowPositionals: true,
   options: {
-    repo: { type: "string" }, title: { type: "string" }, source: { type: "string" },
+    repo: { type: "string" }, title: { type: "string" }, name: { type: "string" }, source: { type: "string" },
     ref: { type: "string", multiple: true }, url: { type: "string", multiple: true }, mode: { type: "string" }, skip: { type: "string" },
     worktree: { type: "string" }, branch: { type: "string" }, status: { type: "string" }, pr: { type: "string" },
     port: { type: "string" }, recipe: { type: "string" }, force: { type: "boolean" }, help: { type: "boolean", short: "h" },
@@ -79,6 +80,7 @@ async function main() {
       const state = createPipeline({
         repo: resolve(need(values.repo, "--repo")),
         title: need(values.title, "--title"),
+        name: values.name,
         source: need(values.source, "--source"),
         links: (values.ref ?? []).map((ref, i) => (values.url?.[i] ? { ref, url: values.url[i] } : { ref })),
         mode: (values.mode as Mode) ?? "full",
