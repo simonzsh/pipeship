@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync, writeFileSync, existsSync, readFileSync } from "no
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createPipeline, listStates, readState, setStep, upsertChunk } from "../src/state.ts";
-import { isAlive, startPreview, stopPipeline } from "../src/preview.ts";
+import { findRecipe, isAlive, savedRecipePath, startPreview, stopPipeline } from "../src/preview.ts";
 
 const root = mkdtempSync(join(tmpdir(), "pipeship-test-"));
 process.env.PIPESHIP_HOME = join(root, "home");
@@ -72,4 +72,32 @@ test("preview fails clearly when the server crashes", async () => {
   await expect(startPreview(id, repo)).rejects.toThrow("boom");
   expect(readState(id).preview).toBeUndefined();
   expect(existsSync(join(process.env.PIPESHIP_HOME!, "pipelines", id, "preview.log"))).toBe(true);
+}, 30_000);
+
+test("a draft recipe is saved for the repo only when the app starts", async () => {
+  const draft = join(root, "draft.json");
+  writeFileSync(draft, JSON.stringify({ start: "exit 1" }));
+  const first = createPipeline({ repo, title: "t", source: "text" });
+  await expect(startPreview(first.id, repo, draft)).rejects.toThrow();
+  expect(existsSync(savedRecipePath(repo))).toBe(false);
+
+  writeFileSync(draft, JSON.stringify({ start: `bun -e "Bun.serve({ port: Number(process.env.PORT), fetch: () => new Response('ok') })"` }));
+  await startPreview(first.id, repo, draft);
+  await stopPipeline(first.id);
+  expect(findRecipe(repo)).toBe(savedRecipePath(repo));
+
+  // The next pipeline in the same repo reuses the saved recipe without a draft.
+  const second = createPipeline({ repo, title: "t", source: "text" });
+  const state = await startPreview(second.id, repo);
+  expect(state.status).toBe("ready");
+  await stopPipeline(second.id);
+}, 30_000);
+
+test("the URL falls back to localhost when the app rejects the ticket host", async () => {
+  const strict = `Bun.serve({ port: Number(process.env.PORT), fetch: (r) => r.headers.get('host')?.startsWith('localhost') ? new Response('ok') : new Response('blocked', { status: 403 }) })`;
+  writeFileSync(join(repo, ".pipeship.json"), JSON.stringify({ start: `bun -e "${strict}"` }));
+  const { id } = createPipeline({ repo, title: "t", source: "text", ref: "HOST-1" });
+  const state = await startPreview(id, repo);
+  expect(state.preview!.url).toBe(`http://localhost:${state.preview!.port}`);
+  await stopPipeline(id);
 }, 30_000);

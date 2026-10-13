@@ -24,13 +24,13 @@ The skill runs when you type `/pipeship`, or when you explicitly ask Claude to u
 
 ## Test environment
 
-Add `.pipeship.json` at the root of each repo (the pipeline offers one if it is missing):
+At the end of a pipeline, the app runs from the feature's worktree on a free port from 3100, at `http://<ticket>.localhost:<port>`.
+
+You do not configure anything: on the first pipeline in a repo, Claude reads the project and writes a recipe (install and start commands, port variable, local files to copy). Once the app starts, the recipe is saved in `~/.pipeship/recipes/` and reused. To share a recipe with your team, commit it as `.pipeship.json` at the repo root:
 
 ```json
 { "install": "bun install", "start": "bun run dev", "portEnv": "PORT", "copyFiles": [".env.local"], "readyPath": "/" }
 ```
-
-The app runs on a free port from 3100, at `http://<ticket>.localhost:<port>`.
 
 ## Dashboard
 

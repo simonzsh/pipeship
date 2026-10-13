@@ -2,7 +2,7 @@ import { spawn, spawnSync } from "node:child_process";
 import { copyFileSync, existsSync, mkdirSync, openSync, readFileSync, closeSync } from "node:fs";
 import { createServer } from "node:net";
 import { dirname, join } from "node:path";
-import { pipelineDir, readState, updateState, type State } from "./state.ts";
+import { home, pipelineDir, readState, updateState, type State } from "./state.ts";
 
 export interface Recipe {
   install?: string;
@@ -15,17 +15,20 @@ export interface Recipe {
 const FIRST_PORT = 3100;
 const READY_TIMEOUT_MS = 180_000;
 
-// The recipe may be committed in the branch, or only exist in the main checkout.
-export function readRecipe(worktree: string, repo: string): Recipe {
-  for (const dir of [worktree, repo]) {
-    const path = join(dir, ".pipeship.json");
-    if (existsSync(path)) {
-      const recipe = JSON.parse(readFileSync(path, "utf8")) as Recipe;
-      if (!recipe.start) throw new Error(`${path}: "start" is required`);
-      return recipe;
-    }
-  }
-  throw new Error(`no .pipeship.json in ${worktree} or ${repo}`);
+export function savedRecipePath(repo: string): string {
+  return join(home(), "recipes", `${repo.replace(/^\/+/, "").replace(/[^a-zA-Z0-9.]+/g, "-")}.json`);
+}
+
+// A recipe shared in the repo wins over the one pipeship saved after a successful start.
+export function findRecipe(repo: string, worktree?: string): string | undefined {
+  const shared = [worktree, repo].filter((dir) => dir !== undefined).map((dir) => join(dir, ".pipeship.json"));
+  return [...shared, savedRecipePath(repo)].find(existsSync);
+}
+
+export function loadRecipe(path: string): Recipe {
+  const recipe = JSON.parse(readFileSync(path, "utf8")) as Recipe;
+  if (!recipe.start) throw new Error(`${path}: "start" is required`);
+  return recipe;
 }
 
 function portIsFree(port: number): Promise<boolean> {
@@ -86,12 +89,25 @@ async function waitReady(url: string, pid: number, log: string): Promise<void> {
   throw new Error(`server not ready after ${READY_TIMEOUT_MS / 1000}s. Log tail:\n${tail(log)}`);
 }
 
-export async function startPreview(id: string, worktree: string): Promise<State> {
+// Some dev servers reject unknown hosts (e.g. Vite's allowedHosts) with 400 or 403.
+async function acceptsHost(url: string, host: string): Promise<boolean> {
+  try {
+    const res = await fetch(url, { headers: { Host: host }, redirect: "manual", signal: AbortSignal.timeout(5000) });
+    return res.status !== 400 && res.status !== 403;
+  } catch {
+    return false;
+  }
+}
+
+// `draft` is a recipe written by the agent; it is saved for the repo only once the app starts.
+export async function startPreview(id: string, worktree: string, draft?: string): Promise<State> {
   let state = readState(id);
   if (state.preview && isAlive(state.preview.pid)) await stopPreview(id);
   state = readState(id);
 
-  const recipe = readRecipe(worktree, state.repo);
+  const recipePath = draft ?? findRecipe(state.repo, worktree);
+  if (!recipePath) throw new Error(`no recipe for ${state.repo}: write one and pass it with --recipe`);
+  const recipe = loadRecipe(recipePath);
   for (const file of recipe.copyFiles ?? []) {
     const from = join(state.repo, file);
     const to = join(worktree, file);
@@ -118,14 +134,15 @@ export async function startPreview(id: string, worktree: string): Promise<State>
     });
     child.unref();
     const pid = child.pid!;
-    const url = `http://${hostLabel(state)}.localhost:${port}`;
+    const host = `${hostLabel(state)}.localhost:${port}`;
+    const readyUrl = `http://localhost:${port}${recipe.readyPath ?? "/"}`;
 
     // Save the pid before waiting, so "stop" works even during a slow start.
     updateState(id, (s) => {
-      s.preview = { url, port, pid, worktree, log };
+      s.preview = { url: `http://${host}`, port, pid, worktree, log };
     });
     try {
-      await waitReady(`http://localhost:${port}${recipe.readyPath ?? "/"}`, pid, log);
+      await waitReady(readyUrl, pid, log);
     } catch (err) {
       await killGroup(pid).catch(() => {});
       updateState(id, (s) => {
@@ -133,7 +150,14 @@ export async function startPreview(id: string, worktree: string): Promise<State>
       });
       throw err;
     }
+    if (draft) {
+      const saved = savedRecipePath(state.repo);
+      mkdirSync(dirname(saved), { recursive: true });
+      copyFileSync(draft, saved);
+    }
+    const hostOk = await acceptsHost(readyUrl, host);
     return updateState(id, (s) => {
+      if (!hostOk) s.preview!.url = `http://localhost:${port}`;
       s.status = "ready";
       const step = s.steps.find((x) => x.name === "preview")!;
       step.status = "done";

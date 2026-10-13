@@ -3,7 +3,7 @@ import { spawn } from "node:child_process";
 import { existsSync, mkdirSync, openSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { parseArgs } from "node:util";
-import { isAlive, killGroup, startPreview, stopPipeline } from "./preview.ts";
+import { findRecipe, isAlive, killGroup, loadRecipe, startPreview, stopPipeline } from "./preview.ts";
 import { DEFAULT_PORT, isDashboardUp, serve } from "./server.ts";
 import {
   STEPS, createPipeline, home, listStates, pipelineDir, readState, setStep, updateState, upsertChunk,
@@ -18,7 +18,8 @@ const USAGE = `pipeship — state, test environments and dashboard for the /pipe
   step <id> <step> <status>    steps: ${STEPS.join(", ")}; status: pending, running, done, skipped, failed
   status <id> <status>         running, waiting_for_user, ready, failed, stopped
   chunk <id> <name> [--worktree p] [--branch b] [--status s] [--pr url]
-  preview <id> <worktree>      start the test environment (reads .pipeship.json)
+  recipe <repo>                print the recipe used to start the app, or "none"
+  preview <id> <worktree> [--recipe file]   start the test environment; a --recipe that works is saved for the repo
   stop <id>                    stop the pipeline and its test server
   dashboard [start|stop] [--port n]   start the dashboard in the background (default) or stop it
   serve [--port n]             run the dashboard in the foreground`;
@@ -29,7 +30,7 @@ const { positionals, values } = parseArgs({
     repo: { type: "string" }, title: { type: "string" }, source: { type: "string" },
     ref: { type: "string" }, url: { type: "string" }, mode: { type: "string" }, skip: { type: "string" },
     worktree: { type: "string" }, branch: { type: "string" }, status: { type: "string" }, pr: { type: "string" },
-    port: { type: "string" }, help: { type: "boolean", short: "h" },
+    port: { type: "string" }, recipe: { type: "string" }, help: { type: "boolean", short: "h" },
   },
 });
 const [command, ...args] = positionals;
@@ -103,8 +104,14 @@ async function main() {
       upsertChunk(need(args[0], "<id>"), chunk);
       return print("ok");
     }
+    case "recipe": {
+      const repo = resolve(need(args[0], "<repo>"));
+      const path = findRecipe(repo);
+      return print(path ? { path, recipe: loadRecipe(path) } : "none");
+    }
     case "preview": {
-      const state = await startPreview(need(args[0], "<id>"), resolve(need(args[1], "<worktree>")));
+      const draft = values.recipe ? resolve(values.recipe) : undefined;
+      const state = await startPreview(need(args[0], "<id>"), resolve(need(args[1], "<worktree>")), draft);
       return print(state.preview!.url);
     }
     case "stop":

@@ -164,9 +164,16 @@ Choix et raisons :
 }
 ```
 
-### Recette par repo (proposition)
+### Recette par repo
 
-Un fichier `.pipeship.json` à la racine du repo :
+Décidé le 2026-10-13 : Claude écrit la recette, le programme l'exécute.
+- Au premier pipeline dans un repo, l'étape de cartographie lit le projet et écrit un brouillon de recette.
+- `pipeship preview --recipe` teste le brouillon. Si l'application démarre, il garde la recette dans `~/.pipeship/recipes/`.
+- Les pipelines suivants réutilisent la recette gardée. Je n'écris jamais de recette.
+- Un `.pipeship.json` dans le repo reste possible, pour partager une recette avec l'équipe. Il passe avant la recette gardée.
+- Raison : un LLM trouve bien comment démarrer un projet. La gestion des processus (port, PID, arrêt) doit rester dans un programme fiable.
+
+Format de la recette :
 
 ```json
 {
@@ -218,6 +225,6 @@ Chaque jalon est utilisable seul.
 
 V1 écrite le 2026-10-12 : skill, état, environnement de test, dashboard et bouton « Arrêter ».
 
-1. Choisir un vrai repo et écrire sa recette `.pipeship.json`.
+1. Choisir un vrai repo. Le pipeline écrit lui-même sa recette.
 2. Lancer `/pipeship quick` sur un petit ticket. Noter ce qui casse.
 3. Lancer un pipeline `full` à plusieurs morceaux.

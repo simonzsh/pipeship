@@ -20,7 +20,8 @@ pipeship get <id>                      # read state: check stopRequested and ski
 pipeship step <id> <step> running|done|skipped|failed
 pipeship status <id> waiting_for_user|running|failed
 pipeship chunk <id> <name> [--worktree p] [--branch b] [--status s] [--pr url]
-pipeship preview <id> <worktree>       # starts the app, prints the URL
+pipeship recipe <repo>                 # the saved recipe to start the app, or "none"
+pipeship preview <id> <worktree> [--recipe file]   # starts the app, prints the URL
 pipeship dashboard                     # starts the dashboard if needed, prints its URL
 ```
 
@@ -51,7 +52,7 @@ Subagent (Explore, model `sonnet`). Input: `ticket.md` and the repo. Output: `<d
 - every file the ticket touches (modules, routes, models, UI, tests), with paths and one line on what each does today;
 - repo conventions to follow (structure, naming, test style);
 - the exact **check commands** (lint, typecheck, tests) from the repo config;
-- whether `.pipeship.json` exists at the repo root (see "Test environment recipe").
+- how to start the app: run `pipeship recipe <repo>`. If it prints `none` and the repo has a web app, write a draft recipe to `<dir>/recipe.json` (see "Test environment recipe"). If the repo has no app to run (a library, a CLI), say so.
 
 In `quick` mode, keep the map short: only the files to change.
 
@@ -59,10 +60,9 @@ In `quick` mode, keep the map short: only the files to change.
 
 1. Compare `ticket.md` with `map.md`. List what is missing or ambiguous.
 2. Ask **all questions in one batch**, numbered. Format: "Today the code does X. Question: … Recommended: …". The user answers in one word or corrects.
-3. Add a question if `.pipeship.json` is missing: propose a recipe (see below).
-4. In `full` mode, if the ticket is small (one coherent change), also propose switching to `quick`.
-5. `pipeship status <id> waiting_for_user`, then **stop and wait** for the answers.
-6. When the user answers: append the answers to `ticket.md` under `## Answers`, write the recipe if agreed, then `pipeship step <id> questions done`.
+3. In `full` mode, if the ticket is small (one coherent change), also propose switching to `quick`.
+4. `pipeship status <id> waiting_for_user`, then **stop and wait** for the answers.
+5. When the user answers: append the answers to `ticket.md` under `## Answers`, then `pipeship step <id> questions done`.
 
 In `quick` mode, ask only **blocking** questions. If there are none, mark the step done and continue without a pause.
 
@@ -105,9 +105,11 @@ If the repo has no remote, skip this step and tell the user.
 
 ## Step 7 — preview
 
-`pipeship preview <id> <top worktree>`. It reads `.pipeship.json`, copies local files, installs, starts the app on a free port, waits until it answers, and marks the pipeline `ready`. Give the user the URL.
+If the repo has no app to run, mark this step `skipped`.
 
-If it fails, it prints the log tail: diagnose, fix the recipe or the code, and retry once before asking the user.
+Run `pipeship preview <id> <top worktree>`, with `--recipe <dir>/recipe.json` if step 1 wrote a draft. It copies local files, installs, starts the app on a free port, waits until it answers, and marks the pipeline `ready`. A draft recipe that works is saved, so later pipelines in this repo skip this work. Give the user the URL.
+
+If it fails, it prints the log tail: diagnose, fix the recipe or the code, and retry up to twice before asking the user. To fix the recipe: if `pipeship recipe <repo>` points to a `.pipeship.json` in the repo, fix that file in the top worktree (it will be part of the PRs) and tell the user; otherwise write a fixed draft and pass it with `--recipe`.
 
 ## End
 
@@ -115,7 +117,7 @@ Give the user a short summary: the test URL, the PRs in stack order, and anythin
 
 ## Test environment recipe
 
-`.pipeship.json` at the repo root (committed, or only in the main checkout):
+You write the recipe; the user never has to. Read `package.json`, the lock file, the README and the dev scripts to find the package manager, the dev command and how the app picks its port. A `.pipeship.json` at the repo root, if the team shares one, wins over the saved recipe.
 
 ```json
 {
@@ -128,5 +130,5 @@ Give the user a short summary: the test URL, the PRs in stack order, and anythin
 ```
 
 - `start` must honour the port in `portEnv` (e.g. `next dev -p $PORT` if the framework ignores `PORT`).
-- `copyFiles`: untracked local files (secrets) copied from the repo into the worktree.
-- The app is served as `http://<ticket>.localhost:<port>`. Some dev servers reject unknown hosts (Next.js `allowedDevOrigins`, Vite `server.allowedHosts`): allow `*.localhost`.
+- `copyFiles`: untracked local files the app needs (`.env`, `.env.local`…), copied from the main checkout into the worktree. List them with `git -C <repo> status --ignored --short`.
+- The app is served as `http://<ticket>.localhost:<port>`. Some dev servers reject unknown hosts (Next.js `allowedDevOrigins`, Vite `server.allowedHosts`): pipeship detects this and prints `http://localhost:<port>` instead. Never change the repo's config only for pipeship.
