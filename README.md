@@ -57,6 +57,7 @@ You can also ask in plain words: "ship ABC-123 with pipeship". pipeship writes t
 
 - **Modes**: `full` (default, all 7 steps) and `quick` (one chunk, blocking questions only, map in the main session, one `sonnet` cleanup pass instead of the full review, no `opus`).
 - **`--skip`** removes steps, e.g. `--skip questions,stack`. You can also say "skip the review" during the run.
+- **Several repos**: a ticket can span several repos. Pass `--repo` once per repo, or let the map step find them. All repos are equal. Each repo gets its own stack of PRs.
 - pipeship only starts when you name it. It does not run on ordinary feature requests.
 
 ## Test environment
@@ -82,11 +83,24 @@ This recipe is one front service. For a monorepo, list `services` instead. pipes
 }
 ```
 
-A service that cannot take its port from the environment can set `"fixedPort": <port>`. pipeship then refuses to start a second pipeline of the same repo while one test environment runs.
+For a ticket that spans several repos, give each service its `repo` (the repo's folder name). It runs from the top worktree of that repo. Put `install` and `copyFiles` on the services. The recipe is saved for this set of repos.
+
+```json
+{
+  "services": [
+    { "name": "api", "kind": "back", "repo": "shop-api", "install": "pnpm install", "copyFiles": [".env"],
+      "start": "pnpm dev", "portEnv": "PORT", "readyPath": "/health" },
+    { "name": "web", "kind": "front", "repo": "shop-web", "install": "bun install",
+      "start": "bun run dev --port $PORT", "env": { "API_URL": "http://localhost:${api.port}" } }
+  ]
+}
+```
+
+A service that cannot take its port from the environment can set `"fixedPort": <port>`. pipeship then refuses to start a second pipeline that shares a repo while one test environment runs.
 
 ## Dashboard
 
-The dashboard on http://localhost:4400 lists pipelines live, with their steps, PRs and test URL. It can request a pipeline stop (the agents stop after their current step), stop the test servers, and delete a finished pipeline: its worktrees and files go, its branches and PRs stay. It also merges a finished pipeline's PRs in two steps, one button at a time. The green "Combine PRs" button merges each PR into the branch below, from the top, so one PR is left. The violet "Merge into <base>" button then squash-merges that PR into the base branch, after a confirmation. Both wait for the checks and stop at the first PR that cannot merge, with the reason on the card. When the agent writes a `test.md` guide (the page to open, the steps to follow, what could not be tested), the card shows it under the test URLs, so you can test without leaving the dashboard. Light and dark themes follow your system, with a toggle.
+The dashboard on http://localhost:4400 lists pipelines live, with their steps, PRs and test URL. It can request a pipeline stop (the agents stop after their current step), stop the test servers, and delete a finished pipeline: its worktrees and files go, its branches and PRs stay. It also merges a finished pipeline's PRs in two steps, one button at a time. The green "Combine PRs" button merges each PR into the branch below, from the top, so one PR is left. The violet "Merge into <base>" button then squash-merges that PR into the base branch, after a confirmation. Both wait for the checks and stop at the first PR that cannot merge, with the reason on the card. With several repos, the card shows one stack tree and one Combine/Merge button per repo. Only one merge runs at a time. When the agent writes a `test.md` guide (the page to open, the steps to follow, what could not be tested), the card shows it under the test URLs, so you can test without leaving the dashboard. Light and dark themes follow your system, with a toggle.
 
 Each card shows the logo of the agent that runs the pipeline (Claude Code or Codex). Click it to copy the command that reopens the session in its folder. Pipeship stores the harness, the session id, the folder and the T3 Code thread, never a pid or a token.
 
