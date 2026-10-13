@@ -47,13 +47,9 @@ export async function serve(port = DEFAULT_PORT) {
             headers: { "Cache-Control": "no-store" },
           });
         } catch (err) {
-          const msg = errorMessage(err);
           const body: DiffErrorBody =
-            err instanceof DiffError
-              ? { error: msg, code: err.code }
-              : { error: msg, code: msg.startsWith("unknown pipeline:") ? "not_found" : "git_failed" };
-          const status = err instanceof DiffError ? err.status : body.code === "not_found" ? 404 : 500;
-          return Response.json(body, { status });
+            err instanceof DiffError ? { error: err.message, code: err.code } : { error: errorMessage(err), code: "git_failed" };
+          return Response.json(body, { status: err instanceof DiffError ? err.status : 500 });
         }
       },
       "/api/pipelines/:id/stop": {

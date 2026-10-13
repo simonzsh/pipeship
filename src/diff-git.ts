@@ -1,7 +1,7 @@
 import { existsSync } from "node:fs";
 import { diffTotals, parseDiff, type DiffErrorCode, type DiffResponse } from "./diff.ts";
 import { diffRange, findRepo, repoName } from "./repos.ts";
-import { readState } from "./state.ts";
+import { readState, statePath } from "./state.ts";
 
 export const DIFF_LIMITS = { maxBytes: 5_000_000, maxLinesPerFile: 3000, timeoutMs: 15_000 };
 
@@ -76,13 +76,7 @@ export async function gitDiff(
   } finally {
     clearTimeout(timer);
   }
-  const buf = new Uint8Array(size);
-  let at = 0;
-  for (const p of parts) {
-    buf.set(p, at);
-    at += p.length;
-  }
-  let text = new TextDecoder().decode(buf.subarray(0, Math.min(size, limits.maxBytes)));
+  let text = Buffer.concat(parts).subarray(0, limits.maxBytes).toString("utf8");
   if (truncated) {
     // Cut on a file boundary: a half file would show wrong counts.
     const i = text.lastIndexOf("\ndiff --git ");
@@ -94,6 +88,7 @@ export async function gitDiff(
 export async function pipelineDiff(
   id: string, repoRef: string | null, chunk: string | null, limits = DIFF_LIMITS,
 ): Promise<DiffResponse> {
+  if (!existsSync(statePath(id))) throw fail("not_found", `unknown pipeline: ${id}`);
   const state = readState(id);
   const repo = repoRef ? findRepo(state, repoRef) : state.repos.length === 1 ? state.repos[0] : undefined;
   if (!repo) throw fail("bad_request", repoRef ? `unknown repo: ${repoRef}` : "repo is required");
@@ -103,17 +98,14 @@ export async function pipelineDiff(
   if (!existsSync(repo.path) || (await runGit(repo.path, ["rev-parse", "--git-dir"])).code !== 0) {
     throw fail("no_repo", `${repo.path} is not a git repository`);
   }
-  const refs: string[] = [];
-  for (const branch of [range.from, range.to]) {
-    const ref = await resolveRef(repo.path, branch);
-    if (!ref) throw fail("missing_ref", `branch "${branch}" not found in ${name}`);
-    refs.push(ref);
-  }
+  const refs = await Promise.all([range.from, range.to].map((b) => resolveRef(repo.path, b)));
+  const missing = refs.findIndex((r) => !r);
+  if (missing >= 0) throw fail("missing_ref", `branch "${[range.from, range.to][missing]}" not found in ${name}`);
   const { text, truncated } = await gitDiff(repo.path, refs[0]!, refs[1]!, limits);
   const files = parseDiff(text, { maxLinesPerFile: limits.maxLinesPerFile });
   const { additions, deletions } = diffTotals(files);
   return {
-    repo: repo.path, name, chunk, from: range.from, to: range.to, range: refs.map(shortRef).join("..."),
+    repo: repo.path, name, chunk, from: range.from, to: range.to, range: refs.map((r) => shortRef(r!)).join("..."),
     files, additions, deletions, truncated,
   };
 }

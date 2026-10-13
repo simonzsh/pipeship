@@ -105,7 +105,7 @@ export function pipelineDir(id: string): string {
   return join(home(), "pipelines", id);
 }
 
-function statePath(id: string): string {
+export function statePath(id: string): string {
   return join(pipelineDir(id), "state.json");
 }
 

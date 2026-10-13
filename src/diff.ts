@@ -136,8 +136,8 @@ export function parseDiff(text: string, opts: ParseOptions = {}): DiffFile[] {
     const finish = () => {
       if (!file) return;
       const f = file;
-      const oldP = renameFrom ?? minusPath ?? (f.status === "added" ? "" : hdrOld);
-      const newP = renameTo ?? plusPath ?? (f.status === "deleted" ? "" : hdrNew);
+      const oldP = renameFrom ?? minusPath ?? hdrOld;
+      const newP = renameTo ?? plusPath ?? hdrNew;
       if (minusPath === "" && !renameFrom) f.status = "added";
       if (plusPath === "" && !renameTo) f.status = "deleted";
       f.oldPath = f.status === "added" ? "" : oldP;
