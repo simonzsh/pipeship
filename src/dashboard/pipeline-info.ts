@@ -1,5 +1,5 @@
 import type { State } from "../state.ts";
-import type { DotStatus } from "./steps";
+import type { DisplayStep } from "./steps";
 
 export function timeAgo(iso: string, now = Date.now()): string {
   const seconds = Math.round((now - new Date(iso).getTime()) / 1000);
@@ -9,12 +9,26 @@ export function timeAgo(iso: string, now = Date.now()): string {
   return `${Math.floor(seconds / 86400)} d ago`;
 }
 
-// A running step of a pipeline that waits for the user shows as "waiting".
-export function displaySteps(p: Pick<State, "steps" | "status">): { name: string; status: DotStatus }[] {
-  return p.steps.map((s) => ({
-    name: s.name,
-    status: s.status === "running" && p.status === "waiting_for_user" ? ("waiting" as const) : s.status,
-  }));
+// "4m32" under an hour, "1h04" above.
+export function formatElapsed(startedAt: string, now = Date.now()): string {
+  const seconds = Math.max(0, Math.floor((now - new Date(startedAt).getTime()) / 1000));
+  const pad = (n: number) => String(n).padStart(2, "0");
+  if (seconds < 60) return `${seconds}s`;
+  if (seconds < 3600) return `${Math.floor(seconds / 60)}m${pad(seconds % 60)}`;
+  return `${Math.floor(seconds / 3600)}h${pad(Math.floor((seconds % 3600) / 60))}`;
+}
+
+// A running step of a pipeline that waits for the user shows as "waiting" and carries the question.
+export function displaySteps(p: Pick<State, "steps" | "status"> & Partial<Pick<State, "waitingFor">>): DisplayStep[] {
+  return p.steps.map((s) => {
+    const waiting = s.status === "running" && p.status === "waiting_for_user";
+    return {
+      name: s.name,
+      status: waiting ? ("waiting" as const) : s.status,
+      startedAt: s.startedAt,
+      note: waiting ? p.waitingFor : undefined,
+    };
+  });
 }
 
 export function allMerged(p: Pick<State, "chunks">): boolean {
