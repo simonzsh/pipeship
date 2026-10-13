@@ -10,6 +10,11 @@ Feature pipeline for Claude Code. Give it a ticket or an issue from any source; 
 
 Modes: `full` (default, all 7 steps) and `quick` (one chunk, blocking questions only). `--skip` removes steps; you can also say "skip the review" during the run.
 
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/dashboard-dark.png">
+  <img alt="The pipeship dashboard: one card per pipeline with its status, steps, test URL and stacked PRs" src="docs/dashboard-light.png" width="720">
+</picture>
+
 ## Install
 
 Requires [Bun](https://bun.sh), git and `gh`. From the repo root, install the dependencies and link the skill into your Claude Code skills:
