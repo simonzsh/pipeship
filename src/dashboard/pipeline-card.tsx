@@ -1,4 +1,4 @@
-import { ChevronDown, FolderGit2, GitMerge } from "lucide-react";
+import { ChevronDown, FolderGit2, GitMerge, Zap } from "lucide-react";
 import { useState, type KeyboardEvent } from "react";
 import type { DashboardState } from "../state.ts";
 import { ActionButton } from "./action-button";
@@ -8,7 +8,7 @@ import { CombinedNote, MergeButton } from "./merge-button";
 import { PreviewPanel } from "./preview-panel";
 import { AgentLogo } from "./session";
 import { StackTree } from "./stack-tree";
-import { StatusBadge } from "./status";
+import { statusConfig, StatusBadge } from "./status";
 import { Steps } from "./steps";
 import { TicketIcon } from "./ticket-icon";
 import { cn } from "./utils";
@@ -46,11 +46,16 @@ export function PipelineCard({ p }: { p: DashboardState }) {
       setOpen(!open);
     },
   };
+  const { tint, hover } = statusConfig(p.status);
   return (
     <Card className="gap-0 overflow-hidden py-0">
       {/* The header and the steps toggle the card. */}
       <div
-        className={cn("flex flex-col gap-5 py-5", hasDetails && "cursor-pointer transition-colors hover:bg-accent")}
+        className={cn(
+          "flex flex-col gap-5 py-5",
+          tint,
+          hasDetails && cn("cursor-pointer transition-colors", hover),
+        )}
         {...(hasDetails && toggle)}
       >
         <CardHeader>
@@ -80,12 +85,12 @@ export function PipelineCard({ p }: { p: DashboardState }) {
           </div>
           <div className="flex shrink-0 flex-col items-end gap-2">
             <div className="flex items-center gap-1.5">
+              <AgentLogo p={p} />
               {p.mode === "quick" && (
                 <Badge variant="secondary" className="bg-pink-500/15 text-pink-700 dark:text-pink-400">
-                  Quick
+                  <Zap /> Quick
                 </Badge>
               )}
-              <AgentLogo p={p} />
               {allMerged && (
                 <Badge variant="secondary" className="bg-violet-500/15 text-violet-700 dark:text-violet-400">
                   <GitMerge /> Merged

@@ -2,13 +2,78 @@ import { CheckCircle2, GitMerge, Loader2, MessageCircleQuestion, Square, XCircle
 import type { Status } from "../state.ts";
 import { Badge } from "./components/ui/badge";
 
-const STATUS: Record<Status, { label: string; icon: LucideIcon; className: string }> = {
-  running: { label: "Running", icon: Loader2, className: "bg-blue-500/10 text-blue-600 dark:text-blue-400 [&>svg]:animate-spin" },
-  waiting_for_user: { label: "Waiting for you", icon: MessageCircleQuestion, className: "bg-amber-500/15 text-amber-700 dark:text-amber-400" },
-  ready: { label: "Ready to test", icon: CheckCircle2, className: "bg-emerald-500/15 text-emerald-700 dark:text-emerald-400" },
-  failed: { label: "Failed", icon: XCircle, className: "bg-red-500/15 text-red-700 dark:text-red-400" },
-  stopped: { label: "Stopped", icon: Square, className: "bg-muted text-muted-foreground" },
+type StatusConfig = {
+  label: string;
+  icon: LucideIcon;
+  badge: string;
+  tint: string;
+  // Only on clickable cards: a deeper shade of the tint, so hover keeps the status colour.
+  hover: string;
+  dot: string;
+  text: string;
+  group: string;
 };
+
+// One entry per status. The key order is the group order on the dashboard (most urgent first).
+const STATUS: Record<Status, StatusConfig> = {
+  waiting_for_user: {
+    label: "Waiting for you",
+    icon: MessageCircleQuestion,
+    badge: "bg-amber-500/20 text-amber-800 ring-1 ring-inset ring-amber-500/40 dark:text-amber-300",
+    tint: "bg-amber-500/5",
+    hover: "hover:bg-amber-500/10",
+    dot: "bg-amber-500",
+    text: "text-amber-700 dark:text-amber-400",
+    group: "Waiting",
+  },
+  ready: {
+    label: "Ready to test",
+    icon: CheckCircle2,
+    badge: "bg-emerald-500/20 text-emerald-800 ring-1 ring-inset ring-emerald-500/40 dark:text-emerald-300",
+    tint: "bg-emerald-500/5",
+    hover: "hover:bg-emerald-500/10",
+    dot: "bg-emerald-500",
+    text: "text-emerald-700 dark:text-emerald-400",
+    group: "Ready for testing",
+  },
+  running: {
+    label: "Running",
+    icon: Loader2,
+    badge: "bg-blue-500/20 text-blue-800 ring-1 ring-inset ring-blue-500/40 dark:text-blue-300 [&>svg]:animate-spin",
+    tint: "bg-blue-500/5",
+    hover: "hover:bg-blue-500/10",
+    dot: "bg-blue-500",
+    text: "text-blue-700 dark:text-blue-400",
+    group: "In progress",
+  },
+  failed: {
+    label: "Failed",
+    icon: XCircle,
+    badge: "bg-red-500/20 text-red-800 ring-1 ring-inset ring-red-500/40 dark:text-red-300",
+    tint: "bg-red-500/5",
+    hover: "hover:bg-red-500/10",
+    dot: "bg-red-500",
+    text: "text-red-700 dark:text-red-400",
+    group: "Failed",
+  },
+  stopped: {
+    label: "Stopped",
+    icon: Square,
+    badge: "bg-muted text-muted-foreground ring-1 ring-inset ring-border",
+    tint: "bg-muted/40",
+    hover: "hover:bg-muted",
+    dot: "bg-muted-foreground/60",
+    text: "text-muted-foreground",
+    group: "Stopped",
+  },
+};
+
+export const STATUS_ORDER = Object.keys(STATUS) as Status[];
+
+// A hand-edited state.json can hold any string: like groupByStatus, fall back to the last status.
+export function statusConfig(status: string): StatusConfig {
+  return STATUS[status as Status] ?? STATUS[STATUS_ORDER[STATUS_ORDER.length - 1]!];
+}
 
 // A chunk's status is free text from the skill: "done", "pr", "merged" and "failed" are final, anything else is in progress.
 // "merging" comes from the dashboard while a merge runs on that chunk: violet, so it does not look like an agent coding.
@@ -27,9 +92,9 @@ function chunkIcon(status: string, label: string) {
 }
 
 export function StatusBadge({ status }: { status: Status }) {
-  const { label, icon: Icon, className } = STATUS[status];
+  const { label, icon: Icon, badge } = statusConfig(status);
   return (
-    <Badge variant="secondary" className={className}>
+    <Badge variant="secondary" className={badge}>
       <Icon /> {label}
     </Badge>
   );

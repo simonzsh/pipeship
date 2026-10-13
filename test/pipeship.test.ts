@@ -14,6 +14,7 @@ import {
 import { spawn, spawnSync } from "node:child_process";
 import { Database } from "bun:sqlite";
 import { detectSession, type ReadProc } from "../src/session.ts";
+import { groupByStatus } from "../src/dashboard/groups.ts";
 
 const root = mkdtempSync(join(tmpdir(), "pipeship-test-"));
 process.env.PIPESHIP_HOME = join(root, "home");
@@ -1060,4 +1061,25 @@ test("setMode quick sets the mode and skips only pending quick steps; full only 
   expect(readState(running.id).steps.find((s) => s.name === "plan")!.status).toBe("running");
 
   expect(() => setMode(p.id, "fast" as never)).toThrow("unknown mode: fast");
+});
+
+test("groupByStatus orders groups, hides empty ones and keeps the order inside a group", () => {
+  const order = ["waiting_for_user", "ready", "running", "failed", "stopped"];
+  const items = [
+    { id: "a", status: "running" },
+    { id: "b", status: "stopped" },
+    { id: "c", status: "waiting_for_user" },
+    { id: "d", status: "running" },
+    { id: "e", status: "waiting_for_user" },
+  ];
+  const groups = groupByStatus(items, order);
+  expect(groups.map((g) => g.status)).toEqual(["waiting_for_user", "running", "stopped"]);
+  expect(groups[0]!.items.map((i) => i.id)).toEqual(["c", "e"]);
+  expect(groups[1]!.items.map((i) => i.id)).toEqual(["a", "d"]);
+  expect(groupByStatus([], order)).toEqual([]);
+});
+
+test("groupByStatus puts an unknown status in the last group", () => {
+  const groups = groupByStatus([{ status: "weird" }, { status: "ready" }, { status: "stopped" }], ["ready", "stopped"]);
+  expect(groups.map((g) => [g.status, g.items.length])).toEqual([["ready", 1], ["stopped", 2]]);
 });
