@@ -1,6 +1,6 @@
 # pipeship
 
-Feature pipeline for Claude Code and Codex. Give it a ticket or an issue from any source; it maps the code, asks its questions in one batch, plans, implements chunks in parallel worktrees, cleans up the code, opens stacked PRs, and starts the app so you can test it at a URL.
+Feature pipeline for Claude Code and Codex. Give it a ticket or an issue from any source; it maps the code, asks its questions in one batch, plans, implements chunks in parallel worktrees, cleans up the code, opens stacked PRs, and starts the app so you can test it at a URL. It works with [T3 Code](https://github.com/pingdotgg/t3code): each pipeline links back to its T3 Code thread.
 
 ## Install
 
@@ -90,7 +90,11 @@ The dashboard on http://localhost:4400 lists pipelines live, with their steps, P
 
 Each card shows the logo of the agent that runs the pipeline (Claude Code or Codex). Click it to copy the command that reopens the session in its folder. Pipeship stores the harness, the session id, the folder and the T3 Code thread, never a pid or a token.
 
-When the session runs in [T3 Code](https://github.com/pingdotgg/t3code), the card also shows a link that opens its thread in the T3 Code desktop app (`t3code://threads/<environmentId>/<threadId>`, T3 Code 0.0.46 or later). `pipeship new` finds the thread in T3 Code's local database (`$T3CODE_HOME`, default `~/.t3`), read-only; `pipeship step` looks again until it is found.
+### T3 Code
+
+pipeship recognizes when a session runs in [T3 Code](https://github.com/pingdotgg/t3code). The card then shows a **T3** button next to the agent logo. Click it to open that pipeline's session in the T3 Code desktop app (`t3code://threads/<environmentId>/<threadId>`, T3 Code 0.0.46 or later). Each pipeline opens its own thread, so you can jump from the dashboard to the right conversation.
+
+`pipeship new` finds the thread in T3 Code's local database (`$T3CODE_HOME`, default `~/.t3`), read-only; `pipeship step` looks again until it is found. Without T3 Code, the card has no T3 button and nothing else changes.
 
 The pipeline starts the dashboard for you. To start or stop it yourself, use `/pipeship:dashboard` and `/pipeship:dashboard stop` in Claude Code, or `$dashboard` and `$dashboard stop` in Codex (from a terminal: `scripts/pipeship dashboard [stop]`). Stopping it leaves the pipelines and their test servers running.
 
@@ -100,7 +104,7 @@ State lives in `~/.pipeship/pipelines/<id>/` (`state.json`, `ticket.md`, `map.md
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/dashboard-dark.png">
-  <img alt="The pipeship dashboard: one card per pipeline with its status, steps, test URL and stacked PRs" src="docs/dashboard-light.png" width="720">
+  <img alt="The pipeship dashboard: one card per pipeline with its status, steps, T3 Code link, test URL and stacked PRs" src="docs/dashboard-light.png" width="720">
 </picture>
 
 ## Develop
