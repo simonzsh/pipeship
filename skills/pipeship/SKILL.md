@@ -50,7 +50,7 @@ Steps: `map`, `questions`, `plan`, `implement`, `review`, `stack`, `preview`.
 
 Subagent (Explore, model `sonnet`). Input: `ticket.md` and the repo. Output: `<dir>/map.md` with:
 - every file the ticket touches (modules, routes, models, UI, tests), with paths and one line on what each does today;
-- repo conventions to follow (structure, naming, test style);
+- repo conventions to follow (structure, naming, test style, branch names from recent `git branch -r`);
 - the exact **check commands** (lint, typecheck, tests) from the repo config;
 - how to start the app: run `pipeship recipe <repo>`. If it prints `none` and the repo has a web app, write a draft recipe to `<dir>/recipe.json` (see "Test environment recipe"). If the repo has no app to run (a library, a CLI), say so.
 
@@ -78,8 +78,11 @@ When this step is skipped (`quick` mode), there is one chunk named after the tic
 ## Step 4 — implement
 
 For each chunk, in stack order:
-1. Branch `pipeship/<id>/<chunk>`, worktree `<dir>/worktrees/<chunk>`:
-   `git -C <repo> worktree add <dir>/worktrees/<chunk> -b pipeship/<id>/<chunk> <base>`
+1. Branch `<ticket>/<chunk>`, worktree `<dir>/worktrees/<chunk>`:
+   `git -C <repo> worktree add <dir>/worktrees/<chunk> -b <ticket>/<chunk> <base>`
+   - `<ticket>` is the first ticket ref in lowercase (`abc-123`), or 2 or 3 words of the title for a plain-text ticket. Keep chunk names short too (`api`, `ui`, `backfill`): e.g. `abc-123/api`.
+   - If the repo has a branch naming convention (see `map.md`), follow it instead, e.g. `feat/abc-123-api`.
+   - If the branch already exists, add `-2`.
 2. `pipeship chunk <id> <chunk> --worktree <path> --branch <branch> --status coding`
 
 Then launch **one subagent per chunk (model `sonnet`), all in the same message** so they run in parallel. Each subagent gets: its worktree path (it works only there), `ticket.md`, `map.md`, `plan.md` (contracts + its chunk), the check commands. It must: implement its chunk against the contracts, make the checks pass, commit, and report what it did. Install dependencies in the worktree if the checks need them.
