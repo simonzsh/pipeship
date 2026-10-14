@@ -75,16 +75,32 @@ export function statusConfig(status: string): StatusConfig {
   return STATUS[status as Status] ?? STATUS[STATUS_ORDER[STATUS_ORDER.length - 1]!];
 }
 
-// A chunk's status is free text from the skill: "done", "pr", "merged" and "failed" are final, anything else is in progress.
+// A chunk's status is free text from the skill: "done", "merged" and "failed" are final, anything else is in progress.
 // "merging" comes from the dashboard while a merge runs on that chunk: violet, so it does not look like an agent coding.
+const NO_ACTIVITY = ["done", "merged", "failed", "merging"];
+
+// The label next to the spinner while an agent works on the chunk: "Coding…" at implement, "Cleaning…" at review.
+export function chunkActivity(status: string): string | undefined {
+  if (NO_ACTIVITY.includes(status)) return undefined;
+  return `${status.charAt(0).toUpperCase()}${status.slice(1)}…`;
+}
+
 export function ChunkStatusIcon({ status, title }: { status: string; title?: string }) {
   const icon = chunkIcon(status, title ?? status);
+  const activity = chunkActivity(status);
+  if (activity) {
+    return (
+      <span className="inline-flex items-center gap-1.5 text-xs text-muted-foreground" title={title}>
+        {icon} {activity}
+      </span>
+    );
+  }
   // A title attribute on an <svg> shows no tooltip: the wrapper carries it.
   return title ? <span title={title} className="inline-flex">{icon}</span> : icon;
 }
 
 function chunkIcon(status: string, label: string) {
-  if (status === "done" || status === "pr") return <CheckCircle2 className="size-4 text-emerald-600 dark:text-emerald-400" aria-label={label} />;
+  if (status === "done") return <CheckCircle2 className="size-4 text-emerald-600 dark:text-emerald-400" aria-label={label} />;
   if (status === "merged") return <GitMerge className="size-4 text-violet-600 dark:text-violet-400" aria-label={label} />;
   if (status === "failed") return <XCircle className="size-4 text-red-600 dark:text-red-400" aria-label={label} />;
   if (status === "merging") return <Loader2 className="size-4 animate-spin text-violet-600 dark:text-violet-400" aria-label={label} />;
