@@ -1,11 +1,10 @@
-import { Loader2, MoreHorizontal, Play, Square, Trash2, type LucideIcon } from "lucide-react";
+import { Loader2, Play, Square, Trash2, type LucideIcon } from "lucide-react";
 import { useState } from "react";
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription,
   AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger,
 } from "./components/ui/alert-dialog";
 import { Button } from "./components/ui/button";
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "./components/ui/dropdown-menu";
 import type { State } from "../state.ts";
 import { finished } from "./pipeline-info";
 import { postAction } from "./utils";
@@ -56,24 +55,27 @@ const ACTIONS: Record<"stopPipeline" | "stopServer" | "delete", ActionDef> = {
 
 type ActionName = keyof typeof ACTIONS;
 
-// The confirmation dialog, driven from outside so a menu item can open it.
-function ActionDialog({ id, action, hasServers, open, onOpenChange }: {
-  id: string; action: ActionName; hasServers?: boolean; open: boolean; onOpenChange: (open: boolean) => void;
-}) {
-  const { endpoint, title, description, serversNote, confirm } = ACTIONS[action];
+// Test servers usually start at the last step: only mention them when some exist.
+function ActionButton({ id, action, hasServers }: { id: string; action: ActionName; hasServers?: boolean }) {
+  const { endpoint, icon: Icon, iconClass, button, title, description, serversNote, confirm } = ACTIONS[action];
   const [error, setError] = useState<string>();
   const run = async () => {
     setError(undefined);
     setError(await postAction(id, endpoint));
   };
   return (
-    <AlertDialog open={open} onOpenChange={onOpenChange}>
+    <AlertDialog>
+      {error && <span className="text-xs text-destructive">{error}</span>}
+      <AlertDialogTrigger asChild>
+        <Button variant="outline" size="xs">
+          <Icon className={iconClass} /> {button}
+        </Button>
+      </AlertDialogTrigger>
       <AlertDialogContent>
         <AlertDialogHeader>
           <AlertDialogTitle>{title}</AlertDialogTitle>
           <AlertDialogDescription>{hasServers && serversNote ? `${description} ${serversNote}` : description}</AlertDialogDescription>
         </AlertDialogHeader>
-        {error && <p className="text-xs text-destructive">{error}</p>}
         <AlertDialogFooter>
           <AlertDialogCancel>Cancel</AlertDialogCancel>
           <AlertDialogAction onClick={run}>{confirm}</AlertDialogAction>
@@ -83,41 +85,16 @@ function ActionDialog({ id, action, hasServers, open, onOpenChange }: {
   );
 }
 
-// The "⋯" menu of a pipeline: stop and delete. Renders nothing when no action applies.
-export function ActionsMenu({ p, merging, starting }: { p: State; merging: boolean; starting: boolean }) {
-  const [pending, setPending] = useState<ActionName>();
-  const items: ActionName[] = [];
+// The stop and delete buttons of a pipeline. Renders nothing when no action applies.
+export function PipelineActions({ p, merging, starting }: { p: State; merging: boolean; starting: boolean }) {
+  const actions: ActionName[] = [];
   if (p.status === "ready") {
-    if (p.preview && !starting) items.push("stopServer");
+    if (p.preview && !starting) actions.push("stopServer");
   } else if (p.status === "running" || p.status === "waiting_for_user" || (p.status === "failed" && p.preview)) {
-    items.push("stopPipeline");
+    actions.push("stopPipeline");
   }
-  if (!merging && finished(p)) items.push("delete");
-  if (items.length === 0) return null;
-  return (
-    <>
-      <DropdownMenu>
-        <DropdownMenuTrigger asChild>
-          <Button variant="ghost" size="icon-xs" aria-label="Pipeline actions">
-            <MoreHorizontal />
-          </Button>
-        </DropdownMenuTrigger>
-        <DropdownMenuContent align="end">
-          {items.map((name) => {
-            const { icon: Icon, iconClass, button } = ACTIONS[name];
-            return (
-              <DropdownMenuItem key={name} onSelect={() => setPending(name)}>
-                <Icon className={iconClass} /> {button}
-              </DropdownMenuItem>
-            );
-          })}
-        </DropdownMenuContent>
-      </DropdownMenu>
-      {pending && (
-        <ActionDialog id={p.id} action={pending} hasServers={!!p.preview} open onOpenChange={(open) => !open && setPending(undefined)} />
-      )}
-    </>
-  );
+  if (!merging && finished(p)) actions.push("delete");
+  return actions.map((name) => <ActionButton key={name} id={p.id} action={name} hasServers={!!p.preview} />);
 }
 
 // No confirm dialog: starting loses nothing. The POST returns at once, so the label follows the preview too.

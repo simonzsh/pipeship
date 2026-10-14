@@ -19,6 +19,7 @@ export interface DisplayStep {
   name: string;
   status: DotStatus;
   startedAt?: string;
+  duration?: string; // time a finished step took
   note?: string; // shown under a waiting step: the question to answer
 }
 
@@ -72,6 +73,7 @@ export function Steps({ steps, compact }: { steps: DisplayStep[]; compact?: bool
               <Elapsed since={step.startedAt} />
             </span>
           )}
+          {step.duration && <span className="text-[11px] tabular-nums text-muted-foreground/70">{step.duration}</span>}
           {step.status === "waiting" && step.note && (
             <span className="text-center text-[11px] leading-tight font-medium text-amber-700 dark:text-amber-400">{step.note}</span>
           )}

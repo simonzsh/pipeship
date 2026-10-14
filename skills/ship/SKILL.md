@@ -36,7 +36,7 @@ pipeship preview <id> [<worktree>] [--recipe file]   # starts the app, prints th
 pipeship dashboard                     # starts the dashboard if needed, prints its URL
 ```
 
-Steps: `map`, `questions`, `plan`, `implement`, `review`, `stack`, `preview`.
+Steps: `explore`, `questions`, `plan`, `implement`, `review`, `stack`, `preview`.
 
 ## Rules
 
@@ -55,36 +55,36 @@ Steps: `map`, `questions`, `plan`, `implement`, `review`, `stack`, `preview`.
 
 1. Parse the arguments (if `$ARGUMENTS` is empty or was not replaced, use the user's request): an optional mode (`quick` or `full`, default `full`), an optional `--skip a,b`, and the ticket (reference, URL or text).
 2. **Read the ticket** with whatever tool this session has for its source: an MCP server (Linear, Notion, Jira…), `gh issue view`, or fetching the URL. Plain text is the ticket itself. A bare reference like `ABC-123` does not name its source: infer it from the tools you have, and ask if unsure. If no tool can read the source, ask the user to paste the ticket.
-3. The repos are the git root of the current directory, plus any repo the user names. If the current directory is not in a git repo, run `new` without `--repo`: the map step adds the repos. The base branch of each repo is its current branch. If a working tree has uncommitted changes, tell the user — they will not be in the worktrees.
+3. The repos are the git root of the current directory, plus any repo the user names. If the current directory is not in a git repo, run `new` without `--repo`: the explore step adds the repos. The base branch of each repo is its current branch. If a working tree has uncommitted changes, tell the user — they will not be in the worktrees.
 4. `pipeship new ...` with one `--repo <path>` per repo, the ticket title, the source (`linear`, `notion`, `github`, `jira`, `url`…; omit `--source` for a plain-text ticket), and one `--ref`/`--url` pair per ticket when the pipeline covers several (never join refs into one `--ref`). `new --repo` and `repo` reduce a path to its git root and refuse a path outside git. Note the `id` and `dir` it prints. It lists each repo with its `base` and `dirty`: tell the user about dirty repos. `pipeship new` records the session that runs it (harness, id, cwd). Run it from this orchestrator session, never from a subagent.
    - For a plain-text ticket, pick a 2 or 3 word name that sums it up (`session-link`, `quick-mode`) and pass it with `--name`. Ticket refs win over the name.
 5. Write the full ticket text to `<dir>/ticket.md`. Later steps read only this file, never the original source.
 6. Run `pipeship dashboard` and give the user the URL.
 
-## Step 1 — map
+## Step 1 — explore
 
-Subagent (read-only, model `sonnet`; Claude Code: `Explore` type). Input: `ticket.md` and the repos. Output: `<dir>/map.md` with:
+Subagent (read-only, model `sonnet`; Claude Code: `Explore` type). Input: `ticket.md` and the repos. Output: `<dir>/explore.md` with:
 - `## Repos`: other repos the ticket touches, when it names them or sibling git repos in the parent folder of each repo's git root match its code. Give the path and the reason. The subagent stays read-only: you run `pipeship repo <id> <path>` for each one and tell the user about dirty repos;
 - every file the ticket touches (modules, routes, models, UI, tests), with paths and one line on what each does today (per repo, when there are several);
 - repo conventions to follow (structure, naming, test style, branch names from recent `git branch -r`), per repo;
 - the exact **check commands** (lint, typecheck, tests) from each repo config;
 - how to start the app: run `pipeship recipe <repo>...` with all the repos. If it prints `none` and the repo has anything that serves requests (a web app, an API, an MCP server, a worker with a health route), write a draft recipe to `<dir>/recipe.json` (see "Test environment recipe"). If the repo runs several apps (a monorepo, a front and an API), the recipe lists one service per app. Back-end only changes count: do not conclude "no preview needed" because the change has no UI. Say "nothing to run" only for a pure library, a CLI that cannot start, or a docs-only change. List what the app needs to run (database, env files, seed data, other services) and how to get test data locally.
 
-In `quick` mode, do the map yourself in the main session, not in a subagent: on a small ticket a subagent costs as much as the work. Keep the map short: only the files to change, the check commands and how to start the app.
+In `quick` mode, do the exploration yourself in the main session, not in a subagent: on a small ticket a subagent costs as much as the work. Keep `explore.md` short: only the files to change, the check commands and how to start the app.
 
 ## Step 2 — questions (human pause)
 
-1. Compare `ticket.md` with `map.md`. List what is missing or ambiguous. With several repos, ask the user to confirm the repo list. The plan and the chunks start only once the list is fixed.
+1. Compare `ticket.md` with `explore.md`. List what is missing or ambiguous. With several repos, ask the user to confirm the repo list. The plan and the chunks start only once the list is fixed.
 2. Ask **all questions in one batch**, numbered. Format: "Today the code does X. Question: … Recommended: …". The user answers in one word or corrects.
 3. In `full` mode, if the ticket is small (one coherent change), also propose switching to `quick`. When the user accepts, run `pipeship mode <id> quick` so the dashboard shows the badge.
 4. `pipeship wait <id> questions --reason "<n> questions to answer"`, then **stop and wait** for the answers.
 5. When the user answers: append the answers to `ticket.md` under `## Answers`, then `pipeship step <id> questions done`.
 
-In `quick` mode, ask only **blocking** questions. When the map step added repos, the repo list is a blocking question. If there are none, mark the step done and continue without a pause.
+In `quick` mode, ask only **blocking** questions. When the explore step added repos, the repo list is a blocking question. If there are none, mark the step done and continue without a pause.
 
 ## Step 3 — plan
 
-Subagent (model `opus`; Claude Code: `Plan` type). Input: `ticket.md`, `map.md`. Output: `<dir>/plan.md` with:
+Subagent (model `opus`; Claude Code: `Plan` type). Input: `ticket.md`, `explore.md`. Output: `<dir>/plan.md` with:
 1. **Contracts first**: the types, API routes and data formats shared between chunks. Fixed contracts are what make chunks independent. Write the contracts between repos once, here.
 2. **Chunks**: independent pieces of work, each with its repo, its files and its done criteria. Chunk names are unique across the pipeline. Do not split for nothing — a small ticket is one chunk; every split adds integration risk.
 3. **Stack order** by dependency: contracts, then back end, then front end. Each repo has its own stack order.
@@ -97,11 +97,11 @@ For each chunk, in stack order:
 1. Branch `<ticket>/<chunk>`, worktree `<dir>/worktrees/<chunk>`:
    `git -C <chunk's repo> worktree add <dir>/worktrees/<chunk> -b <ticket>/<chunk> <that repo's base>`
    - `<ticket>` is the first ticket ref in lowercase (`abc-123`), or the 2 or 3 word `--name` for a plain-text ticket. Keep chunk names short too (`api`, `ui`, `backfill`): e.g. `abc-123/api`.
-   - If the repo has a branch naming convention (see `map.md`), follow it instead, e.g. `feat/abc-123-api`.
+   - If the repo has a branch naming convention (see `explore.md`), follow it instead, e.g. `feat/abc-123-api`.
    - If the branch already exists, add `-2`.
 2. `pipeship chunk <id> <chunk> --worktree <path> --branch <branch> --status coding`. With several repos, add `--repo <name>`.
 
-Then launch **one subagent per chunk (model `sonnet`), started together** so they run in parallel. Each subagent gets: its worktree path (it works only there), `ticket.md`, `map.md`, `plan.md` (contracts + its chunk), the check commands. It must: implement its chunk against the contracts, make the checks pass, commit, and report what it did. Install dependencies in the worktree if the checks need them.
+Then launch **one subagent per chunk (model `sonnet`), started together** so they run in parallel. Each subagent gets: its worktree path (it works only there), `ticket.md`, `explore.md`, `plan.md` (contracts + its chunk), the check commands. It must: implement its chunk against the contracts, make the checks pass, commit, and report what it did. Install dependencies in the worktree if the checks need them.
 
 As soon as a subagent reports, run `pipeship chunk <id> <chunk> --status done`. Do not wait for the other chunks: the user follows each chunk live in the dashboard. If the chunk failed, use `--status failed`.
 

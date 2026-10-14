@@ -2,14 +2,14 @@ import { ArrowLeft, FolderGit2, GitMerge, Loader2, Zap } from "lucide-react";
 import { useState } from "react";
 import { repoName, repoStacks } from "../repos.ts";
 import type { DashboardState } from "../state.ts";
-import { ActionsMenu, StartPreviewButton } from "./action-button";
+import { PipelineActions, StartPreviewButton } from "./action-button";
 import { CodeTab, type DiffTarget } from "./code-tab";
 import { Badge } from "./components/ui/badge";
 import { Button } from "./components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "./components/ui/tabs";
 import { CombinedNote, MergeButton } from "./merge-button";
 import { allMerged, displaySteps, finished, timeAgo } from "./pipeline-info";
-import { PreviewPanel } from "./preview-panel";
+import { NoPreviewPanel, PreviewPanel } from "./preview-panel";
 import { AgentLogo, T3ThreadButton } from "./session";
 import { StackTree } from "./stack-tree";
 import { StatusBadge } from "./status";
@@ -81,22 +81,27 @@ export function PipelineDetail({ p, onBack }: { p: DashboardState; onBack: () =>
           <ArrowLeft /> Pipelines
         </Button>
         <div className="flex flex-col gap-2">
-          <div className="flex items-start justify-between gap-4 max-[599px]:flex-col">
-            <h2 className="min-w-0 text-lg font-semibold leading-tight">{p.ticket.title}</h2>
+          <div className="flex items-center justify-between gap-4 max-[599px]:flex-col max-[599px]:items-start">
+            {/* A long title is cut so the badges stay on its line. */}
+            <div className="flex min-w-0 max-w-full items-center gap-3">
+              <h2 className="min-w-0 truncate text-lg font-semibold leading-tight" title={p.ticket.title}>{p.ticket.title}</h2>
+              <div className="flex shrink-0 items-center gap-2">
+                <StatusBadge status={p.status} />
+                {p.mode === "quick" && (
+                  <Badge variant="secondary" className="bg-pink-500/15 text-pink-700 dark:text-pink-400">
+                    <Zap /> Quick
+                  </Badge>
+                )}
+                {allMerged(p) && (
+                  <Badge variant="secondary" className="bg-violet-500/15 text-violet-700 dark:text-violet-400">
+                    <GitMerge /> Merged
+                  </Badge>
+                )}
+              </div>
+            </div>
             <div className="flex shrink-0 flex-wrap items-center gap-2">
-              <StatusBadge status={p.status} />
-              {p.mode === "quick" && (
-                <Badge variant="secondary" className="bg-pink-500/15 text-pink-700 dark:text-pink-400">
-                  <Zap /> Quick
-                </Badge>
-              )}
-              {allMerged(p) && (
-                <Badge variant="secondary" className="bg-violet-500/15 text-violet-700 dark:text-violet-400">
-                  <GitMerge /> Merged
-                </Badge>
-              )}
               {p.status === "ready" && (!p.preview || starting) && <StartPreviewButton id={p.id} starting={starting} />}
-              <ActionsMenu p={p} merging={merging} starting={starting} />
+              <PipelineActions p={p} merging={merging} starting={starting} />
             </div>
           </div>
           <div className="flex items-center justify-between gap-4 max-[599px]:flex-col max-[599px]:items-start">
@@ -124,7 +129,7 @@ export function PipelineDetail({ p, onBack }: { p: DashboardState; onBack: () =>
               )}
               <span className="whitespace-nowrap">· updated {timeAgo(p.updatedAt)}</span>
             </div>
-            <div className="flex shrink-0 flex-wrap items-center gap-2">
+            <div className="flex shrink-0 flex-wrap items-center gap-1">
               {p.session?.t3Thread && <T3ThreadButton thread={p.session.t3Thread} />}
               <AgentLogo p={p} />
             </div>
@@ -158,9 +163,8 @@ export function PipelineDetail({ p, onBack }: { p: DashboardState; onBack: () =>
                 Preview failed: <span className="line-clamp-3 whitespace-pre-wrap break-words font-mono text-xs">{p.previewError}</span>
               </p>
             )}
-            {p.preview && <PreviewPanel preview={p.preview} />}
+            {p.preview ? <PreviewPanel preview={p.preview} /> : !p.previewError && <NoPreviewPanel />}
             {p.testGuide && <TestGuide guide={p.testGuide} />}
-            {!p.preview && !p.testGuide && !p.previewError && <p className="text-sm text-muted-foreground">No test environment yet</p>}
           </TabsContent>
           {/* The code tab pads its own rows. */}
           <TabsContent value="code">
