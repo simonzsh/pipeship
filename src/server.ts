@@ -4,7 +4,14 @@ import { DiffError, pipelineDiff } from "./diff-git.ts";
 import type { DiffErrorBody } from "./diff.ts";
 import { startPrSync } from "./pr-sync.ts";
 import { listDashboardStates, readState } from "./state.ts";
-import { deletePipeline, isPreviewStarting, PreviewError, requestPreviewStart, stopPipeline, stopPreview } from "./preview.ts";
+import {
+  archivePipeline,
+  deletePipeline, isPreviewStarting,
+  PreviewError,
+  requestPreviewStart,
+  stopPipeline,
+  stopPreviewAndSettle,
+} from "./preview.ts";
 
 export const DEFAULT_PORT = 4400;
 
@@ -63,6 +70,16 @@ export async function serve(port = DEFAULT_PORT, opts: { prSync?: boolean } = {}
           }
         },
       },
+      "/api/pipelines/:id/archive": {
+        POST: async (req) => {
+          try {
+            return Response.json(await archivePipeline(req.params.id));
+          } catch (err) {
+            const status = err instanceof PreviewError ? err.status : 500;
+            return Response.json({ error: errorMessage(err) }, { status });
+          }
+        },
+      },
       "/api/pipelines/:id/preview/start": {
         POST: async (req) => {
           try {
@@ -73,12 +90,11 @@ export async function serve(port = DEFAULT_PORT, opts: { prSync?: boolean } = {}
           }
         },
       },
-      // Unlike /stop, the pipeline keeps its status: only the test servers go.
+      // Unlike /stop, only the test servers go: a ready pipeline becomes done.
       "/api/pipelines/:id/preview/stop": {
         POST: async (req) => {
           try {
-            await stopPreview(req.params.id);
-            return Response.json(readState(req.params.id));
+            return Response.json(await stopPreviewAndSettle(req.params.id));
           } catch (err) {
             return Response.json({ error: errorMessage(err) }, { status: 500 });
           }

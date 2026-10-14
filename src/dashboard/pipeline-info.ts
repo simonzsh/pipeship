@@ -38,5 +38,5 @@ export function allMerged(p: Pick<State, "chunks">): boolean {
 }
 
 export function finished(p: Pick<State, "status">): boolean {
-  return p.status === "ready" || p.status === "failed" || p.status === "stopped";
+  return p.status === "ready" || p.status === "done" || p.status === "failed" || p.status === "archived";
 }

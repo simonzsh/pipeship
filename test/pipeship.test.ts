@@ -7,8 +7,8 @@ import {
 } from "../src/state.ts";
 import { chunksOf, diffRange, repoName, repoStacks, sharesRepo, topChunk } from "../src/repos.ts";
 import {
-  DASHBOARD_PORT, deletePipeline, findRecipe, isAlive, mainService, normalizeRecipe, pickPorts, previewLines, resolveEnv,
-  requestPreviewStart, savedRecipePath, startOrder, startPreview, stopPipeline, stopPreview, type Service,
+  archivePipeline, DASHBOARD_PORT, deletePipeline, findRecipe, isAlive, mainService, normalizeRecipe, pickPorts, previewLines, resolveEnv,
+  requestPreviewStart, savedRecipePath, startOrder, startPreview, stopPipeline, stopPreview, stopPreviewAndSettle, type Service,
 } from "../src/preview.ts";
 import { diffTotals, parseDiff } from "../src/diff.ts";
 import { DiffError, gitDiff, pipelineDiff, resolveRef } from "../src/diff-git.ts";
@@ -64,12 +64,19 @@ test("steps and chunks update the state", () => {
   expect(() => setStep(id, "nope" as never, "done")).toThrow("unknown step");
 });
 
-test("the pipeline is ready once every step is done or skipped", () => {
+test("the pipeline is done once every step is done or skipped, and ready when a preview runs", () => {
   const { id } = createPipeline({ repos: [{ path: repo }], title: "t", source: "text", skip: ["preview"] });
   for (const name of ["explore", "questions", "plan", "implement", "review"] as const) setStep(id, name, "done");
   expect(readState(id).status).toBe("running");
   setStep(id, "stack", "done");
-  expect(readState(id).status).toBe("ready");
+  expect(readState(id).status).toBe("done");
+
+  const withPreview = createPipeline({ repos: [{ path: repo }], title: "p", source: "text", skip: ["preview"] }).id;
+  updateState(withPreview, (s) => {
+    s.preview = { url: "http://localhost:1", port: 1, pid: 1, log: "x", repo, worktree: repo } as never;
+  });
+  for (const name of ["explore", "questions", "plan", "implement", "review", "stack"] as const) setStep(withPreview, name, "done");
+  expect(readState(withPreview).status).toBe("ready");
 });
 
 test("a step run again loses the end of its previous run", () => {
@@ -118,11 +125,11 @@ test("preview starts the app, copies local files, and stop kills it", async () =
 
   const pid = state.preview!.pid!;
   const stopped = await stopPipeline(id);
-  expect(stopped.status).toBe("stopped");
+  expect(stopped.status).toBe("done");
   expect(stopped.stopRequested).toBe(true);
   expect(isAlive(pid)).toBe(false);
 
-  // A stopped pipeline can start its test environment again.
+  // A done pipeline can start its test environment again.
   const again = await startPreview(id, worktree);
   expect(await (await fetch(again.preview!.url)).text()).toBe("hello");
   await stopPipeline(id);
@@ -181,7 +188,7 @@ test("delete removes the worktrees and files, keeps the branch, and protects unc
 
   await expect(deletePipeline(id)).rejects.toThrow("stop the pipeline");
   updateState(id, (s) => {
-    s.status = "ready";
+    s.status = "done";
   });
   writeFileSync(join(wt, "draft.ts"), "work in progress");
   await expect(deletePipeline(id)).rejects.toThrow("uncommitted changes");
@@ -554,7 +561,7 @@ test("stop during a slow start leaves no service running", async () => {
   expect(await pending).toBeInstanceOf(Error);
   const after = readState(id);
   expect(after.preview).toBeUndefined();
-  expect(after.status).toBe("stopped");
+  expect(after.status).toBe("done");
   // The front service is never spawned, and the back one is dead.
   expect(during.find((x) => x.name === "web")!.pid).toBeUndefined();
   expect(isAlive(during.find((x) => x.name === "api")!.pid!)).toBe(false);
@@ -838,7 +845,7 @@ test("merge: stale runs are failed unless their process is alive; delete waits f
   const { id } = createPipeline({ repos: [{ path: repo }], title: "stale" });
   const now = new Date().toISOString();
   updateState(id, (s) => {
-    s.status = "stopped";
+    s.status = "archived";
     s.merge = { status: "running", mode: "base", repo, pid: 999_999, startedAt: now, updatedAt: now };
   });
   failStaleMerges(() => true);
@@ -1137,24 +1144,24 @@ test("setMode quick sets the mode and skips only pending quick steps; full only 
 });
 
 test("groupByStatus orders groups, hides empty ones and keeps the order inside a group", () => {
-  const order = ["waiting_for_user", "ready", "running", "failed", "stopped"];
+  const order = ["waiting_for_user", "ready", "running", "failed", "archived"];
   const items = [
     { id: "a", status: "running" },
-    { id: "b", status: "stopped" },
+    { id: "b", status: "archived" },
     { id: "c", status: "waiting_for_user" },
     { id: "d", status: "running" },
     { id: "e", status: "waiting_for_user" },
   ];
   const groups = groupByStatus(items, order);
-  expect(groups.map((g) => g.status)).toEqual(["waiting_for_user", "running", "stopped"]);
+  expect(groups.map((g) => g.status)).toEqual(["waiting_for_user", "running", "archived"]);
   expect(groups[0]!.items.map((i) => i.id)).toEqual(["c", "e"]);
   expect(groups[1]!.items.map((i) => i.id)).toEqual(["a", "d"]);
   expect(groupByStatus([], order)).toEqual([]);
 });
 
 test("groupByStatus puts an unknown status in the last group", () => {
-  const groups = groupByStatus([{ status: "weird" }, { status: "ready" }, { status: "stopped" }], ["ready", "stopped"]);
-  expect(groups.map((g) => [g.status, g.items.length])).toEqual([["ready", 1], ["stopped", 2]]);
+  const groups = groupByStatus([{ status: "weird" }, { status: "ready" }, { status: "archived" }], ["ready", "archived"]);
+  expect(groups.map((g) => [g.status, g.items.length])).toEqual([["ready", 1], ["archived", 2]]);
 });
 
 // --- Several repos ---
@@ -1447,7 +1454,7 @@ test("delete removes the worktrees of every repo", async () => {
   sh(a, "worktree", "add", "-q", "-b", "t/a1", wtA);
   sh(b, "worktree", "add", "-q", "-b", "t/b1", wtB);
   updateState(id, (s) => {
-    s.status = "stopped";
+    s.status = "archived";
   });
   await deletePipeline(id);
   expect(existsSync(pipelineDir(id))).toBe(false);
@@ -1697,7 +1704,9 @@ test("allMerged and finished", () => {
   expect(allMerged({ chunks: [{ name: "a", pr: "u", status: "merged" }] as never })).toBe(true);
   expect(allMerged({ chunks: [{ name: "a", pr: "u", status: "merged" }, { name: "b", pr: "v", status: "done" }] as never })).toBe(false);
   expect(finished({ status: "ready" })).toBe(true);
+  for (const status of ["done", "failed", "archived"] as const) expect(finished({ status })).toBe(true);
   expect(finished({ status: "running" })).toBe(false);
+  expect(finished({ status: "waiting_for_user" })).toBe(false);
 });
 
 test("chunkActivity labels the chunks an agent works on", () => {
@@ -1786,20 +1795,20 @@ test("displaySteps gives a finished step the time it took", () => {
   expect(displaySteps({ steps, status: "running" }).map((s) => s.duration)).toEqual(["4m32", "42s", undefined, undefined]);
 });
 
-// A ready pipeline with a chunk worktree, so the preview routes can start it (no worktree argument).
-function readyPipeline(recipe: object) {
+// A done pipeline with a chunk worktree, so the preview routes can start it (no worktree argument).
+function donePipeline(recipe: object) {
   const wt = mkdtempSync(join(root, "wt-"));
   writeFileSync(join(wt, ".pipeship.json"), JSON.stringify(recipe));
   const { id } = createPipeline({ repos: [{ path: repo }], title: "t", source: "text" });
   upsertChunk(id, { name: "c", branch: "c", worktree: wt });
-  setStatus(id, "ready");
+  setStatus(id, "done");
   return id;
 }
 
 const SERVER = { start: 'bun -e "Bun.serve({ port: Number(process.env.PORT), fetch: () => new Response(\'ok\') })"' };
 
-test("preview/start and preview/stop keep the pipeline ready", async () => {
-  const id = readyPipeline(SERVER);
+test("preview/start makes the pipeline ready and preview/stop makes it done again", async () => {
+  const id = donePipeline(SERVER);
   const server = await serve(0);
   const post = (action: string) => fetch(`http://localhost:${server.port}/api/pipelines/${id}/preview/${action}`, { method: "POST" });
   try {
@@ -1809,13 +1818,14 @@ test("preview/start and preview/stop keep the pipeline ready", async () => {
     const up = readState(id);
     const pid = up.preview!.services![0]!.pid!;
     expect(isAlive(pid)).toBe(true);
-    expect(up.status).toBe("ready");
+    for (let i = 0; i < 50 && readState(id).status !== "ready"; i++) await Bun.sleep(100);
+    expect(readState(id).status).toBe("ready");
     expect(up.previewError).toBeUndefined();
 
     const res = await post("stop");
     expect(res.status).toBe(200);
     const stopped = readState(id);
-    expect(stopped.status).toBe("ready");
+    expect(stopped.status).toBe("done");
     expect(stopped.stopRequested).toBe(false);
     expect(stopped.preview).toBeUndefined();
     expect(isAlive(pid)).toBe(false);
@@ -1830,8 +1840,8 @@ async function stopPreviewQuiet(id: string) {
 }
 
 test("preview/start answers 409 when not ready or already starting", async () => {
-  const slow = readyPipeline({ start: `bun -e "await Bun.sleep(1500); Bun.serve({ port: Number(process.env.PORT), fetch: () => new Response('ok') })"` });
-  const idle = readyPipeline(SERVER);
+  const slow = donePipeline({ start: `bun -e "await Bun.sleep(1500); Bun.serve({ port: Number(process.env.PORT), fetch: () => new Response('ok') })"` });
+  const idle = donePipeline(SERVER);
   setStatus(idle, "running");
   const server = await serve(0);
   const post = async (id: string) => {
@@ -1853,10 +1863,10 @@ test("preview/start answers 409 when not ready or already starting", async () =>
 }, 30_000);
 
 test("a failed start records previewError and the next start clears it", async () => {
-  const id = readyPipeline({ start: "echo boom; exit 1" });
+  const id = donePipeline({ start: "echo boom; exit 1" });
   await requestPreviewStart(id).done;
   expect(readState(id).previewError).toMatch(/boom/);
-  expect(readState(id).status).toBe("ready");
+  expect(readState(id).status).toBe("done");
 
   writeFileSync(join(readState(id).chunks[0]!.worktree!, ".pipeship.json"), JSON.stringify(SERVER));
   const run = requestPreviewStart(id);
@@ -1871,15 +1881,85 @@ test("a failed start records previewError and the next start clears it", async (
 }, 30_000);
 
 test("a stop during a start is not recorded as previewError", async () => {
-  const id = readyPipeline({ start: `bun -e "await Bun.sleep(2000); Bun.serve({ port: Number(process.env.PORT), fetch: () => new Response('ok') })"` });
+  const id = donePipeline({ start: `bun -e "await Bun.sleep(2000); Bun.serve({ port: Number(process.env.PORT), fetch: () => new Response('ok') })"` });
   const run = requestPreviewStart(id);
   await Bun.sleep(500);
   await stopPreview(id);
   await run.done;
   expect(readState(id).previewError).toBeUndefined();
   expect(readState(id).preview).toBeUndefined();
-  expect(readState(id).status).toBe("ready");
+  expect(readState(id).status).toBe("done");
 }, 30_000);
+
+test("archive is refused unless the pipeline is done or failed", async () => {
+  const id = donePipeline(SERVER);
+  const server = await serve(0);
+  const post = (pid: string) => fetch(`http://localhost:${server.port}/api/pipelines/${pid}/archive`, { method: "POST" });
+  try {
+    // A ready pipeline needs a preview: upgrade() turns a previewless "ready" into "done".
+    updateState(id, (s) => {
+      s.preview = { url: "http://localhost:1", port: 1, pid: 1, log: "x", repo, worktree: repo } as never;
+    });
+    for (const status of ["running", "ready", "archived"] as const) {
+      setStatus(id, status);
+      expect((await post(id)).status).toBe(409);
+      expect(readState(id).status).toBe(status);
+    }
+    expect((await post("nope")).status).toBe(404);
+    setStatus(id, "done");
+    expect((await post(id)).status).toBe(200);
+    expect(readState(id).status).toBe("archived");
+  } finally {
+    server.stop(true);
+  }
+  await expect(archivePipeline(id)).rejects.toThrow("only a done or failed");
+});
+
+test("archiving a failed pipeline stops its preview", async () => {
+  const id = donePipeline(SERVER);
+  await requestPreviewStart(id).done;
+  const pid = readState(id).preview!.services![0]!.pid!;
+  expect(isAlive(pid)).toBe(true);
+  setStatus(id, "failed");
+  try {
+    const archived = await archivePipeline(id);
+    expect(archived.status).toBe("archived");
+    expect(archived.preview).toBeUndefined();
+    expect(isAlive(pid)).toBe(false);
+  } finally {
+    await stopPreviewQuiet(id);
+  }
+}, 30_000);
+
+test("a done pipeline starts its preview, becomes ready, and is done again once the preview stops", async () => {
+  const id = donePipeline(SERVER);
+  try {
+    await requestPreviewStart(id).done;
+    expect(readState(id).status).toBe("ready");
+    expect(readState(id).preview).toBeDefined();
+    expect((await stopPreviewAndSettle(id)).status).toBe("done");
+    expect(readState(id).preview).toBeUndefined();
+  } finally {
+    await stopPreviewQuiet(id);
+  }
+}, 30_000);
+
+test("old state files get the new statuses", () => {
+  const write = (id: string, patch: object) => {
+    const path = join(process.env.PIPESHIP_HOME!, "pipelines", id, "state.json");
+    writeFileSync(path, JSON.stringify({ ...JSON.parse(readFileSync(path, "utf8")), ...patch }));
+  };
+  const make = () => createPipeline({ repos: [{ path: repo }], title: "t", source: "text" }).id;
+  const stopped = make();
+  const readyIdle = make();
+  const readyWithPreview = make();
+  write(stopped, { status: "stopped" });
+  write(readyIdle, { status: "ready" });
+  write(readyWithPreview, { status: "ready", preview: { url: "http://localhost:1", port: 1, pid: 1, log: "x", repo, worktree: repo } });
+  expect(readState(stopped).status).toBe("archived");
+  expect(readState(readyIdle).status).toBe("done");
+  expect(readState(readyWithPreview).status).toBe("ready");
+});
 
 // The PR sync scans every pipeline in PIPESHIP_HOME: each sync test gets an empty home of its own.
 function syncTest(name: string, fn: () => Promise<void>) {

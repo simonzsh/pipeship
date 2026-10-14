@@ -534,7 +534,7 @@ export function requestPreviewStart(id: string): { state: State; done: Promise<v
   } catch (err) {
     throw new PreviewError((err as Error).message, 404);
   }
-  if (state.status !== "ready") throw new PreviewError("the pipeline is not ready: no preview to start", 409);
+  if (state.status !== "done") throw new PreviewError("the pipeline is not done: no preview to start", 409);
   if (startsInFlight.has(id)) throw new PreviewError("a preview is already starting", 409);
   // Before the guard is set: a throw here must not leave the id marked in flight.
   const cleared = updateState(id, (s) => {
@@ -565,8 +565,33 @@ export async function stopPipeline(id: string): Promise<State> {
   });
   await stopPreview(id);
   return updateState(id, (s) => {
-    s.status = "stopped";
+    s.status = "done";
     delete s.waitingFor;
+  });
+}
+
+// The "Stop preview" button: a ready pipeline goes back to done. Other statuses stay.
+export async function stopPreviewAndSettle(id: string): Promise<State> {
+  await stopPreview(id);
+  return updateState(id, (s) => {
+    if (s.status === "ready") s.status = "done";
+  });
+}
+
+// Archived is final: only Delete remains.
+export async function archivePipeline(id: string): Promise<State> {
+  let state: State;
+  try {
+    state = readState(id);
+  } catch (err) {
+    throw new PreviewError((err as Error).message, 404);
+  }
+  if (state.status !== "done" && state.status !== "failed") {
+    throw new PreviewError(`only a done or failed pipeline can be archived (status: ${state.status})`, 409);
+  }
+  await stopPreview(id);
+  return updateState(id, (s) => {
+    s.status = "archived";
   });
 }
 

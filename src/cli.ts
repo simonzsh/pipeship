@@ -3,12 +3,12 @@ import { spawn } from "node:child_process";
 import { existsSync, mkdirSync, openSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { parseArgs } from "node:util";
-import { deletePipeline, findRecipe, git, isAlive, killGroup, loadRecipe, previewLines, startPreview, stopPipeline } from "./preview.ts";
+import { archivePipeline, deletePipeline, findRecipe, git, isAlive, killGroup, loadRecipe, previewLines, startPreview, stopPipeline } from "./preview.ts";
 import { repoName } from "./repos.ts";
 import { detectSession, findT3Thread } from "./session.ts";
 import { DEFAULT_PORT, isDashboardUp, serve } from "./server.ts";
 import {
-  STEPS, addRepo, createPipeline, home, listStates, pipelineDir, readState, setMode, setStatus, setStep, updateState, upsertChunk,
+  STATUSES, STEPS, addRepo, createPipeline, home, listStates, pipelineDir, readState, setMode, setStatus, setStep, updateState, upsertChunk,
   waitForUser,
   type ChunkInput, type Mode, type Status, type StepName, type StepStatus,
 } from "./state.ts";
@@ -26,7 +26,7 @@ const USAGE = `pipeship — state, test environments and dashboard for the /pipe
   mode <id> quick|full         switch the mode; quick also skips the pending steps quick skips
   wait <id> <step> [--reason <text>]   pause for the user on this step: the step runs, the pipeline waits;
                                --reason is the question, shown on the dashboard card
-  status <id> <status>         running, waiting_for_user, ready, failed, stopped; waiting_for_user needs a running step
+  status <id> <status>         ${STATUSES.join(", ")}; waiting_for_user needs a running step
   repo <id> <path>             add a repo and record its base (its current branch); does nothing if it is already there
   chunk <id> <name> [--repo r] [--worktree p] [--branch b] [--status s] [--pr url]
                                --repo (name or path) is required for a new chunk when the pipeline has several repos
@@ -34,6 +34,7 @@ const USAGE = `pipeship — state, test environments and dashboard for the /pipe
   preview <id> [<worktree>] [--recipe file]   start the test environment: each service runs from the top worktree of its repo;
                                <worktree> overrides it for a one-repo pipeline; a --recipe that works is saved for the pipeline's repos
   stop <id>                    stop the pipeline and its test servers
+  archive <id>                 archive a done or failed pipeline (its test servers stop); only delete remains after that
   delete <id> [--force]        delete its worktrees and files (branches and PRs stay); --force drops uncommitted changes
   dashboard [start|stop] [--port n]   start the dashboard in the background (default) or stop it
   serve [--port n]             run the dashboard in the foreground`;
@@ -168,6 +169,9 @@ async function main() {
     case "stop":
       await stopPipeline(need(args[0], "<id>"));
       return print("stopped");
+    case "archive":
+      await archivePipeline(need(args[0], "<id>"));
+      return print("archived");
     case "delete":
       await deletePipeline(need(args[0], "<id>"), { force: values.force });
       return print("deleted");

@@ -1,4 +1,4 @@
-import { Loader2, Play, Square, Trash2, type LucideIcon } from "lucide-react";
+import { Archive, Loader2, Play, Square, Trash2, type LucideIcon } from "lucide-react";
 import { useState } from "react";
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription,
@@ -21,7 +21,7 @@ interface ActionDef {
 }
 
 // Once the agents are done, the only things left to stop are the test servers.
-const ACTIONS: Record<"stopPipeline" | "stopServer" | "delete", ActionDef> = {
+const ACTIONS: Record<"stopPipeline" | "stopServer" | "archive" | "delete", ActionDef> = {
   stopPipeline: {
     endpoint: "stop",
     icon: Square,
@@ -40,6 +40,15 @@ const ACTIONS: Record<"stopPipeline" | "stopServer" | "delete", ActionDef> = {
     title: "Stop the preview?",
     description: "The preview stops. The code, branches and PRs stay in place.",
     confirm: "Stop",
+  },
+  archive: {
+    endpoint: "archive",
+    icon: Archive,
+    iconClass: "text-muted-foreground",
+    button: "Archive",
+    title: "Archive this pipeline?",
+    description: "The pipeline moves to the archived group and the test servers stop. You cannot undo it: you can only delete it after.",
+    confirm: "Archive",
   },
   delete: {
     endpoint: "delete",
@@ -85,7 +94,7 @@ function ActionButton({ id, action, hasServers }: { id: string; action: ActionNa
   );
 }
 
-// The stop and delete buttons of a pipeline. Renders nothing when no action applies.
+// The stop, archive and delete buttons of a pipeline. Renders nothing when no action applies.
 export function PipelineActions({ p, merging, starting }: { p: State; merging: boolean; starting: boolean }) {
   const actions: ActionName[] = [];
   if (p.status === "ready") {
@@ -93,6 +102,7 @@ export function PipelineActions({ p, merging, starting }: { p: State; merging: b
   } else if (p.status === "running" || p.status === "waiting_for_user" || (p.status === "failed" && p.preview)) {
     actions.push("stopPipeline");
   }
+  if (p.status === "done" || p.status === "failed") actions.push("archive");
   if (!merging && finished(p)) actions.push("delete");
   return actions.map((name) => <ActionButton key={name} id={p.id} action={name} hasServers={!!p.preview} />);
 }
