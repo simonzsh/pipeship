@@ -235,6 +235,16 @@ export function updateState(id: string, change: (s: State) => void): State {
   return state;
 }
 
+// After /clear the session id changes: record the new one so later hook matches still work.
+export function refreshSessionId(id: string, detected: Session | undefined): Session | undefined {
+  const stored = readState(id).session;
+  if (!stored || !detected || stored.harness !== detected.harness || stored.cwd !== detected.cwd || stored.id === detected.id) return stored;
+  return updateState(id, (s) => {
+    s.session!.id = detected.id;
+    if (detected.t3Thread) s.session!.t3Thread = detected.t3Thread;
+  }).session;
+}
+
 export function listStates(): State[] {
   const dir = join(home(), "pipelines");
   if (!existsSync(dir)) return [];

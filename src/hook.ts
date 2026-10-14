@@ -1,5 +1,6 @@
-import { resolve } from "node:path";
-import { listStates, pipelineDir, type State, type Status } from "./state.ts";
+import { existsSync, readdirSync } from "node:fs";
+import { join, resolve } from "node:path";
+import { home, pipelineDir, readState, type State, type Status } from "./state.ts";
 
 // Statuses that still need the agent. ready, done, failed and archived do not.
 export const UNFINISHED: readonly Status[] = ["running", "waiting_for_user", "stopped"];
@@ -22,23 +23,43 @@ export function parseHookInput(raw: string): HookInput {
   }
 }
 
-// Match by session id. After /clear the id changes, so fall back to the same harness and cwd.
-export function pendingPipelines(states: State[], input: HookInput, env: Env = process.env): State[] {
+// After /clear the id changes: the fallback only guesses by harness and cwd, and keeps the pipelines that are still active.
+const ACTIVE: readonly Status[] = ["running", "waiting_for_user"];
+
+// byFolder is true when the match comes from the /clear fallback, not from the session id.
+export function matchPipelines(states: State[], input: HookInput, env: Env = process.env): { states: State[]; byFolder: boolean } {
   const id = input.session_id ?? env.CLAUDE_CODE_SESSION_ID;
-  if (!id) return [];
-  const unfinished = states.filter((s) => UNFINISHED.includes(s.status));
-  const byId = unfinished.filter((s) => s.session?.id === id);
-  if (byId.length > 0 || input.source !== "clear" || !input.cwd) return byId;
-  return unfinished.filter((s) => s.session?.harness === "claude" && s.session.cwd === input.cwd);
+  if (!id) return { states: [], byFolder: false };
+  const byId = states.filter((s) => UNFINISHED.includes(s.status) && s.session?.id === id);
+  if (byId.length > 0 || input.source !== "clear" || !input.cwd) return { states: byId, byFolder: false };
+  const byCwd = states.filter((s) => ACTIVE.includes(s.status) && s.session?.harness === "claude" && s.session.cwd === input.cwd);
+  return { states: byCwd, byFolder: byCwd.length > 0 };
 }
 
-export function reminderText(states: State[], paths: { skill: string; helper: string }): string {
+export function pendingPipelines(states: State[], input: HookInput, env: Env = process.env): State[] {
+  return matchPipelines(states, input, env).states;
+}
+
+// One unreadable state.json must not silence the reminders of the others.
+export function readStates(): State[] {
+  const dir = join(home(), "pipelines");
+  if (!existsSync(dir)) return [];
+  const states: State[] = [];
+  for (const id of readdirSync(dir)) {
+    try {
+      states.push(readState(id));
+    } catch {}
+  }
+  return states;
+}
+
+export function reminderText(states: State[], paths: { skill: string; helper: string }, byFolder = false): string {
   const lines = states.map((s) => {
     const waiting = s.waiting ? `, waiting: ${s.waiting.reason ?? s.waiting.step}` : "";
     return `- ${s.id} "${s.ticket.title}": ${s.status}, step ${s.step}${waiting}, dir ${pipelineDir(s.id)}`;
   });
   return [
-    "pipeship: this session has unfinished pipelines.",
+    byFolder ? "pipeship: these unfinished pipelines may belong to this session (same folder)." : "pipeship: this session has unfinished pipelines.",
     ...lines,
     `Before you go on, re-read the skill: ${paths.skill}. \`pipeship\` is ${paths.helper}.`,
     "Key rules:",
@@ -55,13 +76,13 @@ export function sessionStartOutput(
   input: HookInput,
   opts: { states?: State[]; env?: Env; paths?: { skill: string; helper: string } } = {},
 ): string {
-  const found = pendingPipelines(opts.states ?? listStates(), input, opts.env);
+  const { states: found, byFolder } = matchPipelines(opts.states ?? readStates(), input, opts.env);
   if (found.length === 0) return "";
   const paths = opts.paths ?? {
     skill: resolve(import.meta.dir, "../skills/ship/SKILL.md"),
     helper: resolve(import.meta.dir, "../scripts/pipeship"),
   };
-  return JSON.stringify({ hookSpecificOutput: { hookEventName: "SessionStart", additionalContext: reminderText(found, paths) } });
+  return JSON.stringify({ hookSpecificOutput: { hookEventName: "SessionStart", additionalContext: reminderText(found, paths, byFolder) } });
 }
 
 // A hook must never break a session: any error prints nothing and exits 0.

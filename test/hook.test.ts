@@ -55,6 +55,9 @@ describe("pendingPipelines", () => {
     const input = { session_id: "new", cwd: "/work" };
     expect(pendingPipelines(states, { ...input, source: "clear" }, {}).map((s) => s.id)).toEqual(["same"]);
     expect(pendingPipelines(states, { ...input, source: "compact" }, {})).toEqual([]);
+    // The fallback keeps running and waiting_for_user only, not stopped.
+    const mixed = ["running", "waiting_for_user", "stopped"].map((st) => fixture(st, st as Status, { harness: "claude", id: "old", cwd: "/work" }));
+    expect(pendingPipelines(mixed, { ...input, source: "clear" }, {}).map((s) => s.id)).toEqual(["running", "waiting_for_user"]);
     // A match by id wins: the fallback does not add other pipelines.
     const byId = [...states, fixture("mine", "running", { harness: "claude", id: "new", cwd: "/x" })];
     expect(pendingPipelines(byId, { ...input, source: "clear" }, {}).map((s) => s.id)).toEqual(["mine"]);
@@ -72,6 +75,16 @@ describe("reminder", () => {
     for (const rule of ["one subagent per heavy step", "pipeship get <id>", "pipeship step <id> <step> running", "one test suite at a time"]) {
       expect(text).toContain(rule);
     }
+  });
+
+  test("a match by folder only says the pipelines may belong to the session", () => {
+    const states = [fixture("a", "running", { harness: "claude", id: "old", cwd: "/work" })];
+    const input = { session_id: "new", cwd: "/work", source: "clear" };
+    const text = JSON.parse(sessionStartOutput(input, { states, env: {}, paths })).hookSpecificOutput.additionalContext;
+    expect(text).toContain("may belong to this session (same folder)");
+    expect(text).not.toContain("this session has");
+    const byId = JSON.parse(sessionStartOutput({ session_id: "old" }, { states, env: {}, paths })).hookSpecificOutput.additionalContext;
+    expect(byId).toContain("this session has unfinished pipelines");
   });
 
   test("sessionStartOutput is empty without a pipeline, else one JSON line", () => {
@@ -111,6 +124,16 @@ describe("hook script", () => {
     expect(json.hookSpecificOutput.hookEventName).toBe("SessionStart");
     expect(json.hookSpecificOutput.additionalContext).toContain("e2e");
     expect(json.hookSpecificOutput.additionalContext).toContain(join(home, "pipelines", "e2e"));
+  });
+
+  test("one corrupt state.json does not silence the other pipelines", () => {
+    const bad = join(home, "pipelines", "corrupt");
+    mkdirSync(bad, { recursive: true });
+    writeFileSync(join(bad, "state.json"), "{ not json");
+    const r = run(JSON.stringify({ session_id: "s-e2e", source: "compact" }));
+    expect(r.status).toBe(0);
+    expect(JSON.parse(r.stdout).hookSpecificOutput.additionalContext).toContain("e2e");
+    rmSync(bad, { recursive: true, force: true });
   });
 
   test("prints nothing for another session or bad stdin, and exits 0", () => {
