@@ -2,6 +2,17 @@
 # Entry point for the skill. A plugin is copied into Claude Code's cache without
 # node_modules, so install the dependencies on first use.
 set -e
+missing=""
+for cmd in bun git; do
+  command -v "$cmd" >/dev/null 2>&1 || missing="$missing $cmd"
+done
+if [ -n "$missing" ]; then
+  echo "pipeship: missing required command(s):$missing" >&2
+  echo "  bun: https://bun.sh  git: https://git-scm.com" >&2
+  exit 127
+fi
+# gh is only needed to open and merge PRs: warn, so the other steps still run.
+command -v gh >/dev/null 2>&1 || echo "pipeship: gh not found, PR steps will fail (https://cli.github.com, then gh auth login)" >&2
 root="$(cd "$(dirname "$(realpath "$0")")/.." && pwd)"
 if [ ! -d "$root/node_modules" ]; then
   echo "pipeship: installing dependencies (first run)..." >&2
