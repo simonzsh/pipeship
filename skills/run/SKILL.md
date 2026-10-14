@@ -1,19 +1,21 @@
 ---
-name: ship
-description: Feature pipeline from a ticket to stacked PRs and a running test environment. Use whenever the user gives a ticket to handle (reference like ABC-123, Linear/Notion/GitHub/Jira URL, or text), even without naming pipeship.
-argument-hint: "[quick|full] [--skip step,step] <ticket ref, URL or text>"
+name: run
+description: Feature pipeline from a work request to stacked PRs and a running test environment. Use whenever the user asks to make, fix, build or change something, with or without a ticket: a ticket reference (ABC-123), a Linear/Notion/GitHub/Jira URL, a ticket text, or a task decided after a discussion. Use it only for a code change big enough for a branch and a pull request. Do not use it for a one-line tweak, a config or file edit, a chart or document, or a task that needs no pull request. Never use it for a question, an explanation, a plain discussion, a review or a status request.
+argument-hint: "[quick|full] [--skip step,step] <ticket ref, URL or text, or the work request>"
 ---
 
 # pipeship
 
 Run the pipeline below on the user's ticket: `$ARGUMENTS`
 
+In this skill, "ticket" means the ticket, or the work request when there is no ticket. Then `ticket.md` holds the request and the decisions of the discussion.
+
 You are the orchestrator. Run each heavy step in a subagent with a clean context. Each step writes its result to a file in the pipeline directory; the next step reads that file. Keep the user's session for decisions and questions only.
 
 ## Claude Code and Codex
 
 This skill runs in both. Where they differ:
-- **Arguments**: Claude Code fills `$ARGUMENTS`. Codex leaves it as is: take the ticket and options from the user's message.
+- **Arguments**: Claude Code fills `$ARGUMENTS`. Codex leaves it as is: take the ticket and the options from the user's message.
 - **Subagents**: use your harness's subagent tool (Claude Code: `Agent`; Codex: spawn sub-agents). To run subagents in parallel, start them together. If you have none, run the step yourself.
 - **Models**: `opus` and `sonnet` below are Claude Code model names. In another harness, use your strongest model for `opus` steps and your default model for `sonnet` steps.
 - **Codex sandbox**: pipeship writes outside the repo (`~/.pipeship`), starts background servers and pushes branches. If the sandbox blocks a command, ask the user to approve it or to relax the sandbox.
@@ -62,12 +64,12 @@ Steps: `explore`, `questions`, `plan`, `implement`, `review`, `stack`, `preview`
 
 ## Step 0 — Start
 
-1. Parse the arguments (if `$ARGUMENTS` is empty or was not replaced, use the user's request): an optional mode (`quick` or `full`, default `full`), an optional `--skip a,b`, and the ticket (reference, URL or text).
-2. **Read the ticket** with whatever tool this session has for its source: an MCP server (Linear, Notion, Jira…), `gh issue view`, or fetching the URL. Plain text is the ticket itself. A bare reference like `ABC-123` does not name its source: infer it from the tools you have, and ask if unsure. If no tool can read the source, ask the user to paste the ticket.
+1. Parse the arguments: an optional mode (`quick` or `full`, default `full`), an optional `--skip a,b`, and the ticket (reference, URL or text) or the work request. If `$ARGUMENTS` is empty or was not replaced, read the user's message: a ticket reference or URL in it is a ticket (read it as in 0.2); otherwise the message plus what the discussion decided is the work request.
+2. **Read the ticket** with whatever tool this session has for its source: an MCP server (Linear, Notion, Jira…), `gh issue view`, or fetching the URL. Plain text is the ticket itself, and a work request without a ticket is the ticket itself: there is nothing to read. A bare reference like `ABC-123` does not name its source: infer it from the tools you have, and ask if unsure. If no tool can read the source, ask the user to paste the ticket.
 3. The repos are the git root of the current directory, plus any repo the user names. If the current directory is not in a git repo, run `new` without `--repo`: the explore step adds the repos. The base branch of each repo is its current branch.
-4. `pipeship new ...` with one `--repo <path>` per repo, the ticket title, the source (`linear`, `notion`, `github`, `jira`, `url`…; omit `--source` for a plain-text ticket), and one `--ref`/`--url` pair per ticket when the pipeline covers several. `new --repo` and `repo` reduce a path to its git root and refuse a path outside git. Note the `id` and `dir` it prints. It lists each repo with its `base` and `dirty`: tell the user about dirty repos, because their uncommitted changes will not be in the worktrees. Run `pipeship new` from this orchestrator session: it records the session that runs it (harness, id, cwd).
-   - For a plain-text ticket, pick a 2 or 3 word name that sums it up (`session-link`, `quick-mode`) and pass it with `--name`. Ticket refs win over the name.
-5. Write the full ticket text to `<dir>/ticket.md`. Later steps read only this file.
+4. `pipeship new ...` with one `--repo <path>` per repo, the ticket title (for a work request, a short title), the source (`linear`, `notion`, `github`, `jira`, `url`…; omit `--source` for a plain-text ticket or a work request), and one `--ref`/`--url` pair per ticket when the pipeline covers several. `new --repo` and `repo` reduce a path to its git root and refuse a path outside git. Note the `id` and `dir` it prints. It lists each repo with its `base` and `dirty`: tell the user about dirty repos, because their uncommitted changes will not be in the worktrees. Run `pipeship new` from this orchestrator session: it records the session that runs it (harness, id, cwd).
+   - For a plain-text ticket or a work request, pick a 2 or 3 word name that sums it up (`session-link`, `quick-mode`) and pass it with `--name`. Ticket refs win over the name.
+5. Write the full ticket text to `<dir>/ticket.md`. For a work request, write a summary instead: the request, the decisions and constraints of the discussion, and what is out of scope. Later steps read only this file.
 6. Run `pipeship dashboard` and give the user the URL.
 
 ## Step 1 — explore
@@ -99,7 +101,7 @@ When this step is skipped (`quick` mode), there is one chunk named after the tic
 For each chunk, in stack order:
 1. Branch `<ticket>/<chunk>`, worktree `<dir>/worktrees/<chunk>`:
    `git -C <chunk's repo> worktree add <dir>/worktrees/<chunk> -b <ticket>/<chunk> <that repo's base>`
-   - `<ticket>` is the first ticket ref in lowercase (`abc-123`), or the 2 or 3 word `--name` for a plain-text ticket. Keep chunk names short too (`api`, `ui`, `backfill`): e.g. `abc-123/api`.
+   - `<ticket>` is the first ticket ref in lowercase (`abc-123`), or the 2 or 3 word `--name` for a plain-text ticket or a work request. Keep chunk names short too (`api`, `ui`, `backfill`): e.g. `abc-123/api`.
    - If the repo has a branch naming convention (see `explore.md`), follow it instead, e.g. `feat/abc-123-api`.
    - If the branch already exists, add `-2`.
 2. `pipeship chunk <id> <chunk> --worktree <path> --branch <branch> --status coding`. With several repos, add `--repo <name>`.

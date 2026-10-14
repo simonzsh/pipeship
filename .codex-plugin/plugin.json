@@ -1,7 +1,7 @@
 {
   "name": "pipeship",
   "version": "0.13.3",
-  "description": "Feature pipeline: ticket → questions → plan → parallel implementation → cleanup → stacked PRs → running test environment.",
+  "description": "Feature pipeline from a ticket or a work request: questions → plan → parallel implementation → cleanup → stacked PRs → running test environment. Also a review-only skill.",
   "author": { "name": "simonzsh" },
   "homepage": "https://github.com/simonzsh/pipeship",
   "repository": "https://github.com/simonzsh/pipeship",
@@ -10,10 +10,10 @@
   "skills": "./skills/",
   "interface": {
     "displayName": "pipeship",
-    "shortDescription": "From a ticket to stacked PRs and a running test app",
+    "shortDescription": "From a ticket or a work request to stacked PRs and a running test app",
     "category": "Developer Tools",
     "developerName": "simonzsh",
     "capabilities": ["Read", "Write"],
-    "defaultPrompt": ["Use $ship to ship ABC-123"]
+    "defaultPrompt": ["Use $run to handle ABC-123"]
   }
 }

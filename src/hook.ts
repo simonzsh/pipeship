@@ -79,7 +79,7 @@ export function sessionStartOutput(
   const { states: found, byFolder } = matchPipelines(opts.states ?? readStates(), input, opts.env);
   if (found.length === 0) return "";
   const paths = opts.paths ?? {
-    skill: resolve(import.meta.dir, "../skills/ship/SKILL.md"),
+    skill: resolve(import.meta.dir, "../skills/run/SKILL.md"),
     helper: resolve(import.meta.dir, "../scripts/pipeship"),
   };
   return JSON.stringify({ hookSpecificOutput: { hookEventName: "SessionStart", additionalContext: reminderText(found, paths, byFolder) } });
