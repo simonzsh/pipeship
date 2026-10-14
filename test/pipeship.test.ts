@@ -23,7 +23,7 @@ import { detectSession, findT3Thread, type ReadProc } from "../src/session.ts";
 import { groupByStatus } from "../src/dashboard/groups.ts";
 import { t3ThreadLink } from "../src/dashboard/session.tsx";
 import { buildSearch, parseUrl } from "../src/dashboard/url.ts";
-import { allMerged, displaySteps, finished, formatElapsed, timeAgo } from "../src/dashboard/pipeline-info.ts";
+import { allMerged, displaySteps, finished, formatElapsed, timeAgo, timeAgoShort } from "../src/dashboard/pipeline-info.ts";
 import { diffRequests, diffUrl } from "../src/dashboard/diff-requests.ts";
 import { highlightLines, languageOf } from "../src/dashboard/highlight.tsx";
 import { chunkActivity } from "../src/dashboard/status.tsx";
@@ -2056,6 +2056,10 @@ test("timeAgo uses the given clock", () => {
   expect(timeAgo("2026-01-01T23:50:00Z", now)).toBe("10 min ago");
   expect(timeAgo("2026-01-01T21:00:00Z", now)).toBe("3 h ago");
   expect(timeAgo("2025-12-30T00:00:00Z", now)).toBe("3 d ago");
+  expect(timeAgoShort("2026-01-01T23:59:50Z", now)).toBe("now");
+  expect(timeAgoShort("2026-01-01T23:50:00Z", now)).toBe("10m");
+  expect(timeAgoShort("2026-01-01T21:00:00Z", now)).toBe("3h");
+  expect(timeAgoShort("2025-12-30T00:00:00Z", now)).toBe("3d");
 });
 
 test("displaySteps shows a running step as waiting while the user is needed", () => {

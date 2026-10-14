@@ -1,6 +1,6 @@
 import { GitMerge } from "lucide-react";
 import type { DashboardState } from "../state.ts";
-import { allMerged, displaySteps } from "./pipeline-info";
+import { allMerged, displaySteps, timeAgoShort } from "./pipeline-info";
 import { StatusBadge, statusConfig } from "./status";
 import { Steps } from "./steps";
 import { cn } from "./utils";
@@ -34,6 +34,9 @@ export function PipelineListItem({ p, selected, onSelect }: { p: DashboardState;
             </span>
           )}
           <StatusBadge status={p.status} />
+          <span title={`Updated ${p.updatedAt}`} className="text-xs tabular-nums text-muted-foreground">
+            {timeAgoShort(p.updatedAt)}
+          </span>
         </span>
       </span>
     </button>

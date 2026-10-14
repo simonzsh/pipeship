@@ -1,12 +1,24 @@
 import type { State } from "../state.ts";
 import type { DisplayStep } from "./steps";
 
-export function timeAgo(iso: string, now = Date.now()): string {
+// Age as a value and unit; null under a minute.
+function age(iso: string, now: number): [number, "m" | "h" | "d"] | null {
   const seconds = Math.round((now - new Date(iso).getTime()) / 1000);
-  if (seconds < 60) return "just now";
-  if (seconds < 3600) return `${Math.floor(seconds / 60)} min ago`;
-  if (seconds < 86400) return `${Math.floor(seconds / 3600)} h ago`;
-  return `${Math.floor(seconds / 86400)} d ago`;
+  if (seconds < 60) return null;
+  if (seconds < 3600) return [Math.floor(seconds / 60), "m"];
+  if (seconds < 86400) return [Math.floor(seconds / 3600), "h"];
+  return [Math.floor(seconds / 86400), "d"];
+}
+
+export function timeAgo(iso: string, now = Date.now()): string {
+  const a = age(iso, now);
+  return a ? `${a[0]} ${a[1] === "m" ? "min" : a[1]} ago` : "just now";
+}
+
+// Compact age for list cards: "now", "2m", "3h", "4d".
+export function timeAgoShort(iso: string, now = Date.now()): string {
+  const a = age(iso, now);
+  return a ? `${a[0]}${a[1]}` : "now";
 }
 
 // "4m32" under an hour, "1h04" above.
