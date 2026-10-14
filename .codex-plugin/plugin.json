@@ -1,6 +1,6 @@
 {
   "name": "pipeship",
-  "version": "0.9.0",
+  "version": "0.10.0",
   "description": "Feature pipeline: ticket → questions → plan → parallel implementation → cleanup → stacked PRs → running test environment.",
   "author": { "name": "simonzsh" },
   "homepage": "https://github.com/simonzsh/pipeship",
