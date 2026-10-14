@@ -596,16 +596,22 @@ export async function unarchivePipeline(id: string): Promise<State> {
 }
 
 // Once every PR is merged the pipeline has no work left. Never throws: callers are the merge and the PR sync.
+const archivable = (s: State) => ["ready", "done", "failed", "stopped"].includes(s.status) && s.merge?.status !== "running" && allMerged(s);
+
 export async function archiveIfAllMerged(id: string): Promise<boolean> {
   try {
-    const s = readState(id);
-    if (!["ready", "done", "failed", "stopped"].includes(s.status) || s.merge?.status === "running" || !allMerged(s)) return false;
-    await stopPreview(id);
-    // Re-check: the status may have changed while the preview stopped.
+    if (!archivable(readState(id))) return false;
+    // Archive before the stop: the merge can run in this pipeline's own preview server, which the stop kills.
     const after = updateState(id, (x) => {
-      if (["ready", "done", "failed", "stopped"].includes(x.status) && allMerged(x)) x.archivedAt = new Date().toISOString();
+      if (archivable(x)) x.archivedAt = new Date().toISOString();
     });
-    return after.status === "archived";
+    if (after.status !== "archived") return false;
+    try {
+      await stopPreview(id);
+    } catch (err) {
+      console.error(`auto-archive ${id}: ${err instanceof Error ? err.message : String(err)}`);
+    }
+    return true;
   } catch (err) {
     console.error(`auto-archive ${id}: ${err instanceof Error ? err.message : String(err)}`);
     return false;
