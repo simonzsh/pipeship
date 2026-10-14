@@ -526,6 +526,7 @@ const stoppedMidStart = new Set<string>();
 
 // The dashboard cannot wait minutes for a start: failures go to state.previewError instead.
 export const isPreviewStarting = (id: string) => startsInFlight.has(id);
+export const anyPreviewStarting = () => startsInFlight.size > 0;
 
 function readStateOr404(id: string): State {
   try {

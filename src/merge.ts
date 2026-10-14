@@ -107,6 +107,7 @@ export const errorMessage = (err: unknown) => (err instanceof Error ? err.messag
 
 // Pipeline ids with a merge job in this process.
 const active = new Set<string>();
+export const isMergeRunning = () => active.size > 0;
 
 // The engine refreshes updatedAt at every poll, so a silent run is dead even if its pid was reused.
 const STALE_MS = 5 * 60_000;

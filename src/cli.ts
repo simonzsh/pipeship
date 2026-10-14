@@ -1,12 +1,11 @@
 #!/usr/bin/env bun
-import { spawn } from "node:child_process";
-import { existsSync, mkdirSync, openSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, rmSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { parseArgs } from "node:util";
 import { archivePipeline, deletePipeline, findRecipe, git, isAlive, killGroup, loadRecipe, previewLines, startPreview, stopPipeline } from "./preview.ts";
 import { repoName } from "./repos.ts";
 import { detectSession, findT3Thread } from "./session.ts";
-import { DEFAULT_PORT, isDashboardUp, serve } from "./server.ts";
+import { DEFAULT_PORT, isDashboardUp, serve, spawnDashboard } from "./server.ts";
 import {
   STATUSES, STEPS, addRepo, createPipeline, home, listStates, pipelineDir, readState, setMode, setStatus, setStep, updateState, upsertChunk,
   waitForUser,
@@ -72,16 +71,7 @@ const repoReport = (path: string, base?: string, dirty = false) => ({ path, name
 async function startDashboard(): Promise<string> {
   const url = `http://localhost:${port}`;
   if (await isDashboardUp(port)) return url;
-  mkdirSync(home(), { recursive: true });
-  const out = openSync(join(home(), "dashboard.log"), "a");
-  // Run from ~/.pipeship, not the caller's project: the dashboard outlives the session that starts it.
-  const child = spawn(process.execPath, [import.meta.path, "serve", "--port", String(port)], {
-    cwd: home(),
-    detached: true,
-    stdio: ["ignore", out, out],
-  });
-  child.unref();
-  writeFileSync(join(home(), "dashboard.pid"), String(child.pid));
+  spawnDashboard(process.execPath, [import.meta.path, "serve", "--port", String(port)]);
   for (let i = 0; i < 100; i++) {
     if (await isDashboardUp(port)) return url;
     await Bun.sleep(100);
@@ -178,7 +168,7 @@ async function main() {
     case "dashboard":
       return print(args[0] === "stop" ? await stopDashboard() : await startDashboard());
     case "serve":
-      await serve(port, { prSync: true });
+      await serve(port, { prSync: true, retryMs: 8000 });
       return console.log(`pipeship dashboard on http://localhost:${port}`);
     default:
       print(USAGE);
