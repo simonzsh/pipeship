@@ -10,6 +10,7 @@ import { home, listDashboardStates, type Harness } from "./state.ts";
 import { currentHarness, currentVersion, getUpdateInfo, installUpdate, UpdateError, type InstallDeps } from "./update.ts";
 import {
   anyPreviewStarting, archivePipeline, deletePipeline, isPreviewStarting, PreviewError, requestPreviewStart, stopPipeline, stopPreviewAndSettle,
+  unarchivePipeline,
 } from "./preview.ts";
 
 export const DEFAULT_PORT = 4400;
@@ -130,6 +131,16 @@ export async function serve(port = DEFAULT_PORT, opts: ServeOptions = {}) {
         POST: async (req) => {
           try {
             return Response.json(await archivePipeline(req.params.id));
+          } catch (err) {
+            const status = err instanceof PreviewError ? err.status : 500;
+            return Response.json({ error: errorMessage(err) }, { status });
+          }
+        },
+      },
+      "/api/pipelines/:id/unarchive": {
+        POST: async (req) => {
+          try {
+            return Response.json(await unarchivePipeline(req.params.id));
           } catch (err) {
             const status = err instanceof PreviewError ? err.status : 500;
             return Response.json({ error: errorMessage(err) }, { status });

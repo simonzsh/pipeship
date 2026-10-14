@@ -1,4 +1,4 @@
-import { Archive, Loader2, Play, Square, Trash2, type LucideIcon } from "lucide-react";
+import { Archive, ArchiveRestore, Loader2, Play, Square, Trash2, type LucideIcon } from "lucide-react";
 import type { VariantProps } from "class-variance-authority";
 import { useState } from "react";
 import {
@@ -23,7 +23,7 @@ interface ActionDef {
 }
 
 // Once the agents are done, the only things left to stop are the test servers.
-const ACTIONS: Record<"stopPipeline" | "stopServer" | "archive" | "delete", ActionDef> = {
+const ACTIONS: Record<"stopPipeline" | "stopServer" | "archive" | "unarchive" | "delete", ActionDef> = {
   stopPipeline: {
     endpoint: "stop",
     icon: Square,
@@ -50,8 +50,18 @@ const ACTIONS: Record<"stopPipeline" | "stopServer" | "archive" | "delete", Acti
     iconClass: "text-muted-foreground",
     button: "Archive",
     title: "Archive this pipeline?",
-    description: "The pipeline moves to the archived group and its preview stops. You cannot undo it: you can only delete it after.",
+    description: "The pipeline moves to the archived group and its preview stops. You can unarchive it later.",
     confirm: "Archive",
+    variant: "default",
+  },
+  unarchive: {
+    endpoint: "unarchive",
+    icon: ArchiveRestore,
+    iconClass: "text-muted-foreground",
+    button: "Unarchive",
+    title: "Unarchive this pipeline?",
+    description: "The pipeline leaves the archived group. The preview stays stopped.",
+    confirm: "Unarchive",
     variant: "default",
   },
   delete: {
@@ -98,13 +108,14 @@ function ActionButton({ id, action, hasServers }: { id: string; action: ActionNa
   );
 }
 
-// The stop, archive and delete buttons of a pipeline. Renders nothing when no action applies.
+// The stop, archive, unarchive and delete buttons of a pipeline. Renders nothing when no action applies.
 export function PipelineActions({ p, merging, starting }: { p: State; merging: boolean; starting: boolean }) {
   const actions: ActionName[] = [];
   // Only agents at work can be stopped. Once they are done, a failed or done pipeline may still run its preview.
   if (p.status === "running" || p.status === "waiting_for_user") actions.push("stopPipeline");
   else if (p.preview && !starting) actions.push("stopServer");
   if (p.status === "done" || p.status === "failed" || p.status === "stopped") actions.push("archive");
+  if (p.status === "archived") actions.push("unarchive");
   if (!merging && finished(p)) actions.push("delete");
   return actions.map((name) => <ActionButton key={name} id={p.id} action={name} hasServers={!!p.preview} />);
 }
