@@ -79,6 +79,29 @@ test("the pipeline is done once every step is done or skipped, and ready when a 
   expect(readState(withPreview).status).toBe("ready");
 });
 
+test("a step reopened on a ready or done pipeline sets it back to running", () => {
+  const all = ["explore", "questions", "plan", "implement", "review", "stack", "preview"] as const;
+  const id = createPipeline({ repos: [{ path: repo }], title: "r", source: "text" }).id;
+  updateState(id, (s) => {
+    s.preview = { url: "http://localhost:1", port: 1, pid: 1, log: "x", repo, worktree: repo } as never;
+  });
+  for (const name of all) setStep(id, name, "done");
+  expect(readState(id).status).toBe("ready");
+  expect(setStep(id, "implement", "running").status).toBe("running");
+  expect(setStep(id, "implement", "done").status).toBe("ready");
+
+  const done = createPipeline({ repos: [{ path: repo }], title: "d", source: "text" }).id;
+  for (const name of all) setStep(done, name, "done");
+  expect(readState(done).status).toBe("done");
+  expect(setStep(done, "review", "pending").status).toBe("running");
+  expect(setStep(done, "review", "done").status).toBe("done");
+
+  const archived = createPipeline({ repos: [{ path: repo }], title: "a", source: "text" }).id;
+  for (const name of all) setStep(archived, name, "done");
+  setStatus(archived, "archived");
+  expect(setStep(archived, "review", "running").status).toBe("archived");
+});
+
 test("a step run again loses the end of its previous run", () => {
   const { id } = createPipeline({ repos: [{ path: repo }], title: "t", source: "text" });
   expect(setStep(id, "explore", "done").steps[0]!.endedAt).toBeDefined();

@@ -266,6 +266,8 @@ export function setStep(id: string, name: StepName, status: StepStatus): State {
       s.status = "running";
       delete s.waitingFor;
     }
+    // A reopened step means work again: ready and done no longer hold.
+    if ((status === "running" || status === "pending") && (s.status === "ready" || s.status === "done")) s.status = "running";
     if (status === "done" || status === "failed") step.endedAt = now;
     if (status === "failed") s.status = "failed";
     // Ready means a preview runs. A skipped preview leaves the pipeline done.
