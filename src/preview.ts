@@ -482,8 +482,6 @@ export async function startPreview(id: string, worktree?: string, draft?: string
     const step = s.steps.find((x) => x.name === "preview")!;
     step.status = "done";
     step.endedAt = new Date().toISOString();
-    // A step waiting for the user (e.g. stack waiting for approval) keeps the pipeline waiting.
-    if (s.status !== "waiting_for_user") s.status = "ready";
   });
 }
 
@@ -566,21 +564,16 @@ export function requestPreviewStart(id: string): { state: State; done: Promise<v
 export async function stopPipeline(id: string): Promise<State> {
   updateState(id, (s) => {
     s.stopRequested = true;
+    delete s.waiting;
   });
   await stopPreview(id);
-  // A failed or archived pipeline keeps its status.
-  return updateState(id, (s) => {
-    if (s.status !== "failed" && s.status !== "archived") s.status = "stopped";
-    delete s.waitingFor;
-  });
+  return readState(id);
 }
 
-// The "Stop preview" button: a ready pipeline goes back to done. Other statuses stay.
+// The "Stop preview" button: with no preview left, a ready pipeline derives back to done.
 export async function stopPreviewAndSettle(id: string): Promise<State> {
   await stopPreview(id);
-  return updateState(id, (s) => {
-    if (s.status === "ready") s.status = "done";
-  });
+  return readState(id);
 }
 
 // Archived is final: only Delete remains.
@@ -591,7 +584,7 @@ export async function archivePipeline(id: string): Promise<State> {
   }
   await stopPreview(id);
   return updateState(id, (s) => {
-    s.status = "archived";
+    s.archivedAt = new Date().toISOString();
   });
 }
 
@@ -603,7 +596,7 @@ export async function archiveIfAllMerged(id: string): Promise<boolean> {
     await stopPreview(id);
     // Re-check: the status may have changed while the preview stopped.
     const after = updateState(id, (x) => {
-      if (["ready", "done", "failed", "stopped"].includes(x.status) && allMerged(x)) x.status = "archived";
+      if (["ready", "done", "failed", "stopped"].includes(x.status) && allMerged(x)) x.archivedAt = new Date().toISOString();
     });
     return after.status === "archived";
   } catch (err) {

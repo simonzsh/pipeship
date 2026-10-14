@@ -7,9 +7,9 @@ import { repoName } from "./repos.ts";
 import { detectSession, findT3Thread } from "./session.ts";
 import { DEFAULT_PORT, isDashboardUp, serve, spawnDashboard } from "./server.ts";
 import {
-  STATUSES, STEPS, addRepo, createPipeline, home, listStates, pipelineDir, readState, setMode, setStatus, setStep, updateState, upsertChunk,
+  STEPS, addRepo, createPipeline, home, listStates, pipelineDir, readState, setMode, setStep, updateState, upsertChunk,
   waitForUser,
-  type ChunkInput, type Mode, type Status, type StepName, type StepStatus,
+  type ChunkInput, type Mode, type StepName, type StepStatus,
 } from "./state.ts";
 
 const USAGE = `pipeship — state, test environments and dashboard for the /pipeship skill
@@ -25,7 +25,6 @@ const USAGE = `pipeship — state, test environments and dashboard for the /pipe
   mode <id> quick|full         switch the mode; quick also skips the pending steps quick skips
   wait <id> <step> [--reason <text>]   pause for the user on this step: the step runs, the pipeline waits;
                                --reason is the question, shown on the dashboard card
-  status <id> <status>         ${STATUSES.join(", ")}; waiting_for_user needs a running step
   repo <id> <path>             add a repo and record its base (its current branch); does nothing if it is already there
   chunk <id> <name> [--repo r] [--worktree p] [--branch b] [--status s] [--pr url]
                                --repo (name or path) is required for a new chunk when the pipeline has several repos
@@ -130,9 +129,6 @@ async function main() {
       return print("ok");
     case "wait":
       waitForUser(need(args[0], "<id>"), need(args[1], "<step>") as StepName, values.reason);
-      return print("ok");
-    case "status":
-      setStatus(need(args[0], "<id>"), need(args[1], "<status>") as Status);
       return print("ok");
     case "chunk": {
       if ((values.repo?.length ?? 0) > 1) throw new Error("chunk takes one --repo");

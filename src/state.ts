@@ -77,8 +77,9 @@ export interface State {
   ticket: { source?: string; title: string; links: TicketLink[] };
   repos: Repo[];
   mode: Mode;
-  status: Status;
-  waitingFor?: string; // the question the user must answer, set by `pipeship wait`
+  status: Status; // derived by pipelineStatus on every write; never set by hand
+  waiting?: { step: StepName; reason?: string }; // set by `pipeship wait`: the step that needs the user and why
+  archivedAt?: string;
   step: StepName;
   steps: { name: StepName; status: StepStatus; startedAt?: string; endedAt?: string }[];
   chunks: Chunk[];
@@ -89,6 +90,16 @@ export interface State {
   stopRequested: boolean;
   createdAt: string;
   updatedAt: string;
+}
+
+// The only place that decides the status. Rule order matters: archived and failed win over stopped, then waiting.
+export function pipelineStatus(s: Pick<State, "archivedAt" | "steps" | "stopRequested" | "waiting" | "preview">): Status {
+  if (s.archivedAt) return "archived";
+  if (s.steps.some((x) => x.status === "failed")) return "failed";
+  if (s.stopRequested) return "stopped";
+  if (s.waiting) return "waiting_for_user";
+  if (s.steps.every((x) => x.status === "done" || x.status === "skipped")) return s.preview ? "ready" : "done";
+  return "running";
 }
 
 export interface PreviewService {
@@ -154,7 +165,7 @@ export function createPipeline(opts: {
     ticket: { ...(opts.source && { source: opts.source }), title: opts.title, links },
     repos,
     mode,
-    status: "running",
+    status: "running", // recomputed by writeState
     step: STEPS[0],
     steps: STEPS.map((name) => ({ name, status: skipped.has(name) ? "skipped" : "pending" })),
     chunks: [],
@@ -174,7 +185,7 @@ export function readState(id: string): State {
   return upgrade(JSON.parse(readFileSync(path, "utf8")));
 }
 
-type Raw = State & { repo?: string; base?: string; ticket: { ref?: string; url?: string } };
+type Raw = State & { repo?: string; base?: string; waitingFor?: string; ticket: { ref?: string; url?: string } };
 
 // Runs on every read and must accept any old file.
 function upgrade(raw: Raw): State {
@@ -193,8 +204,11 @@ function upgrade(raw: Raw): State {
     }
   }
   if (preview) delete preview.worktree;
-  // "ready" used to hold without a preview.
-  if (raw.status === "ready" && !raw.preview) raw.status = "done";
+  // The status used to be stored: archived and waiting were facts held only there.
+  if (raw.status === "archived" && !raw.archivedAt) raw.archivedAt = raw.updatedAt;
+  if (raw.status === "waiting_for_user" && !raw.waiting) raw.waiting = { step: raw.step, ...(raw.waitingFor && { reason: raw.waitingFor }) };
+  delete raw.waitingFor;
+  raw.status = pipelineStatus(raw);
   // Merge runs saved before combine mode existed were all base merges.
   if (raw.merge && !raw.merge.mode) raw.merge.mode = "base";
   // State files written before `links` existed hold one `ref` (sometimes "A-1,A-2") and one `url`.
@@ -206,6 +220,7 @@ function upgrade(raw: Raw): State {
 
 // Write to a temp file then rename, so the dashboard never reads half a file.
 export function writeState(state: State): void {
+  state.status = pipelineStatus(state);
   state.updatedAt = new Date().toISOString();
   const path = statePath(state.id);
   writeFileSync(`${path}.tmp`, JSON.stringify(state, null, 2) + "\n");
@@ -262,15 +277,10 @@ export function setStep(id: string, name: StepName, status: StepStatus): State {
       s.step = name;
     }
     // The wait ends when any step starts or when the step it blocked moves on.
-    if (s.status === "waiting_for_user" && (status === "running" || name === s.step)) {
-      s.status = "running";
-      delete s.waitingFor;
-    }
+    if (s.waiting && (status === "running" || name === s.waiting.step)) delete s.waiting;
+    // A step that starts again resumes a stopped pipeline.
+    if (status === "running") s.stopRequested = false;
     if (status === "done" || status === "failed") step.endedAt = now;
-    if (status === "failed") s.status = "failed";
-    // Ready means a preview runs. A skipped preview leaves the pipeline done.
-    const finished = s.steps.every((x) => x.status === "done" || x.status === "skipped");
-    if (finished && (s.status === "running" || s.status === "waiting_for_user")) s.status = s.preview ? "ready" : "done";
   });
 }
 
@@ -286,20 +296,7 @@ export function waitForUser(id: string, name: StepName, reason?: string): State 
       delete step.endedAt;
     }
     s.step = name;
-    s.status = "waiting_for_user";
-    if (reason) s.waitingFor = reason;
-    else delete s.waitingFor;
-  });
-}
-
-export function setStatus(id: string, status: Status): State {
-  if (!STATUSES.includes(status)) throw new Error(`unknown status: ${status} (expected ${STATUSES.join(", ")})`);
-  return updateState(id, (s) => {
-    if (status === "waiting_for_user" && !s.steps.some((x) => x.status === "running")) {
-      throw new Error(`no step is running: use "pipeship wait ${id} <step>" to say which step waits`);
-    }
-    s.status = status;
-    if (status !== "waiting_for_user") delete s.waitingFor;
+    s.waiting = { step: name, ...(reason && { reason }) };
   });
 }
 
