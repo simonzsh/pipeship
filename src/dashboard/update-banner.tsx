@@ -9,7 +9,9 @@ const REFRESH_MS = 600_000;
 // Bottom of the sidebar. `live` is the SSE state: after an install, a new live=true means the server restarted.
 export function UpdateBanner({ live }: { live: boolean }) {
   const [info, setInfo] = useState<UpdateInfo>();
-  const [updating, setUpdating] = useState(false);
+  // The version at click time: later /api/update refreshes must not change what the reload check compares to.
+  const [from, setFrom] = useState<string>();
+  const updating = from !== undefined;
   const [error, setError] = useState<string>();
   const wasLive = useRef(live);
 
@@ -23,20 +25,20 @@ export function UpdateBanner({ live }: { live: boolean }) {
 
   // Check the version on each SSE reconnect, and every 3 s as a fallback if the restart was too quick to see.
   useEffect(() => {
-    if (!updating) return;
+    if (from === undefined) return;
     const check = () =>
       fetch("/api/health")
         .then((r) => r.json())
-        .then((h) => shouldReload(info?.current ?? "", h.version) && location.reload(), () => {});
+        .then((h) => shouldReload(from, h.version) && location.reload(), () => {});
     if (live && !wasLive.current) check();
     wasLive.current = live;
     const timer = setInterval(check, 3000);
     return () => clearInterval(timer);
-  }, [live, updating]);
+  }, [live, from]);
 
   const install = async () => {
     setError(undefined);
-    setUpdating(true);
+    setFrom(info?.current ?? "");
     wasLive.current = live;
     try {
       const res = await fetch("/api/update/install", { method: "POST" });
@@ -44,11 +46,11 @@ export function UpdateBanner({ live }: { live: boolean }) {
       const data: { restarting?: boolean; message?: string } = await res.json();
       if (!data.restarting) {
         setError(data.message ?? "Nothing to update");
-        setUpdating(false);
+        setFrom(undefined);
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
-      setUpdating(false);
+      setFrom(undefined);
     }
   };
 
