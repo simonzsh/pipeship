@@ -18,7 +18,7 @@ const USAGE = `pipeship — state, test environments and dashboard for the /pipe
                                records the calling agent session (harness, id, cwd) when one is found, and each repo with its base branch
                                repeat --repo for each repo the ticket touches; none is fine: add them later with "repo"
                                repeat --ref/--url for each ticket; the nth --url belongs to the nth --ref
-                               --name: a 2 or 3 word id for a plain-text ticket; refs win
+                               --name: a 2 or 3 word id for a plain-text ticket or a work request; refs win
   get <id>                     print the state (JSON)
   list                         list pipelines
   step <id> <step> <status>    steps: ${STEPS.join(", ")}; status: pending, running, done, skipped, failed

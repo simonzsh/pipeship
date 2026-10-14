@@ -1,6 +1,6 @@
 ---
 name: run
-description: Feature pipeline from a work request to stacked PRs and a running test environment. Use whenever the user asks to make, fix, build or change something, with or without a ticket: a ticket reference (ABC-123), a Linear/Notion/GitHub/Jira URL, a ticket text, or a task decided after a discussion. Never use it for a question, an explanation, a plain discussion, a review or a status request.
+description: Feature pipeline from a work request to stacked PRs and a running test environment. Use whenever the user asks to make, fix, build or change something, with or without a ticket: a ticket reference (ABC-123), a Linear/Notion/GitHub/Jira URL, a ticket text, or a task decided after a discussion. Use it only for a code change big enough for a branch and a pull request. Do not use it for a one-line tweak, a config or file edit, a chart or document, or a task that needs no pull request. Never use it for a question, an explanation, a plain discussion, a review or a status request.
 argument-hint: "[quick|full] [--skip step,step] <ticket ref, URL or text, or the work request>"
 ---
 
@@ -62,7 +62,7 @@ Steps: `explore`, `questions`, `plan`, `implement`, `review`, `stack`, `preview`
 
 ## Step 0 — Start
 
-1. Parse the arguments: an optional mode (`quick` or `full`, default `full`), an optional `--skip a,b`, and the ticket (reference, URL or text) or the work request. If `$ARGUMENTS` is empty or was not replaced, the work request is the user's request plus what the discussion decided.
+1. Parse the arguments: an optional mode (`quick` or `full`, default `full`), an optional `--skip a,b`, and the ticket (reference, URL or text) or the work request. If `$ARGUMENTS` is empty or was not replaced, read the user's message: a ticket reference or URL in it is a ticket (read it as in 0.2); otherwise the message plus what the discussion decided is the work request.
 2. **Read the ticket** with whatever tool this session has for its source: an MCP server (Linear, Notion, Jira…), `gh issue view`, or fetching the URL. Plain text is the ticket itself, and a work request without a ticket is the ticket itself: there is nothing to read. A bare reference like `ABC-123` does not name its source: infer it from the tools you have, and ask if unsure. If no tool can read the source, ask the user to paste the ticket.
 3. The repos are the git root of the current directory, plus any repo the user names. If the current directory is not in a git repo, run `new` without `--repo`: the explore step adds the repos. The base branch of each repo is its current branch.
 4. `pipeship new ...` with one `--repo <path>` per repo, the ticket title (for a work request, a short title), the source (`linear`, `notion`, `github`, `jira`, `url`…; omit `--source` for a plain-text ticket or a work request), and one `--ref`/`--url` pair per ticket when the pipeline covers several. `new --repo` and `repo` reduce a path to its git root and refuse a path outside git. Note the `id` and `dir` it prints. It lists each repo with its `base` and `dirty`: tell the user about dirty repos, because their uncommitted changes will not be in the worktrees. Run `pipeship new` from this orchestrator session: it records the session that runs it (harness, id, cwd).
