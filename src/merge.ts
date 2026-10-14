@@ -75,7 +75,8 @@ const failed = (c: Check) =>
     : c.status === "COMPLETED" && !["SUCCESS", "NEUTRAL", "SKIPPED", "STALE"].includes(c.conclusion ?? "");
 const pending = (c: Check) => (isContext(c) ? c.state === "PENDING" || c.state === "EXPECTED" : c.status !== "COMPLETED");
 
-export function classifyPr(v: PrView): Verdict {
+// waitChecks false (combine): pending checks do not hold the merge, and BLOCKED is final.
+export function classifyPr(v: PrView, { waitChecks = true } = {}): Verdict {
   const n = v.number;
   const checks = v.statusCheckRollup ?? [];
   if (v.isDraft) return { kind: "blocked", reason: `#${n} is a draft` };
@@ -87,12 +88,12 @@ export function classifyPr(v: PrView): Verdict {
   if (v.reviewDecision === "CHANGES_REQUESTED") return { kind: "blocked", reason: `changes requested on #${n}` };
   if (v.reviewDecision === "REVIEW_REQUIRED") return { kind: "blocked", reason: `review required on #${n}` };
   if (v.mergeable === "UNKNOWN") return { kind: "wait", reason: `waiting for GitHub to check #${n}`, pendingChecks: false };
-  const waiting = checks.filter(pending);
+  const waiting = waitChecks ? checks.filter(pending) : [];
   if (waiting.length) {
     return { kind: "wait", reason: `waiting for checks on #${n} (${waiting.length} pending)`, pendingChecks: true };
   }
   // BLOCKED is normal while required checks run, so it is tested after the pending checks.
-  if (v.mergeStateStatus === "BLOCKED") return { kind: "blocked", reason: `merge blocked by branch protection on #${n}`, transient: true };
+  if (v.mergeStateStatus === "BLOCKED") return { kind: "blocked", reason: `merge blocked by branch protection on #${n}`, ...(waitChecks && { transient: true as const }) };
   return { kind: "ready" };
 }
 
@@ -193,7 +194,7 @@ interface Ctx {
   progress: (c: Chunk, message: string) => void;
   finish: (message: string) => void;
   mergePr: (c: Chunk, head: string, method: "merge" | "squash", message: string) => Promise<void>;
-  waitReady: (c: Chunk, first: PrView, expectedHead: string, pushed: boolean, reuseFirst: boolean) => Promise<PrView>;
+  waitReady: (c: Chunk, first: PrView, expectedHead: string, pushed: boolean, reuseFirst: boolean, waitChecks?: boolean) => Promise<PrView>;
 }
 
 function makeCtx(id: string, repo: string, d: MergeDeps): Ctx {
@@ -226,9 +227,10 @@ function makeCtx(id: string, repo: string, d: MergeDeps): Ctx {
     progress(c, message);
   };
 
-  // Just after a fold, CI has not queued yet: "no checks" and "blocked" are not final answers.
+  // Just after a fold, GitHub may show the old head and CI has not queued yet: "no checks" and "blocked"
+  // are not final answers. With waitChecks false, only the new head is awaited.
   // `first` is reused for the first poll unless the PR changed since it was read (a fold).
-  const waitReady: Ctx["waitReady"] = async (c, first, expectedHead, pushed, reuseFirst) => {
+  const waitReady: Ctx["waitReady"] = async (c, first, expectedHead, pushed, reuseFirst, waitChecks = true) => {
     const url = c.pr!;
     const n = parsePrUrl(url).number;
     let v = first;
@@ -237,12 +239,13 @@ function makeCtx(id: string, repo: string, d: MergeDeps): Ctx {
     let checksSince: number | undefined;
     for (let reuse = reuseFirst; ; reuse = false) {
       if (!reuse) v = await view(url);
-      let verdict = classifyPr(v);
+      let verdict = classifyPr(v, { waitChecks });
       if (pushed && d.now() - t0 <= d.limits.mergeableMs) {
         const unseen = v.headRefOid !== expectedHead;
-        const noChecks = hadChecks && v.statusCheckRollup.length === 0;
+        const noChecks = waitChecks && hadChecks && v.statusCheckRollup.length === 0;
         if (unseen || (verdict.kind === "ready" && noChecks) || (verdict.kind === "blocked" && verdict.transient)) {
-          verdict = { kind: "wait", reason: `waiting for checks to start on #${n}`, pendingChecks: false };
+          const reason = waitChecks ? `waiting for checks to start on #${n}` : `waiting for GitHub to show the new head of #${n}`;
+          verdict = { kind: "wait", reason, pendingChecks: false };
         }
       }
       if (verdict.kind === "ready") break;
@@ -302,7 +305,7 @@ async function combine(x: Ctx, chunks: Chunk[]): Promise<void> {
     // The first step reuses the view read above; later ones follow a fold, so they need a fresh one.
     const first = i === top ? views[i]! : await x.view(c.pr!);
     if (first.baseRefName !== below.headRefName) throw new Error(`PR #${n} targets ${first.baseRefName}, not ${below.headRefName}`);
-    const v = await x.waitReady(c, first, foldTip ?? first.headRefOid, foldTip !== undefined, i === top);
+    const v = await x.waitReady(c, first, foldTip ?? first.headRefOid, foldTip !== undefined, i === top, false);
 
     await x.mergePr(c, v.headRefOid, "merge", `combined #${n} into ${below.headRefName}`);
     const tip = await x.d.run("git", ["ls-remote", "origin", `refs/heads/${below.headRefName}`], { cwd: x.repo });
