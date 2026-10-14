@@ -1,4 +1,4 @@
-import { memo, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { AlertCircle, ChevronDown, ChevronRight, ChevronsDownUp, ChevronsUpDown, Loader2, RefreshCw } from "lucide-react";
 import type { DashboardState } from "../state.ts";
 import { repoName } from "../repos.ts";
@@ -149,19 +149,24 @@ function FilePath({ path }: { path: string }) {
 
 // Line height of the diff table (leading-5): the placeholder keeps the page height before render.
 const LINE_PX = 20;
+const MARGIN_PX = 1500;
 
 // Renders its children only once near the viewport, then keeps them: a big diff paints in slices.
 function WhenVisible({ lines, children }: { lines: number; children: ReactNode }) {
   const ref = useRef<HTMLDivElement>(null);
   const [seen, setSeen] = useState(false);
-  useEffect(() => {
+  // Layout effect: files already near the screen render before the first paint.
+  // The observer fires a frame later, which made the diff blink on a branch switch.
+  useLayoutEffect(() => {
     const el = ref.current;
     if (!el) return;
+    const r = el.getBoundingClientRect();
+    if (r.top < innerHeight + MARGIN_PX && r.bottom > -MARGIN_PX) return setSeen(true);
     const io = new IntersectionObserver((entries) => {
       if (!entries.some((e) => e.isIntersecting)) return;
       setSeen(true);
       io.disconnect();
-    }, { rootMargin: "1500px 0px" });
+    }, { rootMargin: `${MARGIN_PX}px 0px` });
     io.observe(el);
     return () => io.disconnect();
   }, []);
