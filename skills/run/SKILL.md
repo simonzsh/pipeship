@@ -6,14 +6,16 @@ argument-hint: "[quick|full] [--skip step,step] <ticket ref, URL or text, or the
 
 # pipeship
 
-Run the pipeline below on the user's ticket or work request: `$ARGUMENTS`
+Run the pipeline below on the user's ticket: `$ARGUMENTS`
+
+In this skill, "ticket" means the ticket, or the work request when there is no ticket. Then `ticket.md` holds the request and the decisions of the discussion.
 
 You are the orchestrator. Run each heavy step in a subagent with a clean context. Each step writes its result to a file in the pipeline directory; the next step reads that file. Keep the user's session for decisions and questions only.
 
 ## Claude Code and Codex
 
 This skill runs in both. Where they differ:
-- **Arguments**: Claude Code fills `$ARGUMENTS`. Codex leaves it as is: take the ticket or work request and the options from the user's message.
+- **Arguments**: Claude Code fills `$ARGUMENTS`. Codex leaves it as is: take the ticket and the options from the user's message.
 - **Subagents**: use your harness's subagent tool (Claude Code: `Agent`; Codex: spawn sub-agents). To run subagents in parallel, start them together. If you have none, run the step yourself.
 - **Models**: `opus` and `sonnet` below are Claude Code model names. In another harness, use your strongest model for `opus` steps and your default model for `sonnet` steps.
 - **Codex sandbox**: pipeship writes outside the repo (`~/.pipeship`), starts background servers and pushes branches. If the sandbox blocks a command, ask the user to approve it or to relax the sandbox.

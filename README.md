@@ -28,7 +28,7 @@ To work on pipeship itself, clone the repo, run `bun install`, and link the skil
 
 ## Usage
 
-Give pipeship a ticket or a work request: a reference (`ABC-123`), a URL (Linear, Notion, GitHub, Jira…) or plain text. It reads the ticket with the tools your session has, such as an MCP server or `gh`. Without a ticket, your request is the ticket.
+Give pipeship a ticket or a work request: a reference (`ABC-123`), a URL (Linear, Notion, GitHub, Jira…) or plain text. It reads the ticket with the tools your session has, such as an MCP server or `gh`. Without a ticket, your work request is the ticket.
 
 ### In Claude Code
 
