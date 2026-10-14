@@ -22,6 +22,7 @@ export interface Chunk {
   branch?: string;
   status?: string;
   pr?: string;
+  prBase?: string; // base branch of the PR on GitHub, written by the PR sync; wins over the stack order
 }
 
 // Chunk.status stays free text; the merge engine writes this value.
@@ -340,6 +341,8 @@ export function upsertChunk(id: string, chunk: ChunkInput): State {
     }
     const repo = chunk.repo ? lookupRepo(s, chunk.repo).path : existing.repo;
     if (repo !== existing.repo) throw new Error(`chunk "${chunk.name}" belongs to ${repoName(existing.repo)}`);
+    // A new PR has its own base: the sync reads it again.
+    if (chunk.pr && chunk.pr !== existing.pr) delete existing.prBase;
     Object.assign(existing, chunk, { repo });
   });
 }

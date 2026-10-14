@@ -10,14 +10,11 @@ import { postAction, prNumber } from "./utils";
 
 type Mode = "combine" | "base";
 
-// Green folds the stack into one PR; violet merges that PR into the base. One button at a time.
-const TONE: Record<Mode, string> = {
-  combine: "bg-emerald-600 hover:bg-emerald-700",
-  base: "bg-violet-600 hover:bg-violet-700",
-};
+// Violet for every merge action: combining the stack and merging into the base. One button at a time.
+const TONE = "bg-violet-600 hover:bg-violet-700 text-white";
 
 // Shown on finished pipelines with open PRs, and while a merge runs.
-// `busy`: another repo's merge runs, and only one merge runs per pipeline.
+// `busy`: another repo's merge runs, and only one merge runs per pipeline: the button stays, disabled.
 export function MergeButton({ id, repo, chunks, base, merge, busy, finished }: {
   id: string; repo: string; chunks: Chunk[]; base?: string; merge?: MergeRun; busy: boolean; finished: boolean;
 }) {
@@ -39,10 +36,10 @@ export function MergeButton({ id, repo, chunks, base, merge, busy, finished }: {
       setStarting(undefined);
     }
   };
-  if (busy) return null;
+  const waitTitle = busy ? "Another repo of this pipeline is merging" : undefined;
   if (running || starting) {
     return (
-      <Button size="xs" disabled className={`${TONE[running ? merge!.mode : starting!]} text-white disabled:opacity-80`} title={merge?.message}>
+      <Button size="xs" disabled className={`${TONE} disabled:opacity-80`} title={merge?.message}>
         <Loader2 className="animate-spin" /> Merging…
       </Button>
     );
@@ -57,7 +54,7 @@ export function MergeButton({ id, repo, chunks, base, merge, busy, finished }: {
     return (
       <>
         {failure}
-        <Button size="xs" className={`${TONE.combine} text-white`} onClick={run} title="Merge each PR into the branch below, from the top. One PR is left.">
+        <Button size="xs" className={TONE} onClick={run} disabled={busy} title={waitTitle ?? "Merge each PR into the branch below, from the top. One PR is left."}>
           <GitMerge /> Combine PRs
         </Button>
       </>
@@ -69,7 +66,7 @@ export function MergeButton({ id, repo, chunks, base, merge, busy, finished }: {
     <AlertDialog>
       {failure}
       <AlertDialogTrigger asChild>
-        <Button size="xs" className={`${TONE.base} text-white`}>
+        <Button size="xs" className={TONE} disabled={busy} title={waitTitle}>
           <GitMerge /> {into}
         </Button>
       </AlertDialogTrigger>
@@ -80,7 +77,7 @@ export function MergeButton({ id, repo, chunks, base, merge, busy, finished }: {
         </AlertDialogHeader>
         <AlertDialogFooter>
           <AlertDialogCancel>Cancel</AlertDialogCancel>
-          <AlertDialogAction onClick={run} className={`${TONE.base} text-white`}>Merge</AlertDialogAction>
+          <AlertDialogAction onClick={run} className={TONE}>Merge</AlertDialogAction>
         </AlertDialogFooter>
       </AlertDialogContent>
     </AlertDialog>

@@ -1,5 +1,6 @@
 import { existsSync } from "node:fs";
 import { diffTotals, parseDiff, type DiffErrorCode, type DiffResponse } from "./diff.ts";
+import { defaultRunner } from "./merge.ts";
 import { diffRange, findRepo, repoName } from "./repos.ts";
 import { readState, statePath } from "./state.ts";
 
@@ -27,13 +28,34 @@ async function runGit(cwd: string, args: string[]): Promise<{ code: number; out:
   }
 }
 
-// Local branch first, then the remote one (a branch can be pushed and its local copy deleted).
-// Returns the full ref so a tag with the same name cannot win in the diff range.
-export async function resolveRef(cwd: string, branch: string): Promise<string | undefined> {
-  for (const ref of [`refs/heads/${branch}`, `refs/remotes/origin/${branch}`]) {
+// Full refs, so a tag with the same name cannot win in the diff range.
+async function firstRef(cwd: string, refs: string[]): Promise<string | undefined> {
+  for (const ref of refs) {
     if ((await runGit(cwd, ["rev-parse", "--verify", "--quiet", `${ref}^{commit}`])).code === 0) return ref;
   }
   return undefined;
+}
+const local = (b: string) => `refs/heads/${b}`;
+const remote = (b: string) => `refs/remotes/origin/${b}`;
+
+// Head: local first (it can hold unpushed work), then origin (local copy deleted).
+export const headRef = (cwd: string, b: string) => firstRef(cwd, [local(b), remote(b)]);
+// Base: origin first, as the base can move there while the local copy stays old.
+export const baseRef = (cwd: string, b: string) => firstRef(cwd, [remote(b), local(b)]);
+
+// Best effort: offline or a branch not on origin keeps the refs we have.
+async function fetchBranch(cwd: string, branch: string): Promise<void> {
+  const refspec = `+${local(branch)}:${remote(branch)}`;
+  await defaultRunner("git", ["fetch", "--quiet", "--no-tags", "--no-write-fetch-head", "origin", refspec], { cwd, timeoutMs: 10_000 }).catch(() => {});
+}
+
+// Local head against its origin copy: ahead = not pushed, behind = only on origin.
+async function originSync(cwd: string, branch: string, head: string): Promise<{ ahead: number; behind: number } | null> {
+  if (head !== local(branch)) return null;
+  const { code, out } = await runGit(cwd, ["rev-list", "--left-right", "--count", `${remote(branch)}...${head}`]);
+  if (code !== 0) return null;
+  const [behind, ahead] = out.trim().split(/\s+/).map(Number);
+  return { ahead: ahead!, behind: behind! };
 }
 
 const shortRef = (ref: string) => ref.replace(/^refs\/(heads|remotes)\//, "");
@@ -98,14 +120,15 @@ export async function pipelineDiff(
   if (!existsSync(repo.path) || (await runGit(repo.path, ["rev-parse", "--git-dir"])).code !== 0) {
     throw fail("no_repo", `${repo.path} is not a git repository`);
   }
-  const refs = await Promise.all([range.from, range.to].map((b) => resolveRef(repo.path, b)));
+  await Promise.all([fetchBranch(repo.path, range.from), fetchBranch(repo.path, range.to)]);
+  const refs = await Promise.all([baseRef(repo.path, range.from), headRef(repo.path, range.to)]);
   const missing = refs.findIndex((r) => !r);
   if (missing >= 0) throw fail("missing_ref", `branch "${[range.from, range.to][missing]}" not found in ${name}`);
-  const { text, truncated } = await gitDiff(repo.path, refs[0]!, refs[1]!, limits);
+  const [{ text, truncated }, origin] = await Promise.all([gitDiff(repo.path, refs[0]!, refs[1]!, limits), originSync(repo.path, range.to, refs[1]!)]);
   const files = parseDiff(text, { maxLinesPerFile: limits.maxLinesPerFile });
   const { additions, deletions } = diffTotals(files);
   return {
     repo: repo.path, name, chunk, from: range.from, to: range.to, range: refs.map((r) => shortRef(r!)).join("..."),
-    files, additions, deletions, truncated,
+    files, additions, deletions, truncated, origin,
   };
 }

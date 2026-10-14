@@ -26,19 +26,19 @@ export function syncedStatus(status: string | undefined, ghState: string): strin
   return undefined;
 }
 
-async function ghState(run: Runner, c: Chunk, timeoutMs: number): Promise<string> {
+async function ghState(run: Runner, c: Chunk, timeoutMs: number): Promise<{ state: string; base?: string }> {
   let timer: Timer | undefined;
   const timeout = new Promise<never>((_, reject) => {
     timer = setTimeout(() => reject(new Error(`gh timed out after ${timeoutMs} ms`)), timeoutMs);
   });
   try {
-    const args = ["pr", "view", c.pr!, "--json", "state,mergedAt"];
+    const args = ["pr", "view", c.pr!, "--json", "state,mergedAt,baseRefName"];
     const res = await Promise.race([run("gh", args, { cwd: c.repo ?? home(), timeoutMs }), timeout]);
     if (res.code !== 0) throw new Error(res.stderr.trim() || `gh exited with ${res.code}`);
-    const view = JSON.parse(res.stdout) as { state?: string; mergedAt?: string | null };
-    if (view.mergedAt || view.state === "MERGED") return "MERGED";
-    if (view.state === "OPEN" || view.state === "CLOSED") return view.state;
-    throw new Error(`unexpected PR state ${String(view.state)}`);
+    const view = JSON.parse(res.stdout) as { state?: string; mergedAt?: string | null; baseRefName?: string };
+    const state = view.mergedAt || view.state === "MERGED" ? "MERGED" : view.state;
+    if (state !== "MERGED" && state !== "OPEN" && state !== "CLOSED") throw new Error(`unexpected PR state ${String(view.state)}`);
+    return { state, base: view.baseRefName || undefined };
   } finally {
     clearTimeout(timer);
   }
@@ -71,10 +71,10 @@ export async function syncPrStatuses(deps: Partial<SyncDeps> = {}): Promise<{ ch
       continue;
     }
     if (s.merge?.status === "running") continue;
-    const results: { name: string; pr: string; state: string }[] = [];
+    const results: { name: string; pr: string; state: string; base?: string }[] = [];
     for (const c of polledChunks(s)) {
       try {
-        results.push({ name: c.name, pr: c.pr!, state: await ghState(d.run, c, d.timeoutMs) });
+        results.push({ name: c.name, pr: c.pr!, ...(await ghState(d.run, c, d.timeoutMs)) });
         total.checked++;
       } catch (err) {
         total.failed++;
@@ -89,6 +89,11 @@ export async function syncPrStatuses(deps: Partial<SyncDeps> = {}): Promise<{ ch
       for (const r of results) {
         const c = x.chunks.find((k) => k.name === r.name);
         if (!c || c.pr !== r.pr || c.status === MERGED) continue;
+        // A PR can be retargeted on GitHub (by hand, or when the branch below it is deleted).
+        if (r.base && r.base !== c.prBase) {
+          c.prBase = r.base;
+          changes.push(`pr sync: ${id}/${c.name} base ${r.base}`);
+        }
         const next = syncedStatus(c.status, r.state);
         if (!next) continue;
         c.status = next;

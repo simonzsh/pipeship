@@ -52,6 +52,9 @@ export interface DiffResponse {
   additions: number;
   deletions: number;
   truncated: boolean; // raw output went past maxBytes: files after the cut missing
+  // Local head against origin/<to>: ahead = not pushed, behind = only on origin.
+  // null when the head is read from origin or has no copy there.
+  origin: { ahead: number; behind: number } | null;
 }
 
 export type DiffErrorCode =

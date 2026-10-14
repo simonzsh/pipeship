@@ -119,9 +119,9 @@ Each pipeline's header shows the logo of the agent that runs the pipeline (Claud
 
 The header can request a pipeline stop (the agents stop after their current step; the pipeline shows "Stopped"), stop the test servers ("Stop preview": a ready pipeline becomes done) and start them again ("Start preview" on a done pipeline, with no confirmation; a failure shows in the Test tab). A pipeline is `ready` while its preview runs and `done` when every step is finished and no preview runs. A done, failed or stopped pipeline can be archived ("Archive", with a confirmation): it moves to the collapsed "Archived" group, out of the header count, and cannot be unarchived. A pipeline whose PRs are all merged (by the merge engine or on GitHub) is archived by itself when it is ready, done, failed or stopped, and its preview stops. A finished pipeline can be deleted: its worktrees and files go, its branches and PRs stay.
 
-The PR stack is always visible, with one row per repo, its path and its merge button. A finished pipeline's PRs merge in two steps, one button at a time. The green "Combine PRs" button merges each PR into the branch below, from the top, so one PR is left. The violet "Merge into <base>" button then squash-merges that PR into the base branch, after a confirmation. Both wait for the checks and stop at the first PR that cannot merge, with the reason in the pipeline's detail. Only one merge runs at a time.
+The PR stack is always visible, with one row per repo, its path and its merge button. A finished pipeline's PRs merge in two steps, one button at a time. Both buttons are violet. "Combine PRs" merges each PR into the branch below, from the top, so one PR is left. "Merge into <base>" then squash-merges that PR into the base branch, after a confirmation. Both wait for the checks and stop at the first PR that cannot merge, with the reason in the pipeline's detail. Only one merge runs at a time.
 
-The dashboard also syncs PR statuses with GitHub. At startup, on page load and every 60 seconds, it runs `gh pr view` for each chunk that has a PR and is not merged. It skips pipelines with no such PR, and pipelines while a merge runs. A PR merged elsewhere sets the chunk to `merged`. A PR closed without merge sets it to `closed`, and a reopened PR sets it back to `done`. Without `gh`, or on an error, the state stays as it is and the error goes to `~/.pipeship/dashboard.log`. The merge buttons stay for a closed PR: Combine PRs and Merge then fail with "PR #n is closed". The page-load check runs at most once every 15 seconds. In the pipeline list, a violet merge icon shows that all PRs of a pipeline are merged.
+The dashboard also syncs PR statuses with GitHub. At startup, on page load and every 60 seconds, it runs `gh pr view` for each chunk that has a PR and is not merged. It skips pipelines with no such PR, and pipelines while a merge runs. A PR merged elsewhere sets the chunk to `merged`. A PR closed without merge sets it to `closed`, and a reopened PR sets it back to `done`. Without `gh`, or on an error, the state stays as it is and the error goes to `~/.pipeship/dashboard.log`. While a merge runs, the merge buttons of the other repos and the Delete button stay visible but disabled. The merge buttons stay for a closed PR: Combine PRs and Merge then fail with "PR #n is closed". The page-load check runs at most once every 15 seconds. In the pipeline list, a violet merge icon shows that all PRs of a pipeline are merged.
 
 ### Test tab
 
@@ -131,11 +131,11 @@ The test URLs, one per service, and the agent's `test.md` guide: the page to ope
 
 The code diff, to review the work without leaving the dashboard.
 
-- **Whole stack** by default: `<base>...<top branch>`, one diff per repo.
-- **One PR**: click it in the stack for `<previous branch>...<branch>`. The breadcrumb ("Whole stack › PR #17") or the base branch row brings you back.
+- **Whole stack** by default: `<base>...<top branch>`, one diff per repo. The base is the branch at the bottom of the top PR's chain of bases.
+- **One PR**: click it in the stack for `<PR base>...<branch>`. The breadcrumb ("Whole stack › PR #17") or the base branch row brings you back.
 - Every file opens as a collapsible block with its line numbers, its +/− counts and syntax highlighting. "Collapse all" and "Expand all" toggle every file; "Refresh" reloads the diff.
 
-Diffs come from the local branches (or `origin/<branch>` when the local one is gone). A missing branch shows a message in its repo's section.
+The base of each diff is `origin/<base>`, fetched before each diff: a base that moved on the remote does not add its commits to the diff. The other end is the local branch (or `origin/<branch>` when the local one is gone). The PR base comes from GitHub: the dashboard reads it with the PR status, every minute. A retargeted PR (by hand, or by GitHub when the branch below it is deleted) moves in the stack tree and in its diff. Before a chunk has a PR, its base is the previous chunk's branch. When the local branch differs from `origin/<branch>`, a badge says so, for example "2 commits not pushed": the PR on GitHub does not show this work yet. A missing branch shows a message in its repo's section.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/dashboard-code-dark.png">

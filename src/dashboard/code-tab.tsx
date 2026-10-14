@@ -3,6 +3,7 @@ import { AlertCircle, ChevronDown, ChevronRight, ChevronsDownUp, ChevronsUpDown,
 import type { DashboardState } from "../state.ts";
 import { repoName } from "../repos.ts";
 import type { DiffErrorBody, DiffFile, DiffHunk, DiffResponse, LineKind } from "../diff.ts";
+import { Badge } from "./components/ui/badge";
 import { Button } from "./components/ui/button";
 import { highlightLines, languageOf } from "./highlight";
 import { diffRequests, diffUrl, type DiffRequest, type DiffTarget } from "./diff-requests";
@@ -254,13 +255,26 @@ const RepoDiff = memo(function RepoDiff({ data, all }: { data: DiffResponse; all
   );
 });
 
+// Warns when the diff shows work the PR on GitHub does not have yet.
+function OriginSync({ data }: { data: DiffResponse }) {
+  const o = data.origin;
+  const commits = (n: number) => `${n} commit${n > 1 ? "s" : ""}`;
+  const text = [o?.ahead && `${commits(o.ahead)} not pushed`, o?.behind && `${commits(o.behind)} behind origin`].filter(Boolean).join(", ");
+  if (!text) return null;
+  return (
+    <Badge variant="secondary" title={`Local ${data.to} against origin/${data.to}`} className="bg-amber-500/15 text-amber-700 dark:text-amber-400">
+      {text}
+    </Badge>
+  );
+}
+
 export function CodeTab({ p, target, onTarget }: CodeTabProps) {
   const [manual, setManual] = useState(0);
   const [all, setAll] = useState<All>(null);
   const requests = useMemo(() => diffRequests(p, target), [p, target]);
   // A chunk's range starts at the previous chunk, so any chunk of the repo can move it.
   const repos = new Set(requests.map((r) => r.repo));
-  const refreshKey = `${manual}:${JSON.stringify(p.chunks.filter((c) => repos.has(c.repo)).map((c) => [c.branch, c.status]))}`;
+  const refreshKey = `${manual}:${JSON.stringify(p.chunks.filter((c) => repos.has(c.repo)).map((c) => [c.branch, c.status, c.prBase]))}`;
   const { results, fetching } = useDiff(p.id, requests, refreshKey);
   const multi = p.repos.length > 1;
 
@@ -287,6 +301,7 @@ export function CodeTab({ p, target, onTarget }: CodeTabProps) {
           <span className="font-medium">Whole stack</span>
         )}
         {!multi && datas[0] && <code className="rounded bg-muted px-1.5 py-0.5 text-xs text-muted-foreground">{datas[0].range}</code>}
+        {!multi && datas[0] && <OriginSync data={datas[0]} />}
         {datas.length > 0 && <Counts additions={additions} deletions={deletions} />}
         {datas.length > 0 && <span className="text-xs text-muted-foreground">{datas.reduce((n, d) => n + d.files.length, 0)} files</span>}
         <span className="ml-auto flex items-center gap-2">
@@ -311,6 +326,7 @@ export function CodeTab({ p, target, onTarget }: CodeTabProps) {
               <h4 className="flex items-center gap-2 px-6 text-sm font-medium">
                 {repoName(req.repo)}
                 {"data" in r && <code className="rounded bg-muted px-1.5 py-0.5 text-xs font-normal text-muted-foreground">{r.data.range}</code>}
+                {"data" in r && <OriginSync data={r.data} />}
               </h4>
             )}
             {"loading" in r ? (
