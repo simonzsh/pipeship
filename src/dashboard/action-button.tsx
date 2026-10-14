@@ -71,7 +71,7 @@ const ACTIONS: Record<"stopPipeline" | "stopServer" | "archive" | "unarchive" | 
     button: "Delete",
     title: "Delete this pipeline?",
     description:
-      "The preview stops, and the worktrees and pipeline files are deleted. The local branches of merged PRs are deleted too; other branches and PRs stay. Uncommitted changes block the deletion.",
+      "Deletes the worktrees, the pipeline files and the local branches of merged PRs. The preview stops. Uncommitted changes block it.",
     confirm: "Delete",
   },
 };
