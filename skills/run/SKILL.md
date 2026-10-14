@@ -47,7 +47,7 @@ Steps: `explore`, `questions`, `plan`, `implement`, `review`, `stack`, `preview`
 
 - **Brief each subagent with its prompt file**: tell it to read `<skill dir>/prompts/<name>.md` first, then give it its inputs. Pass absolute paths (the brief, `<dir>`, its worktree, and the `pipeship` helper when the brief uses it): a subagent does not know the skill dir. When you run a step yourself (quick explore, no subagent tool), read the brief and follow it.
 - **Each step**: `pipeship step <id> <step> running` when it starts, `done` when it ends.
-- **Each chunk**: set it to its activity (`coding`, `cleaning`) when its subagent starts. When that subagent reports, set the chunk to `done` (`failed` if it failed) at once, while the other subagents still run. The user follows each chunk live in the dashboard.
+- **Each chunk**: set it to its activity (`coding`, `reviewing`, `fixing`) when its subagent starts. When that subagent reports, set the chunk to `done` (`failed` if it failed) at once, while the other subagents still run. The user follows each chunk live in the dashboard.
 - **Before each step**, run `pipeship get <id>`. If `stopRequested` is true, stop and tell the user, unless the user just asked you to resume. If the step is `skipped`, move on.
 - **The user can change the steps at any time** ("skip the review", "ask me your questions anyway"). Update the state with `pipeship step <id> <step> skipped|pending` and continue.
 - **Keep the steps that later steps need**: the test environment needs a worktree; PRs need commits.
@@ -115,12 +115,12 @@ When all are done, **restack**: in stack order, rebase each chunk branch onto th
 Start the global review and the cleanups together, in the same message. Wait for all of them before you fix anything.
 
 1. **Global review** (one subagent, model `opus`, top worktree, diff `<base>..<top branch>`; with several repos, the top worktree and diff of every repo). Brief: `<skill dir>/prompts/global-review.md`.
-2. **Cleanup per chunk** (one subagent per chunk, model `sonnet`, status `cleaning`). Brief: `<skill dir>/prompts/cleanup.md`.
-3. **Fix** each finding of the global review **in the worktree of the chunk that owns the code**, then commit. A cleanup may have changed that code: check before you fix.
+2. **Cleanup per chunk** (one subagent per chunk, model `sonnet`, status `reviewing`). Brief: `<skill dir>/prompts/cleanup.md`.
+3. **Fix** each finding of the global review **in the worktree of the chunk that owns the code**, then commit. Set that chunk to `fixing` while you fix it, and back to `done` after the safety rule. A cleanup may have changed that code: check before you fix.
 4. **Restack once** for the whole step, in stack order, per repo.
 5. **Safety rule**: after the restack, re-run the checks once: the fast checks and the targeted tests for the diff. If a check fails, fix it or revert the pass. Run one test suite at a time.
 
-In `quick` mode, skip the global review. Run one cleanup pass (one subagent, model `sonnet`, same brief) on the whole diff. Give it the worktree of every chunk and tell it that it runs in quick mode. It covers every chunk, so all chunks are `cleaning` together. Then run the checks once, for the whole diff.
+In `quick` mode, skip the global review. Run one cleanup pass (one subagent, model `sonnet`, same brief) on the whole diff. Give it the worktree of every chunk and tell it that it runs in quick mode. It covers every chunk, so all chunks are `reviewing` together. Then run the checks once, for the whole diff.
 
 Write a short summary to `<dir>/review.md`. List the tests that ran and say that CI covers the rest.
 
@@ -170,7 +170,7 @@ The user may ask for changes after the end, or comment on a PR. Do not fix it al
 2. **Record it.** Add the feedback to `<dir>/ticket.md` under `## Feedback <n>`. The subagents read only this file.
 3. **Implement.** One subagent per chunk concerned (model `sonnet`), in its existing worktree. Brief: `<skill dir>/prompts/implement.md`. Give it the feedback. It fixes and commits.
 4. **Restack once**, in stack order, then run the targeted checks for the diff of the feedback. Mark `implement` `done`.
-5. **Review the delta only.** Mark `review` `running`. Run one cleanup subagent (model `sonnet`, brief `<skill dir>/prompts/cleanup.md`, chunks `cleaning`) on the diff of the feedback. Run the global review (model `opus`, brief `<skill dir>/prompts/global-review.md`) only if the feedback touches several chunks or a contract. Then mark `review` `done`.
+5. **Review the delta only.** Mark `review` `running`. Run one cleanup subagent (model `sonnet`, brief `<skill dir>/prompts/cleanup.md`, chunks `reviewing`) on the diff of the feedback. Run the global review (model `opus`, brief `<skill dir>/prompts/global-review.md`) only if the feedback touches several chunks or a contract. Then mark `review` `done`.
 6. **Push** the same branches: open PRs update on their own. Use `--force-with-lease` after a restack. If the PRs are already merged, open a new PR on the base of the repo.
 7. **Small feedback** (one line, a name, a text): you may fix it yourself. Commit in the chunk that owns the code, restack, re-run the checks, and update the steps.
 8. **Test again.** If the tested behaviour changed, run `pipeship preview <id>` again and update `<dir>/verify.md` and `<dir>/test.md`.
