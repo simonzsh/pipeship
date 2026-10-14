@@ -123,7 +123,7 @@ Before you push, check the rules of the repo and of the workspace (CLAUDE.md, AG
 
 1. Push every chunk branch.
 2. In stack order, open one PR per chunk: `gh pr create --head <branch> --base <previous branch>` (the first PR of each repo targets that repo's base). Title from the ticket and chunk; body: what this chunk does, a link to the ticket, and the stack position ("2/3").
-3. `pipeship chunk <id> <chunk> --pr <url>`. The chunk stays `done`: the dashboard shows the PR link.
+3. `pipeship chunk <id> <chunk> --pr <url>`. The chunk stays `done`: the dashboard shows the PR link. The dashboard later sets `merged` or `closed` from GitHub.
 
 With several repos, once every PR exists, add a "Related PRs" list with the other repos' PRs to each PR body (`gh pr edit <url> --body-file <file>`).
 

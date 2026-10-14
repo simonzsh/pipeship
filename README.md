@@ -120,6 +120,8 @@ The header can request a pipeline stop (the agents stop after their current step
 
 The PR stack is always visible, with one row per repo, its path and its merge button. A finished pipeline's PRs merge in two steps, one button at a time. The green "Combine PRs" button merges each PR into the branch below, from the top, so one PR is left. The violet "Merge into <base>" button then squash-merges that PR into the base branch, after a confirmation. Both wait for the checks and stop at the first PR that cannot merge, with the reason in the pipeline's detail. Only one merge runs at a time.
 
+The dashboard also syncs PR statuses with GitHub. At startup, on page load and every 60 seconds, it runs `gh pr view` for each chunk that has a PR and is not merged. It skips pipelines with no such PR, and pipelines while a merge runs. A PR merged elsewhere sets the chunk to `merged`. A PR closed without merge sets it to `closed`, and a reopened PR sets it back to `done`. Without `gh`, or on an error, the state stays as it is and the error goes to `~/.pipeship/dashboard.log`. A closed PR blocks both merge buttons with "PR #n is closed". In the pipeline list, a violet merge icon shows that all PRs of a pipeline are merged.
+
 ### Test tab
 
 The test URLs, one per service, and the agent's `test.md` guide: the page to open, the steps to follow, what could not be tested. You can test without leaving the dashboard. Code blocks in the guide are highlighted.

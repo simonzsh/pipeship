@@ -1,4 +1,4 @@
-import { CheckCircle2, GitMerge, Loader2, MessageCircleQuestion, Square, XCircle, type LucideIcon } from "lucide-react";
+import { CheckCircle2, GitMerge, GitPullRequestClosed, Loader2, MessageCircleQuestion, Square, XCircle, type LucideIcon } from "lucide-react";
 import type { Status } from "../state.ts";
 import { Badge } from "./components/ui/badge";
 
@@ -75,9 +75,9 @@ export function statusConfig(status: string): StatusConfig {
   return STATUS[status as Status] ?? STATUS[STATUS_ORDER[STATUS_ORDER.length - 1]!];
 }
 
-// A chunk's status is free text from the skill: "done", "merged" and "failed" are final, anything else is in progress.
-// "merging" comes from the dashboard while a merge runs on that chunk: violet, so it does not look like an agent coding.
-const NO_ACTIVITY = ["done", "merged", "failed", "merging"];
+// A chunk's status is free text from the skill: "done", "merged", "closed" and "failed" are final, anything else is in progress.
+// "closed" comes from the PR sync (PR closed without merge). "merging" comes from the dashboard while a merge runs on that chunk: violet, so it does not look like an agent coding.
+const NO_ACTIVITY = ["done", "merged", "closed", "failed", "merging"];
 
 // The label next to the spinner while an agent works on the chunk: "Coding…" at implement, "Cleaning…" at review.
 export function chunkActivity(status: string): string | undefined {
@@ -102,6 +102,7 @@ export function ChunkStatusIcon({ status, title }: { status: string; title?: str
 function chunkIcon(status: string, label: string) {
   if (status === "done") return <CheckCircle2 className="size-4 text-emerald-600 dark:text-emerald-400" aria-label={label} />;
   if (status === "merged") return <GitMerge className="size-4 text-violet-600 dark:text-violet-400" aria-label={label} />;
+  if (status === "closed") return <GitPullRequestClosed className="size-4 text-red-600/70 dark:text-red-400/70" aria-label={label} />;
   if (status === "failed") return <XCircle className="size-4 text-red-600 dark:text-red-400" aria-label={label} />;
   if (status === "merging") return <Loader2 className="size-4 animate-spin text-violet-600 dark:text-violet-400" aria-label={label} />;
   return <Loader2 className="size-4 animate-spin text-blue-600 dark:text-blue-400" aria-label={label} />;

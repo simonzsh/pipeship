@@ -26,6 +26,8 @@ export interface Chunk {
 
 // Chunk.status stays free text; the merge engine writes this value.
 export const MERGED = "merged";
+// Written by the dashboard's PR sync for a PR closed without merge.
+export const CLOSED = "closed";
 
 export type MergeStatus = "running" | "done" | "failed";
 export type MergeMode = "combine" | "base";

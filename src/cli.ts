@@ -174,7 +174,7 @@ async function main() {
     case "dashboard":
       return print(args[0] === "stop" ? await stopDashboard() : await startDashboard());
     case "serve":
-      await serve(port);
+      await serve(port, { prSync: true });
       return console.log(`pipeship dashboard on http://localhost:${port}`);
     default:
       print(USAGE);
