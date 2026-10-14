@@ -119,7 +119,7 @@ export function PipelineActions({ p, merging, starting }: { p: State; merging: b
   if (p.status === "archived") actions.push("unarchive");
   if (finished(p)) actions.push("delete");
   // Delete would remove the worktrees a merge runs in: it waits, disabled.
-  const disabledTitle = (name: ActionName) => (name === "delete" && merging ? "Wait for the merge to end" : undefined);
+  const disabledTitle = (name: ActionName) => (name === "delete" && merging ? "Wait for the merges to end" : undefined);
   return actions.map((name) => <ActionButton key={name} id={p.id} action={name} hasServers={!!p.preview} disabledTitle={disabledTitle(name)} />);
 }
 

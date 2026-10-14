@@ -37,11 +37,9 @@ export function allMerged(p: Pick<State, "chunks">): boolean {
 export const CLOSED = "closed";
 
 export type MergeStatus = "running" | "done" | "failed";
-export type MergeMode = "combine" | "base";
 export interface MergeRun {
   status: MergeStatus;
   repo: string; // Repo.path whose stack this run merges
-  mode: MergeMode; // "combine" folds the stack into the bottom PR; "base" squash-merges the last PR into the base branch
   pid?: number; // process that runs the merge (the dashboard server)
   current?: string; // name of the chunk being merged, or the one that stopped the merge
   message?: string; // progress, e.g. "waiting for checks on #12 (2 pending)"
@@ -87,7 +85,7 @@ export interface State {
   preview?: { url: string; port: number; pid?: number; log: string; services?: PreviewService[] };
   session?: Session;
   previewError?: string; // why the last dashboard "Start preview" failed
-  merge?: MergeRun; // last "Merge stack" run from the dashboard
+  merges?: Record<string, MergeRun>; // last dashboard merge run per repo, keyed by Repo.path
   stopRequested: boolean;
   createdAt: string;
   updatedAt: string;
@@ -186,7 +184,7 @@ export function readState(id: string): State {
   return upgrade(JSON.parse(readFileSync(path, "utf8")));
 }
 
-type Raw = State & { repo?: string; base?: string; waitingFor?: string; ticket: { ref?: string; url?: string } };
+type Raw = State & { merge?: MergeRun & { mode?: unknown }; repo?: string; base?: string; waitingFor?: string; ticket: { ref?: string; url?: string } };
 
 // Runs on every read and must accept any old file.
 function upgrade(raw: Raw): State {
@@ -210,8 +208,12 @@ function upgrade(raw: Raw): State {
   if (raw.status === "waiting_for_user" && !raw.waiting) raw.waiting = { step: raw.step, ...(raw.waitingFor && { reason: raw.waitingFor }) };
   delete raw.waitingFor;
   raw.status = pipelineStatus(raw);
-  // Merge runs saved before combine mode existed were all base merges.
-  if (raw.merge && !raw.merge.mode) raw.merge.mode = "base";
+  // One run per pipeline became one per repo; old runs also held a mode.
+  if (raw.merge) {
+    const { mode: _, ...run } = raw.merge;
+    if (run.repo) (raw.merges ??= {})[run.repo] ??= run; // no repo with several repos: no key, dropped
+    delete raw.merge;
+  }
   // State files written before `links` existed hold one `ref` (sometimes "A-1,A-2") and one `url`.
   const { ref, url, ...ticket } = raw.ticket;
   if (ticket.links) return raw;
