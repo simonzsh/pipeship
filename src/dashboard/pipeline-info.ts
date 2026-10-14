@@ -19,7 +19,7 @@ export function formatElapsed(startedAt: string, now = Date.now()): string {
 }
 
 // A running step of a pipeline that waits for the user shows as "waiting" and carries the question.
-export function displaySteps(p: Pick<State, "steps" | "status"> & Partial<Pick<State, "waitingFor">>): DisplayStep[] {
+export function displaySteps(p: Pick<State, "steps" | "status"> & Partial<Pick<State, "waiting">>): DisplayStep[] {
   return p.steps.map((s) => {
     const waiting = s.status === "running" && p.status === "waiting_for_user";
     return {
@@ -27,7 +27,7 @@ export function displaySteps(p: Pick<State, "steps" | "status"> & Partial<Pick<S
       status: waiting ? ("waiting" as const) : s.status,
       startedAt: s.startedAt,
       duration: s.startedAt && s.endedAt ? formatElapsed(s.startedAt, Date.parse(s.endedAt)) : undefined,
-      note: waiting ? p.waitingFor : undefined,
+      note: waiting ? p.waiting?.reason : undefined,
     };
   });
 }
