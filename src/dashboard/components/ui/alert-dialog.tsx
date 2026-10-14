@@ -1,4 +1,5 @@
 import * as AlertDialogPrimitive from "@radix-ui/react-alert-dialog";
+import type { VariantProps } from "class-variance-authority";
 import type { ComponentProps } from "react";
 import { cn } from "../../utils";
 import { buttonVariants } from "./button";
@@ -37,8 +38,12 @@ export function AlertDialogDescription({ className, ...props }: ComponentProps<t
   return <AlertDialogPrimitive.Description className={cn("text-sm text-muted-foreground", className)} {...props} />;
 }
 
-export function AlertDialogAction({ className, ...props }: ComponentProps<typeof AlertDialogPrimitive.Action>) {
-  return <AlertDialogPrimitive.Action className={cn(buttonVariants({ variant: "destructive" }), className)} {...props} />;
+export function AlertDialogAction({
+  className,
+  variant = "destructive",
+  ...props
+}: ComponentProps<typeof AlertDialogPrimitive.Action> & { variant?: VariantProps<typeof buttonVariants>["variant"] }) {
+  return <AlertDialogPrimitive.Action className={cn(buttonVariants({ variant }), className)} {...props} />;
 }
 
 export function AlertDialogCancel({ className, ...props }: ComponentProps<typeof AlertDialogPrimitive.Cancel>) {

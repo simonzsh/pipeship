@@ -752,6 +752,16 @@ test("base: one PR is squash-merged into main with a single gh call and no git w
   expect(sh(stack.origin, "rev-parse", "c1")).toBe(before);
 });
 
+test("merge engine: finishing the last PR archives a done pipeline, not a running one", async () => {
+  const stack = makeStack(1);
+  setStatus(stack.id, "done");
+  await mergeStack(stack.id, fakeGh(stack, 1).deps, "base");
+  expect(readState(stack.id).status).toBe("archived");
+  const busy = makeStack(1);
+  await mergeStack(busy.id, fakeGh(busy, 1).deps, "base");
+  expect(readState(busy.id).status).toBe("running");
+});
+
 test("base: a failing check stops the merge, and a new run merges once it passes", async () => {
   const stack = makeStack(1);
   const gh = fakeGh(stack, 1);
@@ -2014,6 +2024,39 @@ syncTest("pr sync: a PR merged outside pipeship sets the chunk to merged", async
   expect(chunkStatuses(id)).toEqual(["merged"]);
   expect(allMerged(readState(id))).toBe(true);
   expect(logs).toEqual([`pr sync: ${id}/c1 -> merged`]);
+});
+
+syncTest("pr sync: the last PR merged archives a done pipeline", async () => {
+  const id = syncPipeline("sync archive", [111]);
+  setStatus(id, "done");
+  await syncPrStatuses({ run: syncGh({ [prUrl(111)]: { state: "MERGED" } }).run, log: () => {} });
+  expect(readState(id).status).toBe("archived");
+});
+
+syncTest("pr sync: no auto-archive while running or while a PR is open", async () => {
+  const running = syncPipeline("sync running", [112]);
+  const partial = syncPipeline("sync partial", [113, 114]);
+  setStatus(partial, "done");
+  const gh = syncGh({ [prUrl(112)]: { state: "MERGED" }, [prUrl(113)]: { state: "MERGED" } });
+  await syncPrStatuses({ run: gh.run, log: () => {} });
+  expect(readState(running).status).toBe("running");
+  expect(chunkStatuses(running)).toEqual(["merged"]);
+  expect(readState(partial).status).toBe("done");
+});
+
+syncTest("pr sync: auto-archive stops the preview of a ready pipeline", async () => {
+  const id = donePipeline(SERVER);
+  upsertChunk(id, { name: "c", pr: prUrl(115) });
+  await requestPreviewStart(id).done;
+  const pid = readState(id).preview!.services![0]!.pid!;
+  try {
+    await syncPrStatuses({ run: syncGh({ [prUrl(115)]: { state: "MERGED" } }).run, log: () => {} });
+    expect(readState(id).status).toBe("archived");
+    expect(readState(id).preview).toBeUndefined();
+    expect(isAlive(pid)).toBe(false);
+  } finally {
+    await stopPreviewQuiet(id);
+  }
 });
 
 syncTest("pr sync: a PR closed without merge sets closed, a reopened PR goes back to done", async () => {

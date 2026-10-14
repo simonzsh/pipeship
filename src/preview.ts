@@ -4,7 +4,7 @@ import { connect, createServer } from "node:net";
 import { createHash } from "node:crypto";
 import { dirname, join } from "node:path";
 import { findRepo, repoName, sharesRepo, topChunk } from "./repos.ts";
-import { home, listStates, pipelineDir, readState, updateState, type PreviewService, type Repo, type State } from "./state.ts";
+import { allMerged, home, listStates, pipelineDir, readState, updateState, type PreviewService, type Repo, type State } from "./state.ts";
 
 export interface ServiceRecipe {
   name: string;
@@ -592,6 +592,23 @@ export async function archivePipeline(id: string): Promise<State> {
   return updateState(id, (s) => {
     s.status = "archived";
   });
+}
+
+// Once every PR is merged the pipeline has no work left. Never throws: callers are the merge and the PR sync.
+export async function archiveIfAllMerged(id: string): Promise<boolean> {
+  try {
+    const s = readState(id);
+    if (!["ready", "done", "failed"].includes(s.status) || s.merge?.status === "running" || !allMerged(s)) return false;
+    await stopPreview(id);
+    // Re-check: the status may have changed while the preview stopped.
+    const after = updateState(id, (x) => {
+      if (["ready", "done", "failed"].includes(x.status) && allMerged(x)) x.status = "archived";
+    });
+    return after.status === "archived";
+  } catch (err) {
+    console.error(`auto-archive ${id}: ${err instanceof Error ? err.message : String(err)}`);
+    return false;
+  }
 }
 
 // The worktree folders are flat: try each repo until one owns the worktree.

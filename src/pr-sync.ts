@@ -1,3 +1,4 @@
+import { archiveIfAllMerged } from "./preview.ts";
 import { defaultRunner, errorMessage, type Runner } from "./merge.ts";
 import { CLOSED, home, listStates, MERGED, readState, writeState, type Chunk, type State } from "./state.ts";
 
@@ -9,6 +10,7 @@ export interface SyncDeps {
   run: Runner;
   log: (line: string) => void;
   timeoutMs: number;
+  archive: (id: string) => Promise<unknown>;
   lastError: { value?: string }; // the previous pass's error, to log each error once
 }
 
@@ -48,6 +50,7 @@ export async function syncPrStatuses(deps: Partial<SyncDeps> = {}): Promise<{ ch
     run: deps.run ?? defaultRunner,
     log: deps.log ?? ((l) => console.error(l)),
     timeoutMs: deps.timeoutMs ?? GH_TIMEOUT_MS,
+    archive: deps.archive ?? archiveIfAllMerged,
     lastError: deps.lastError ?? {},
   };
   const total = { checked: 0, changed: 0, failed: 0 };
@@ -95,6 +98,7 @@ export async function syncPrStatuses(deps: Partial<SyncDeps> = {}): Promise<{ ch
       writeState(x);
       total.changed += changes.length;
       changes.forEach((l) => d.log(l));
+      if (changes.some((l) => l.endsWith(`-> ${MERGED}`))) await d.archive(id);
     } catch (err) {
       d.log(`pr sync: cannot update ${id}: ${errorMessage(err)}`);
     }

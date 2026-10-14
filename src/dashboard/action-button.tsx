@@ -1,10 +1,11 @@
 import { Archive, Loader2, Play, Square, Trash2, type LucideIcon } from "lucide-react";
+import type { VariantProps } from "class-variance-authority";
 import { useState } from "react";
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription,
   AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger,
 } from "./components/ui/alert-dialog";
-import { Button } from "./components/ui/button";
+import { Button, buttonVariants } from "./components/ui/button";
 import type { State } from "../state.ts";
 import { finished } from "./pipeline-info";
 import { postAction } from "./utils";
@@ -18,6 +19,7 @@ interface ActionDef {
   description: string;
   serversNote?: string; // appended when the pipeline has test servers
   confirm: string;
+  variant?: VariantProps<typeof buttonVariants>["variant"]; // confirm button style, destructive by default
 }
 
 // Once the agents are done, the only things left to stop are the test servers.
@@ -47,8 +49,9 @@ const ACTIONS: Record<"stopPipeline" | "stopServer" | "archive" | "delete", Acti
     iconClass: "text-muted-foreground",
     button: "Archive",
     title: "Archive this pipeline?",
-    description: "The pipeline moves to the archived group and the test servers stop. You cannot undo it: you can only delete it after.",
+    description: "The pipeline moves to the archived group and its preview stops. You cannot undo it: you can only delete it after.",
     confirm: "Archive",
+    variant: "default",
   },
   delete: {
     endpoint: "delete",
@@ -66,7 +69,7 @@ type ActionName = keyof typeof ACTIONS;
 
 // Test servers usually start at the last step: only mention them when some exist.
 function ActionButton({ id, action, hasServers }: { id: string; action: ActionName; hasServers?: boolean }) {
-  const { endpoint, icon: Icon, iconClass, button, title, description, serversNote, confirm } = ACTIONS[action];
+  const { endpoint, icon: Icon, iconClass, button, title, description, serversNote, confirm, variant } = ACTIONS[action];
   const [error, setError] = useState<string>();
   const run = async () => {
     setError(undefined);
@@ -87,7 +90,7 @@ function ActionButton({ id, action, hasServers }: { id: string; action: ActionNa
         </AlertDialogHeader>
         <AlertDialogFooter>
           <AlertDialogCancel>Cancel</AlertDialogCancel>
-          <AlertDialogAction onClick={run}>{confirm}</AlertDialogAction>
+          <AlertDialogAction variant={variant} onClick={run}>{confirm}</AlertDialogAction>
         </AlertDialogFooter>
       </AlertDialogContent>
     </AlertDialog>
