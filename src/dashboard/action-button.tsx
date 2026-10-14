@@ -42,6 +42,7 @@ const ACTIONS: Record<"stopPipeline" | "stopServer" | "archive" | "delete", Acti
     title: "Stop the preview?",
     description: "The preview stops. The code, branches and PRs stay in place.",
     confirm: "Stop",
+    variant: "default",
   },
   archive: {
     endpoint: "archive",
