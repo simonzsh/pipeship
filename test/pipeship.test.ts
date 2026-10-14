@@ -11,7 +11,7 @@ import {
   requestPreviewStart, savedRecipePath, startOrder, startPreview, stopPipeline, stopPreview, stopPreviewAndSettle, type Service, unarchivePipeline,
 } from "../src/preview.ts";
 import { diffTotals, parseDiff } from "../src/diff.ts";
-import { baseRef, DiffError, gitDiff, headRef, pipelineDiff } from "../src/diff-git.ts";
+import { baseRef, DiffError, gitDiff, headRef, pipelineDiff, resetFetchCache } from "../src/diff-git.ts";
 import { DEFAULT_PORT, serve } from "../src/server.ts";
 import {
   classifyPr, defaultRunner, DEFAULT_LIMITS, failStaleMerges, mergeStack, MergeError, resolveMergeRepo, startMerge, type MergeDeps, type PrView, type Runner,
@@ -1950,6 +1950,24 @@ test("pipelineDiff compares against the base on origin, not a stale local copy",
   expect((await pipelineDiff(stack.id, null, "c2")).files.map((f) => f.path)).toEqual(["f2.txt", "wip.txt"]);
 });
 
+test("pipelineDiff reuses a recent fetch unless forced, and shares the in-flight one", async () => {
+  const stack = makeStack(1);
+  const other = join(stack.dir, "other");
+  sh(stack.dir, "clone", "-q", stack.origin, other);
+  const before = sh(stack.clone, "rev-parse", "origin/main");
+  resetFetchCache();
+  const [a, b] = await Promise.all([pipelineDiff(stack.id, null, "c1"), pipelineDiff(stack.id, null, "c1")]);
+  expect(a.files).toEqual(b.files);
+  commitFile(other, "upstream.txt", "upstream\n", "upstream change");
+  sh(other, "push", "-q", "origin", "main");
+  // Within the TTL: no new fetch, so the local copy of origin/main stays where it was.
+  expect((await pipelineDiff(stack.id, null, "c1")).files.map((f) => f.path)).toEqual(["f1.txt"]);
+  expect(sh(stack.clone, "rev-parse", "origin/main")).toBe(before);
+  const forced = await pipelineDiff(stack.id, null, "c1", undefined, { fetch: true });
+  expect(sh(stack.clone, "rev-parse", "origin/main")).toBe(sh(stack.origin, "rev-parse", "main"));
+  expect(forced.files.map((f) => f.path)).toEqual(["f1.txt"]);
+});
+
 test("gitDiff caps the output and cuts on a file boundary", async () => {
   const stack = makeStack(3);
   const full = await gitDiff(stack.clone, "main", "c3");
@@ -1989,6 +2007,20 @@ test("the diff route answers 200, 404, 400 and 409", async () => {
     expect(await get(`${multi.id}/diff`)).toMatchObject({ status: 400, body: { code: "bad_request" } });
     expect(await get(`${multi.id}/diff?repo=nope`)).toMatchObject({ status: 400 });
     expect((await get(`${multi.id}/diff?repo=other`)).body.files.map((f: { path: string }) => f.path)).toEqual(["f1.txt"]);
+
+    // fetch=1 forces the fetch: origin/c1 moves only then.
+    const o = join(stack.dir, "other");
+    sh(stack.dir, "clone", "-q", stack.origin, o);
+    sh(o, "checkout", "-q", "c1");
+    commitFile(o, "late.txt", "late\n", "late");
+    sh(o, "push", "-q", "origin", "c1");
+    const files = async (q: string) => ((await get(`${stack.id}/diff?${q}`)).body.files as { path: string }[]).map((f) => f.path);
+    expect(await files("chunk=c1")).toEqual(["f1.txt"]);
+    const behind = sh(stack.clone, "rev-parse", "origin/c1");
+    expect(behind).not.toBe(sh(stack.origin, "rev-parse", "c1"));
+    await files("chunk=c1&fetch=1");
+    expect(sh(stack.clone, "rev-parse", "origin/c1")).toBe(sh(stack.origin, "rev-parse", "c1"));
+    expect((await get(`${stack.id}/diff?chunk=c2&fetch=1`)).body.range).toBe("origin/c1...c2");
 
     upsertChunk(stack.id, { name: "ghost", branch: "feat/ghost", status: "done" });
     expect(await get(`${stack.id}/diff?chunk=ghost`)).toMatchObject({ status: 409, body: { code: "missing_ref" } });
@@ -2072,6 +2104,7 @@ test("diffRequests: whole stack skips repos without branches, a chunk targets it
   expect(diffRequests(p, { chunk: "c2" })).toEqual([{ repo: "/r/web", chunk: "c2" }]);
   expect(diffRequests(p, { chunk: "nope" })).toEqual([]);
   expect(diffUrl("a b", { repo: "/r/api", chunk: "c1" })).toBe("/api/pipelines/a%20b/diff?repo=%2Fr%2Fapi&chunk=c1");
+  expect(diffUrl("a b", { repo: "/r/api", chunk: "c1" }, true)).toBe("/api/pipelines/a%20b/diff?repo=%2Fr%2Fapi&chunk=c1&fetch=1");
 });
 
 test("wait marks its step running and shows the question until the step moves on", () => {

@@ -43,8 +43,22 @@ export const headRef = (cwd: string, b: string) => firstRef(cwd, [local(b), remo
 // Base: origin first, as the base can move there while the local copy stays old.
 export const baseRef = (cwd: string, b: string) => firstRef(cwd, [remote(b), local(b)]);
 
+export const FETCH_TTL_MS = 30_000; // a branch click reuses a recent fetch instead of hitting the network
+const fetches = new Map<string, { at: number; done: Promise<void> }>();
+export const resetFetchCache = () => fetches.clear();
+
+// Shared in-flight promise per repo:branch. A failed fetch counts too: it is best effort, and retrying offline would only add 10 s.
+function fetchBranch(cwd: string, branch: string, force: boolean): Promise<void> {
+  const key = `${cwd}:${branch}`;
+  const hit = fetches.get(key);
+  if (hit && !force && Date.now() - hit.at < FETCH_TTL_MS) return hit.done;
+  const done = runFetch(cwd, branch);
+  fetches.set(key, { at: Date.now(), done });
+  return done;
+}
+
 // Best effort: offline or a branch not on origin keeps the refs we have.
-async function fetchBranch(cwd: string, branch: string): Promise<void> {
+async function runFetch(cwd: string, branch: string): Promise<void> {
   const refspec = `+${local(branch)}:${remote(branch)}`;
   await defaultRunner("git", ["fetch", "--quiet", "--no-tags", "--no-write-fetch-head", "origin", refspec], { cwd, timeoutMs: 10_000 }).catch(() => {});
 }
@@ -108,7 +122,7 @@ export async function gitDiff(
 }
 
 export async function pipelineDiff(
-  id: string, repoRef: string | null, chunk: string | null, limits = DIFF_LIMITS,
+  id: string, repoRef: string | null, chunk: string | null, limits = DIFF_LIMITS, opts: { fetch?: boolean } = {},
 ): Promise<DiffResponse> {
   if (!existsSync(statePath(id))) throw fail("not_found", `unknown pipeline: ${id}`);
   const state = readState(id);
@@ -120,7 +134,7 @@ export async function pipelineDiff(
   if (!existsSync(repo.path) || (await runGit(repo.path, ["rev-parse", "--git-dir"])).code !== 0) {
     throw fail("no_repo", `${repo.path} is not a git repository`);
   }
-  await Promise.all([fetchBranch(repo.path, range.from), fetchBranch(repo.path, range.to)]);
+  await Promise.all([fetchBranch(repo.path, range.from, !!opts.fetch), fetchBranch(repo.path, range.to, !!opts.fetch)]);
   const refs = await Promise.all([baseRef(repo.path, range.from), headRef(repo.path, range.to)]);
   const missing = refs.findIndex((r) => !r);
   if (missing >= 0) throw fail("missing_ref", `branch "${[range.from, range.to][missing]}" not found in ${name}`);

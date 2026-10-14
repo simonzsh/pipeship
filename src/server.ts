@@ -109,7 +109,7 @@ export async function serve(port = DEFAULT_PORT, opts: ServeOptions = {}) {
         }
         const q = new URL(req.url).searchParams;
         try {
-          return Response.json(await pipelineDiff(req.params.id, q.get("repo"), q.get("chunk")), {
+          return Response.json(await pipelineDiff(req.params.id, q.get("repo"), q.get("chunk"), undefined, { fetch: q.get("fetch") === "1" }), {
             headers: { "Cache-Control": "no-store" },
           });
         } catch (err) {

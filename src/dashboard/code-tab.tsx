@@ -1,4 +1,4 @@
-import { memo, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { AlertCircle, ChevronDown, ChevronRight, ChevronsDownUp, ChevronsUpDown, Loader2, RefreshCw } from "lucide-react";
 import type { DashboardState } from "../state.ts";
 import { repoName } from "../repos.ts";
@@ -18,24 +18,36 @@ export interface CodeTabProps {
 
 type Result = { loading: true } | { data: DiffResponse } | { error: string };
 
-// Refetch on manual refresh or when a chunk's branch/status changes, not on every SSE tick.
-// Previous data stays on screen while a URL refetches, so open files and highlighting survive.
-function useDiff(id: string, requests: DiffRequest[], refreshKey: string): { results: Result[]; fetching: boolean } {
+export interface RefreshKeys {
+  manual: number; // Refresh button: forces the server fetch
+  prBase: string; // a chunk's prBase changed: forces too
+  soft: string; // branch/status changed: goes through the server cache
+}
+
+// Stale-while-revalidate: each URL keeps its last result and shows it while a refetch runs.
+// Refetch on manual refresh or a branch/status/prBase change, not on every SSE tick.
+function useDiff(id: string, requests: DiffRequest[], keys: RefreshKeys): { results: Result[]; fetching: boolean } {
   const [results, setResults] = useState<Record<string, Result>>({});
   const [fetching, setFetching] = useState(false);
+  const prev = useRef({ ...keys, urlsKey: "" });
   const urls = requests.map((r) => diffUrl(id, r));
   const urlsKey = urls.join("\n");
   useEffect(() => {
+    // prBase is repo-wide, so it only counts as a change while the target stays the same.
+    const last = prev.current;
+    const force = keys.manual !== last.manual || (keys.prBase !== last.prBase && urlsKey === last.urlsKey);
+    prev.current = { ...keys, urlsKey };
     const ctl = new AbortController();
     setFetching(true);
-    setResults((prev) => Object.fromEntries(urls.flatMap((u) => (prev[u] && "data" in prev[u] ? [[u, prev[u]]] : []))));
+    // An old error must not stick: the revalidation below replaces it.
+    setResults((r) => Object.fromEntries(Object.entries(r).filter(([, v]) => "data" in v)));
     let pending = urls.length;
     const done = () => {
       if (--pending === 0 && !ctl.signal.aborted) setFetching(false);
     };
     if (pending === 0) setFetching(false);
-    for (const url of urls) {
-      fetch(url, { signal: ctl.signal, cache: "no-store" })
+    for (const [i, url] of urls.entries()) {
+      fetch(force ? diffUrl(id, requests[i]!, true) : url, { signal: ctl.signal, cache: "no-store" })
         .then(async (res) => {
           const body = await res.json().catch(() => null);
           if (ctl.signal.aborted) return;
@@ -54,7 +66,7 @@ function useDiff(id: string, requests: DiffRequest[], refreshKey: string): { res
     }
     return () => ctl.abort();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [urlsKey, refreshKey]);
+  }, [urlsKey, keys.manual, keys.prBase, keys.soft]);
   return { results: urls.map((u) => results[u] ?? ({ loading: true } as Result)), fetching };
 }
 
@@ -137,19 +149,24 @@ function FilePath({ path }: { path: string }) {
 
 // Line height of the diff table (leading-5): the placeholder keeps the page height before render.
 const LINE_PX = 20;
+const MARGIN_PX = 1500;
 
 // Renders its children only once near the viewport, then keeps them: a big diff paints in slices.
 function WhenVisible({ lines, children }: { lines: number; children: ReactNode }) {
   const ref = useRef<HTMLDivElement>(null);
   const [seen, setSeen] = useState(false);
-  useEffect(() => {
+  // Layout effect: files already near the screen render before the first paint.
+  // The observer fires a frame later, which made the diff blink on a branch switch.
+  useLayoutEffect(() => {
     const el = ref.current;
     if (!el) return;
+    const r = el.getBoundingClientRect();
+    if (r.top < innerHeight + MARGIN_PX && r.bottom > -MARGIN_PX) return setSeen(true);
     const io = new IntersectionObserver((entries) => {
       if (!entries.some((e) => e.isIntersecting)) return;
       setSeen(true);
       io.disconnect();
-    }, { rootMargin: "1500px 0px" });
+    }, { rootMargin: `${MARGIN_PX}px 0px` });
     io.observe(el);
     return () => io.disconnect();
   }, []);
@@ -274,8 +291,9 @@ export function CodeTab({ p, target, onTarget }: CodeTabProps) {
   const requests = useMemo(() => diffRequests(p, target), [p, target]);
   // A chunk's range starts at the previous chunk, so any chunk of the repo can move it.
   const repos = new Set(requests.map((r) => r.repo));
-  const refreshKey = `${manual}:${JSON.stringify(p.chunks.filter((c) => repos.has(c.repo)).map((c) => [c.branch, c.status, c.prBase]))}`;
-  const { results, fetching } = useDiff(p.id, requests, refreshKey);
+  const mine = p.chunks.filter((c) => repos.has(c.repo));
+  const keys = { manual, prBase: JSON.stringify(mine.map((c) => c.prBase)), soft: JSON.stringify(mine.map((c) => [c.branch, c.status])) };
+  const { results, fetching } = useDiff(p.id, requests, keys);
   const multi = p.repos.length > 1;
 
   const chunk = target.chunk ? p.chunks.find((c) => c.name === target.chunk) : undefined;
