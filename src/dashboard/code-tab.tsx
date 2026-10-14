@@ -24,8 +24,8 @@ export interface RefreshKeys {
   soft: string; // branch/status changed: goes through the server cache
 }
 
-// Stale-while-revalidate: every URL seen keeps its result, and a target change shows it at once while a refetch runs.
-// Refetch on manual refresh or when a chunk's branch/status changes, not on every SSE tick.
+// Stale-while-revalidate: each URL keeps its last result and shows it while a refetch runs.
+// Refetch on manual refresh or a branch/status/prBase change, not on every SSE tick.
 function useDiff(id: string, requests: DiffRequest[], keys: RefreshKeys): { results: Result[]; fetching: boolean } {
   const [results, setResults] = useState<Record<string, Result>>({});
   const [fetching, setFetching] = useState(false);
