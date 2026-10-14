@@ -7,7 +7,7 @@ import { CodeTab, type DiffTarget } from "./code-tab";
 import { Badge } from "./components/ui/badge";
 import { Button } from "./components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "./components/ui/tabs";
-import { CombinedNote, MergeButton } from "./merge-button";
+import { MergeButton } from "./merge-button";
 import { allMerged, displaySteps, finished, timeAgo } from "./pipeline-info";
 import { NoPreviewPanel, PreviewPanel } from "./preview-panel";
 import { AgentLogo, T3ThreadButton } from "./session";
@@ -44,7 +44,6 @@ export function PipelineDetail({ p, onBack }: { p: DashboardState; onBack: () =>
       ) : (
         <p className="text-xs text-muted-foreground">No branch yet</p>
       )}
-      {merge && <CombinedNote merge={merge} chunks={chunks} />}
     </>
   );
   // Same layout for one repo or several: the repo row carries its merge button.

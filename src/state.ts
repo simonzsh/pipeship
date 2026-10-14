@@ -37,11 +37,9 @@ export function allMerged(p: Pick<State, "chunks">): boolean {
 export const CLOSED = "closed";
 
 export type MergeStatus = "running" | "done" | "failed";
-export type MergeMode = "combine" | "base";
 export interface MergeRun {
   status: MergeStatus;
   repo: string; // Repo.path whose stack this run merges
-  mode: MergeMode; // "combine" folds the stack into the bottom PR; "base" squash-merges the last PR into the base branch
   pid?: number; // process that runs the merge (the dashboard server)
   current?: string; // name of the chunk being merged, or the one that stopped the merge
   message?: string; // progress, e.g. "waiting for checks on #12 (2 pending)"
@@ -210,8 +208,8 @@ function upgrade(raw: Raw): State {
   if (raw.status === "waiting_for_user" && !raw.waiting) raw.waiting = { step: raw.step, ...(raw.waitingFor && { reason: raw.waitingFor }) };
   delete raw.waitingFor;
   raw.status = pipelineStatus(raw);
-  // Merge runs saved before combine mode existed were all base merges.
-  if (raw.merge && !raw.merge.mode) raw.merge.mode = "base";
+  // Runs saved before the single flow held a mode.
+  if (raw.merge) delete (raw.merge as { mode?: unknown }).mode;
   // State files written before `links` existed hold one `ref` (sometimes "A-1,A-2") and one `url`.
   const { ref, url, ...ticket } = raw.ticket;
   if (ticket.links) return raw;
