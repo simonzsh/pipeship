@@ -57,7 +57,7 @@ export function readInstalled(env: NodeJS.ProcessEnv = process.env): Installed |
   try {
     const data = JSON.parse(readFileSync(file, "utf8"));
     const entry = (data.plugins ?? data)[PLUGIN_KEY]?.[0];
-    return entry?.installPath ? { installPath: entry.installPath, version: String(entry.version ?? "") } : undefined;
+    return typeof entry?.installPath === "string" && entry.installPath ? { installPath: entry.installPath, version: String(entry.version ?? "") } : undefined;
   } catch {
     return undefined;
   }

@@ -47,20 +47,32 @@ async function listen(options: Parameters<typeof Bun.serve>[0] & { port: number 
   }
 }
 
+// Detached so the dashboard outlives its parent; runs from ~/.pipeship, not the caller's project.
+export function spawnDashboard(command: string, args: string[]) {
+  mkdirSync(home(), { recursive: true });
+  const out = openSync(join(home(), "dashboard.log"), "a");
+  const child = spawn(command, args, { cwd: home(), detached: true, stdio: ["ignore", out, out] });
+  child.unref();
+  writeFileSync(join(home(), "dashboard.pid"), String(child.pid));
+}
+
 export interface ServeOptions { prSync?: boolean; retryMs?: number; update?: Partial<InstallDeps> }
 
 export async function serve(port = DEFAULT_PORT, opts: ServeOptions = {}) {
   let sync: ReturnType<typeof startPrSync> | undefined;
   const assets = await buildDashboard();
-  // Hand the port to the new version's launcher, then leave. Previews are detached and keep running.
+  let restarting = false;
+  // Start the new version's launcher first (it retries the bind), then free the port and leave. Previews are detached.
   const handoff = (launcher: string) => {
+    try {
+      spawnDashboard(launcher, ["serve", "--port", String(server.port)]);
+    } catch (err) {
+      restarting = false;
+      console.error(`restart failed: ${errorMessage(err)}`);
+      return;
+    }
     server.stop(true);
     sync?.stop();
-    mkdirSync(home(), { recursive: true });
-    const out = openSync(join(home(), "dashboard.log"), "a");
-    const child = spawn(launcher, ["serve", "--port", String(server.port)], { cwd: home(), detached: true, stdio: ["ignore", out, out] });
-    child.unref();
-    writeFileSync(join(home(), "dashboard.pid"), String(child.pid));
     process.exit(0);
   };
   const server = await listen({
@@ -72,12 +84,14 @@ export async function serve(port = DEFAULT_PORT, opts: ServeOptions = {}) {
       "/api/update": async () => Response.json(await getUpdateInfo(), { headers: { "Cache-Control": "no-store" } }),
       "/api/update/install": {
         POST: async () => {
+          if (restarting) return Response.json({ restarting: true, from: currentVersion() });
           try {
             const blocker = () =>
               anyPreviewStarting() ? "A test environment is starting: wait for it, then update" :
               isMergeRunning() ? "A merge is running: wait for it, then update" : undefined;
             const result = await installUpdate({ blocker, ...opts.update });
             if (!result.restarting) return Response.json({ restarting: false, message: result.message });
+            restarting = true;
             setTimeout(() => handoff(result.launcher), 300); // let the response go out first
             return Response.json({ restarting: true, from: currentVersion() });
           } catch (err) {
