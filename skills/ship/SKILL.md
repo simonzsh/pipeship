@@ -47,6 +47,9 @@ Steps: `explore`, `questions`, `plan`, `implement`, `review`, `stack`, `preview`
 - **The user can change the steps at any time** ("skip the review", "ask me your questions anyway"). Update the state with `pipeship step <id> <step> skipped|pending` and continue.
 - **Keep the steps that later steps need**: the test environment needs a worktree; PRs need commits.
 - On failure: `pipeship step <id> <step> failed`, explain what failed, and ask the user what to do.
+- **The checks** are the **fast checks** (typecheck, lint, format, repo rule scripts: they run in full) plus the **targeted tests** for the diff: test files added or changed, tests of the changed modules, and cross-cutting tests the diff can break (infra, env, routes, imports). Do not run the full suite: CI runs it on each PR. Exception: if CI does not run the full suite on PRs, or the user asks for it, run it once only, on the top of the stack, before step 6.
+- **Report the tests.** Every report that mentions checks lists the tests that ran and says that CI covers the rest. If the full suite ran locally instead, say so.
+- **One test suite at a time on the machine.** Never run two suites in parallel (several subagents, several worktrees). Subagents that run together run only their targeted tests.
 - **Every pause for the user names its step**: `pipeship wait <id> <step> --reason "<the question, in one short line>"`, then stop. This covers the questions of step 2, an approval that the repo or workspace rules require (CLAUDE.md, AGENTS.md…) before a push or a PR, and any decision you cannot make. The step shows amber on the dashboard and the card shows the question. When the user answers, the next `step` call ends the wait.
 - **A step that waits does not block an independent later step.** Example: when `stack` needs approval, run `preview` on the top worktree first, then run `wait` and ask once for everything that waits. Run `wait` last: any step that starts ends the wait.
 - While this pipeline runs, it replaces process skills such as brainstorming, writing-plans, using-git-worktrees, subagent-driven-development and finishing-a-development-branch. The only skills it uses are `simplify` and `code-review`, in step 5.
@@ -70,10 +73,12 @@ Subagent (read-only, model `sonnet`; Claude Code: `Explore` type). Input: `ticke
 - `## Repos`: other repos the ticket touches, when it names them or sibling git repos in the parent folder of each repo's git root match its code. Give the path and the reason. The subagent stays read-only: you run `pipeship repo <id> <path>` for each one and tell the user about dirty repos;
 - every file the ticket touches (modules, routes, models, UI, tests), with paths and one line on what each does today (per repo, when there are several);
 - repo conventions to follow (structure, naming, test style, branch names from recent `git branch -r`), per repo;
-- the exact **check commands** (lint, typecheck, tests) from each repo config;
+- the exact **fast checks** from each repo config (typecheck, lint, format, repo rule scripts such as an import check);
+- the **targeted tests**: the runner command that takes files or a filter (`npx vitest run <files>`, `pytest <paths>`, `go test ./pkg/...`, `bun test <files>`), and how to find the tests of a file: naming convention, test folders, cross-cutting tests that read the infra, env, routes or import graph;
+- whether CI runs the full suite on PRs (read `.github/workflows` or the equivalent);
 - how to start the app: run `pipeship recipe <repo>...` with all the repos. If it prints `none` and the repo has anything that serves requests (a web app, an API, an MCP server, a worker with a health route), write a draft recipe to `<dir>/recipe.json` (see "Test environment recipe"). If the repo runs several apps (a monorepo, a front and an API), the recipe lists one service per app. A back-end change needs a recipe too (see step 7). List what the app needs to run (database, env files, seed data, other services) and how to get test data locally.
 
-In `quick` mode, do the exploration yourself in the main session: on a small ticket a subagent costs as much as the work. Keep `explore.md` short: only the files to change, the check commands and how to start the app.
+In `quick` mode, do the exploration yourself in the main session: on a small ticket a subagent costs as much as the work. Keep `explore.md` short: only the files to change, the fast checks, the targeted tests and how to start the app.
 
 ## Step 2 — questions (human pause)
 
@@ -104,27 +109,29 @@ For each chunk, in stack order:
    - If the branch already exists, add `-2`.
 2. `pipeship chunk <id> <chunk> --worktree <path> --branch <branch> --status coding`. With several repos, add `--repo <name>`.
 
-Then launch **one subagent per chunk (model `sonnet`), started together** so they run in parallel. Each subagent gets: its worktree path (it works only there), `ticket.md`, `explore.md`, `plan.md` (contracts + its chunk), the check commands. It must: implement its chunk against the contracts, make the checks pass, commit, and report what it did. Install dependencies in the worktree if the checks need them.
+Then launch **one subagent per chunk (model `sonnet`), started together** so they run in parallel. Each subagent gets: its worktree path (it works only there), `ticket.md`, `explore.md`, `plan.md` (contracts + its chunk), the fast checks and the targeted tests. It must: implement its chunk against the contracts, make the checks pass, commit, and report what it did, with the tests that ran and a note that CI covers the rest. Install dependencies in the worktree if the checks need them.
 
-When all are done, **restack**: in stack order, rebase each chunk branch onto the previous one (`git -C <worktree> rebase <previous branch>`). The last chunk branch is the **top of the stack** and contains the whole feature. Run the checks on the top. With several repos, restack each repo on its own: each repo has its own top. If the restack or the checks fail, set the chunks to fix back to `--status coding`.
+When all are done, **restack**: in stack order, rebase each chunk branch onto the previous one (`git -C <worktree> rebase <previous branch>`). The last chunk branch is the **top of the stack** and contains the whole feature. Run the checks on the top, for the diff `<base>..<top branch>`. With several repos, restack each repo on its own: each repo has its own top. If the restack or the checks fail, set the chunks to fix back to `--status coding`.
 
 ## Step 5 — review
 
 1. **Global review** (one subagent, model `opus`, top worktree, diff `<base>..<top branch>`; with several repos, the top worktree and diff of every repo): duplicated helpers across chunks, contract mismatches, integration bugs. Parallel agents cannot see each other — only this review finds these.
 2. **Cleanup per chunk** (one subagent per chunk, model `sonnet`, status `cleaning`): simplification, dead code, repo conventions, readability. Use the `simplify` and `code-review` skills if available.
 3. Fix each problem **in the worktree of the chunk that owns the code**, commit, then restack the later chunks of that repo.
-4. **Safety rule**: after every pass that changes code, re-run the checks. If a check fails, fix it or revert the pass.
+4. **Safety rule**: after every pass that changes code, re-run the checks for the diff of the pass. If a check fails, fix it or revert the pass.
 
-In `quick` mode, skip the global review. Run one cleanup pass (one subagent, model `sonnet`) on the whole diff, with the same skills: simplification, dead code, repo conventions. It covers every chunk, so all chunks are `cleaning` together. Then run the checks once.
+In `quick` mode, skip the global review. Run one cleanup pass (one subagent, model `sonnet`) on the whole diff, with the same skills: simplification, dead code, repo conventions. It covers every chunk, so all chunks are `cleaning` together. Then run the checks once, for the whole diff.
 
-Write a short summary to `<dir>/review.md`.
+Write a short summary to `<dir>/review.md`. List the tests that ran and say that CI covers the rest.
 
 ## Step 6 — stack
 
 Before you push, check the rules of the repo and of the workspace (CLAUDE.md, AGENTS.md…). If they require the user's approval for a push or for a PR the team can see, run step 7 first, then `pipeship wait <id> stack --reason "Push <n> branches and open <n> PRs?"`, ask, and stop. Push only after an explicit yes. On a no, `pipeship step <id> stack skipped`.
 
+If the exception in **The checks** applies (CI does not run the full suite on PRs, or the user asks for it), run the full suite once now, on the top of each repo's stack. If it fails, fix it before you push.
+
 1. Push every chunk branch.
-2. In stack order, open one PR per chunk: `gh pr create --head <branch> --base <previous branch>` (the first PR of each repo targets that repo's base). Title from the ticket and chunk; body: what this chunk does, a link to the ticket, and the stack position ("2/3").
+2. In stack order, open one PR per chunk: `gh pr create --head <branch> --base <previous branch>` (the first PR of each repo targets that repo's base). Title from the ticket and chunk; body: what this chunk does, a link to the ticket, the stack position ("2/3"), the tests that ran, and a note that CI covers the rest.
 3. `pipeship chunk <id> <chunk> --pr <url>`. The chunk stays `done`: the dashboard shows the PR link. The dashboard later sets `merged` or `closed` from GitHub.
 
 With several repos, once every PR exists, add a "Related PRs" list with the other repos' PRs to each PR body (`gh pr edit <url> --body-file <file>`).
@@ -138,7 +145,7 @@ Run the changed code, front end or back end. An API, MCP or engine change needs 
 1. **Start.** First run `pipeship recipe <repo>...` again with the final repo list. If the list changed since step 1, update the `repo` names in the draft. Then run `pipeship preview <id>`. It uses each repo's top worktree. Add `--recipe <dir>/recipe.json` if there is a draft. It copies local files, installs, starts each service of the recipe on its own free port (back ends first, then fronts), waits until each answers, and marks the `preview` step done. A draft recipe that works is saved, so later pipelines in this repo skip this work. Give the user the URLs it prints (the first is the main front).
    Services the app needs (a local database, a queue) belong in a `start` command of the recipe, so the dashboard's "Stop preview" button stops them with the app (see "Test environment recipe"). Run other one-off setup yourself; for test data, see **Data** below.
 2. **Verify.** Use the changed behaviour the way its client does, and write what you called and what came back to `<dir>/verify.md`: a UI change in a browser (the preview tools of your harness), an HTTP API with `curl`, an MCP or other protocol with a real client. Cover the main path and one failure path. If you cannot exercise it (no test data, a missing service), say so in the summary. Report as working only what you exercised.
-3. **Fix.** If verification fails, fix the code in the worktree of the chunk that owns it, commit, restack and re-run the checks. Push only if step 6 opened PRs.
+3. **Fix.** If verification fails, fix the code in the worktree of the chunk that owns it, commit, restack and re-run the checks for the diff of the fix. Push only if step 6 opened PRs.
 4. **Test guide.** After verify, write `<dir>/test.md` for the user, in the user's language. The dashboard shows it in the pipeline's Test tab, so the user can test without leaving the dashboard. `verify.md` stays your evidence; `test.md` is the user's guide. Keep it short:
    - the direct URL of the changed page, not only the root;
    - how to log in if the app needs it: which local account, and where its credentials live;
@@ -153,7 +160,7 @@ If the preview fails to start, it prints the log tail: diagnose, fix the recipe 
 
 ## End
 
-Give the user a short summary: the test URL, the PRs in stack order (per repo), what the verification covered (or why it was skipped), and anything to check by hand. Point to the test guide: the user finds it in the pipeline's Test tab. The test servers keep running on purpose; the user stops them with the dashboard's "Stop preview" button and starts them again with "Start preview".
+Give the user a short summary: the test URL, the PRs in stack order (per repo), what the verification covered (or why it was skipped), the tests that ran (CI covers the rest), and anything to check by hand. Point to the test guide: the user finds it in the pipeline's Test tab. The test servers keep running on purpose; the user stops them with the dashboard's "Stop preview" button and starts them again with "Start preview".
 
 ## Test environment recipe
 
