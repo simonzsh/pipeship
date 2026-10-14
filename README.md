@@ -58,7 +58,7 @@ You can also ask in plain words: "ship ABC-123 with pipeship". pipeship writes t
 - **Modes**: `full` (default, all 7 steps) and `quick` (one chunk, blocking questions only, explore in the main session, one `sonnet` cleanup pass instead of the full review, no `opus`).
 - **`--skip`** removes steps, e.g. `--skip questions,stack`. You can also say "skip the review" during the run.
 - **Several repos**: a ticket can span several repos. Pass `--repo` once per repo, or let the explore step find them. Each repo gets its own stack of PRs.
-- pipeship only starts when you name it. It does not run on ordinary feature requests.
+- pipeship starts on its own whenever you give the agent a ticket to handle (a reference, a URL or a text). You do not need to name it. It does not run on questions or reviews.
 
 ## Test environment
 
