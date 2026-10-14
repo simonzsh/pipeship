@@ -227,7 +227,8 @@ function makeCtx(id: string, repo: string, d: MergeDeps): Ctx {
     progress(c, message);
   };
 
-  // Just after a fold, CI has not queued yet: "no checks" and "blocked" are not final answers.
+  // Just after a fold, GitHub may show the old head and CI has not queued yet: "no checks" and "blocked"
+  // are not final answers. With waitChecks false, only the new head is awaited.
   // `first` is reused for the first poll unless the PR changed since it was read (a fold).
   const waitReady: Ctx["waitReady"] = async (c, first, expectedHead, pushed, reuseFirst, waitChecks = true) => {
     const url = c.pr!;
@@ -243,7 +244,8 @@ function makeCtx(id: string, repo: string, d: MergeDeps): Ctx {
         const unseen = v.headRefOid !== expectedHead;
         const noChecks = waitChecks && hadChecks && v.statusCheckRollup.length === 0;
         if (unseen || (verdict.kind === "ready" && noChecks) || (verdict.kind === "blocked" && verdict.transient)) {
-          verdict = { kind: "wait", reason: `waiting for checks to start on #${n}`, pendingChecks: false };
+          const reason = waitChecks ? `waiting for checks to start on #${n}` : `waiting for GitHub to show the new head of #${n}`;
+          verdict = { kind: "wait", reason, pendingChecks: false };
         }
       }
       if (verdict.kind === "ready") break;
