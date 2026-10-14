@@ -1,5 +1,5 @@
-import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { AlertCircle, ChevronDown, ChevronRight, ChevronsDownUp, ChevronsUpDown, RefreshCw } from "lucide-react";
+import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from "react";
+import { AlertCircle, ArrowUp, ChevronDown, ChevronRight, ChevronsDownUp, ChevronsUpDown, RefreshCw } from "lucide-react";
 import { Spinner } from "./components/ui/spinner";
 import type { DashboardState } from "../state.ts";
 import { repoName } from "../repos.ts";
@@ -190,9 +190,6 @@ const FileDiff = memo(function FileDiff({ file, open, onToggle }: { file: DiffFi
         {open ? <ChevronDown className="size-4 shrink-0 text-muted-foreground" /> : <ChevronRight className="size-4 shrink-0 text-muted-foreground" />}
         <FilePath path={renamed ? `${file.oldPath} → ${file.newPath}` : file.path} />
         <span className={`shrink-0 rounded px-1.5 py-0.5 text-[11px] font-medium ${STATUS_STYLE[file.status]}`}>{file.status}</span>
-        {file.similarity !== undefined && file.status !== "modified" && (
-          <span className="shrink-0 text-xs text-muted-foreground">{file.similarity}%</span>
-        )}
         <span className="ml-auto" />
         <Counts additions={file.additions} deletions={file.deletions} />
       </button>
@@ -286,7 +283,37 @@ function OriginSync({ data }: { data: DiffResponse }) {
   );
 }
 
+// Sticky corner button: the diff scrolls inside the detail pane, so we find that pane from the tab itself.
+function ScrollTop({ root }: { root: RefObject<HTMLElement | null> }) {
+  const [shown, setShown] = useState(false);
+  const pane = useRef<HTMLElement | null>(null);
+  useEffect(() => {
+    let el = root.current?.parentElement ?? null;
+    while (el && !/(auto|scroll)/.test(getComputedStyle(el).overflowY)) el = el.parentElement;
+    pane.current = el;
+    if (!el) return;
+    const on = () => setShown(el.scrollTop > 400);
+    on();
+    el.addEventListener("scroll", on, { passive: true });
+    return () => el.removeEventListener("scroll", on);
+  }, [root]);
+  if (!shown) return null;
+  return (
+    <Button
+      size="icon"
+      variant="outline"
+      aria-label="Scroll to top"
+      title="Scroll to top"
+      className="sticky bottom-4 z-20 mr-4 -mt-10 self-end bg-card shadow-md dark:bg-card dark:hover:bg-accent"
+      onClick={() => pane.current?.scrollTo({ top: 0, behavior: "smooth" })}
+    >
+      <ArrowUp />
+    </Button>
+  );
+}
+
 export function CodeTab({ p, target, onTarget }: CodeTabProps) {
+  const root = useRef<HTMLDivElement>(null);
   const [manual, setManual] = useState(0);
   const [all, setAll] = useState<All>(null);
   const requests = useMemo(() => diffRequests(p, target), [p, target]);
@@ -305,7 +332,7 @@ export function CodeTab({ p, target, onTarget }: CodeTabProps) {
   const allOpen = all?.open ?? true;
 
   return (
-    <div className="flex flex-col gap-4">
+    <div ref={root} className="flex flex-col gap-4">
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1 px-6 text-sm">
         {/* Breadcrumb: "Whole stack" is the way back once a PR is picked. */}
         {chunk ? (
@@ -362,6 +389,7 @@ export function CodeTab({ p, target, onTarget }: CodeTabProps) {
           </div>
         );
       })}
+      <ScrollTop root={root} />
     </div>
   );
 }
