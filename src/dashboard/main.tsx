@@ -34,8 +34,9 @@ function App() {
   const [url, setUrl] = useState<UrlState>(() => parseUrl(location.search));
   const [live, setLive] = useState(false);
   const [, tick] = useState(0);
-  // Archived pipelines are history: the group starts collapsed.
-  const [archivedOpen, setArchivedOpen] = useState(false);
+  // Groups the user opened or closed. Archived pipelines are history: that group starts collapsed, the others open.
+  const [open, setOpen] = useState<Record<string, boolean>>({});
+  const isOpen = (status: string) => open[status] ?? status !== "archived";
 
   useEffect(() => {
     const events = new EventSource("/api/events");
@@ -150,7 +151,7 @@ function App() {
             <div className="flex min-h-0 flex-1 flex-col gap-5 overflow-y-auto px-3 py-4">
               {groups.map((g) => {
                 const { group, dot, text } = statusConfig(g.status);
-                const collapsed = g.status === "archived" && !archivedOpen;
+                const collapsed = !isOpen(g.status);
                 const title = (
                   <>
                     <span className={cn("size-1.5 rounded-full", dot)} />
@@ -160,19 +161,15 @@ function App() {
                 );
                 return (
                   <section key={g.status} className="flex flex-col gap-1.5">
-                    {g.status === "archived" ? (
-                      <button
-                        type="button"
-                        aria-expanded={!collapsed}
-                        onClick={() => setArchivedOpen(!archivedOpen)}
-                        className="flex cursor-pointer items-center gap-2 px-1"
-                      >
-                        {collapsed ? <ChevronRight className="size-3 text-muted-foreground" /> : <ChevronDown className="size-3 text-muted-foreground" />}
-                        {title}
-                      </button>
-                    ) : (
-                      <div className="flex items-center gap-2 px-1">{title}</div>
-                    )}
+                    <button
+                      type="button"
+                      aria-expanded={!collapsed}
+                      onClick={() => setOpen({ ...open, [g.status]: collapsed })}
+                      className="flex cursor-pointer items-center gap-2 px-1"
+                    >
+                      {collapsed ? <ChevronRight className="size-3 text-muted-foreground" /> : <ChevronDown className="size-3 text-muted-foreground" />}
+                      {title}
+                    </button>
                     {!collapsed && g.items.map((p) => (
                       <PipelineListItem key={p.id} p={p} selected={p.id === current.id} onSelect={() => selectPipeline(p.id)} />
                     ))}
