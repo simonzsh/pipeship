@@ -26,6 +26,7 @@ export function displaySteps(p: Pick<State, "steps" | "status"> & Partial<Pick<S
       name: s.name,
       status: waiting ? ("waiting" as const) : s.status,
       startedAt: s.startedAt,
+      duration: s.startedAt && s.endedAt ? formatElapsed(s.startedAt, Date.parse(s.endedAt)) : undefined,
       note: waiting ? p.waitingFor : undefined,
     };
   });

@@ -64,16 +64,24 @@ test("steps and chunks update the state", () => {
 
 test("the pipeline is ready once every step is done or skipped", () => {
   const { id } = createPipeline({ repos: [{ path: repo }], title: "t", source: "text", skip: ["preview"] });
-  for (const name of ["map", "questions", "plan", "implement", "review"] as const) setStep(id, name, "done");
+  for (const name of ["explore", "questions", "plan", "implement", "review"] as const) setStep(id, name, "done");
   expect(readState(id).status).toBe("running");
   setStep(id, "stack", "done");
   expect(readState(id).status).toBe("ready");
 });
 
+test("a step run again loses the end of its previous run", () => {
+  const { id } = createPipeline({ repos: [{ path: repo }], title: "t", source: "text" });
+  expect(setStep(id, "explore", "done").steps[0]!.endedAt).toBeDefined();
+  expect(setStep(id, "explore", "running").steps[0]!.endedAt).toBeUndefined();
+  setStep(id, "questions", "failed");
+  expect(waitForUser(id, "questions").steps[1]!.endedAt).toBeUndefined();
+});
+
 test("a failed pipeline stays failed when its last step ends", () => {
   const { id } = createPipeline({ repos: [{ path: repo }], title: "t", source: "text", mode: "quick" });
   setStep(id, "review", "failed");
-  for (const name of ["map", "questions", "implement", "review", "stack", "preview"] as const) setStep(id, name, "done");
+  for (const name of ["explore", "questions", "implement", "review", "stack", "preview"] as const) setStep(id, name, "done");
   expect(readState(id).status).toBe("failed");
 });
 
@@ -315,7 +323,7 @@ test("a session is matched to the T3 Code thread that runs it", () => {
 test("step records the T3 Code thread once T3 Code knows the session", () => {
   const state = createPipeline({ repos: [{ path: repo }], title: "t", source: "text", session: { harness: "claude", id: CLAUDE_ID, cwd: "/w" } });
   const step = (status: string) =>
-    spawnSync("bun", [join(import.meta.dir, "../src/cli.ts"), "step", state.id, "map", status], { encoding: "utf8", env: process.env });
+    spawnSync("bun", [join(import.meta.dir, "../src/cli.ts"), "step", state.id, "explore", status], { encoding: "utf8", env: process.env });
   step("running");
   expect(readState(state.id).session?.t3Thread).toBeUndefined();
   fakeT3Home([{ thread: T3_THREAD, cursor: { resume: CLAUDE_ID } }], process.env.T3CODE_HOME);
@@ -1677,7 +1685,7 @@ test("timeAgo uses the given clock", () => {
 });
 
 test("displaySteps shows a running step as waiting while the user is needed", () => {
-  const steps = [{ name: "map" as const, status: "done" as const }, { name: "plan" as const, status: "running" as const }];
+  const steps = [{ name: "explore" as const, status: "done" as const }, { name: "plan" as const, status: "running" as const }];
   expect(displaySteps({ steps, status: "running" })[1]!.status).toBe("running");
   expect(displaySteps({ steps, status: "waiting_for_user" }).map((s) => s.status)).toEqual(["done", "waiting"]);
 });
@@ -1755,9 +1763,19 @@ test("formatElapsed shows seconds, minutes and hours", () => {
 });
 
 test("displaySteps puts the question on the waiting step only", () => {
-  const steps = [{ name: "map" as const, status: "done" as const }, { name: "questions" as const, status: "running" as const }];
+  const steps = [{ name: "explore" as const, status: "done" as const }, { name: "questions" as const, status: "running" as const }];
   const out = displaySteps({ steps, status: "waiting_for_user", waitingFor: "3 questions" });
   expect(out.map((s) => s.note)).toEqual([undefined, "3 questions"]);
+});
+
+test("displaySteps gives a finished step the time it took", () => {
+  const steps = [
+    { name: "explore" as const, status: "done" as const, startedAt: "2026-01-01T00:00:00Z", endedAt: "2026-01-01T00:04:32Z" },
+    { name: "plan" as const, status: "failed" as const, startedAt: "2026-01-01T00:05:00Z", endedAt: "2026-01-01T00:05:42Z" },
+    { name: "implement" as const, status: "running" as const, startedAt: "2026-01-01T00:06:00Z" },
+    { name: "review" as const, status: "skipped" as const },
+  ];
+  expect(displaySteps({ steps, status: "running" }).map((s) => s.duration)).toEqual(["4m32", "42s", undefined, undefined]);
 });
 
 // A ready pipeline with a chunk worktree, so the preview routes can start it (no worktree argument).

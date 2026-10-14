@@ -3,7 +3,7 @@ import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import { assertRepoName, findRepo, repoName } from "./repos.ts";
 
-export const STEPS = ["map", "questions", "plan", "implement", "review", "stack", "preview"] as const;
+export const STEPS = ["explore", "questions", "plan", "implement", "review", "stack", "preview"] as const;
 export type StepName = (typeof STEPS)[number];
 export type StepStatus = "pending" | "running" | "done" | "skipped" | "failed";
 export const STATUSES = ["running", "waiting_for_user", "ready", "failed", "stopped"] as const;
@@ -248,6 +248,7 @@ export function setStep(id: string, name: StepName, status: StepStatus): State {
     step.status = status;
     if (status === "running") {
       step.startedAt = now;
+      delete step.endedAt; // a step run again is not finished
       s.step = name;
     }
     // The wait ends when any step starts or when the step it blocked moves on.
@@ -272,6 +273,7 @@ export function waitForUser(id: string, name: StepName, reason?: string): State 
     if (step.status !== "running") {
       step.status = "running";
       step.startedAt = new Date().toISOString();
+      delete step.endedAt;
     }
     s.step = name;
     s.status = "waiting_for_user";

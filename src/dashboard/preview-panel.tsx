@@ -45,3 +45,13 @@ export function PreviewPanel({ preview }: { preview: PanelPreview }) {
     </div>
   );
 }
+
+// Same box as the live preview, in grey: the test guide below it still applies.
+export function NoPreviewPanel() {
+  return (
+    <div className="flex items-center gap-3 rounded-lg border bg-muted/40 px-3 py-2.5 text-sm text-muted-foreground">
+      <Globe className="size-4 shrink-0" />
+      No test environment running
+    </div>
+  );
+}

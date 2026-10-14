@@ -10,8 +10,8 @@ export function resumeCommand(s: Session): string {
   return s.harness === "claude" ? `cd ${cwd} && claude --resume ${s.id}` : `cd ${cwd} && codex resume ${s.id}`;
 }
 
-// The two header buttons share their box, so they stay the same size side by side.
-const ICON_BUTTON = "flex size-6 items-center justify-center rounded-md";
+// Borderless and smaller than the action buttons above: the session links stay secondary.
+const SESSION_BUTTON = "flex h-6 items-center gap-1.5 rounded-md px-1.5 text-[11px] font-medium text-muted-foreground";
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -66,8 +66,8 @@ export function AgentLogo({ p }: { p: State }) {
           aria-label={canResume ? `Copy the command to resume the ${name} session` : `${name} session`}
           aria-disabled={!canResume}
           className={cn(
-            ICON_BUTTON,
-            canResume ? "cursor-pointer hover:bg-accent" : "cursor-default",
+            SESSION_BUTTON,
+            canResume ? "cursor-pointer hover:bg-accent hover:text-foreground" : "cursor-default",
           )}
           onClick={async (e) => {
             e.stopPropagation();
@@ -84,6 +84,7 @@ export function AgentLogo({ p }: { p: State }) {
               <path d={icon.path} />
             </svg>
           )}
+          {canResume && (copied ? "Copied" : "Copy session")}
         </button>
       </TooltipTrigger>
       <TooltipContent onClick={(e) => e.stopPropagation()}>
@@ -108,13 +109,14 @@ export function T3ThreadButton({ thread }: { thread: T3Thread }) {
         <a
           href={t3ThreadLink(thread)}
           aria-label="Open the thread in T3 Code"
-          className={cn(ICON_BUTTON, "text-foreground hover:bg-accent")}
+          className={cn(SESSION_BUTTON, "hover:bg-accent hover:text-foreground")}
           onClick={(e) => e.stopPropagation()}
         >
           {/* The mark is black in T3 Code: follow the text colour, like the ChatGPT logo. */}
-          <svg viewBox="7 29 111 74" fill="currentColor" className="h-3 w-auto">
+          <svg viewBox="7 29 111 74" fill="currentColor" className="h-3 w-auto text-foreground">
             <path d={T3_MARK} />
           </svg>
+          Open
         </a>
       </TooltipTrigger>
       <TooltipContent>Open in T3 Code</TooltipContent>
