@@ -116,8 +116,8 @@ export function startPrSync(opts: Partial<SyncDeps> & { intervalMs?: number; now
     running = syncPrStatuses({ ...deps, lastError })
       .catch((err) => (deps.log ?? console.error)(`pr sync: ${errorMessage(err)}`))
       .finally(() => {
-      running = undefined;
-    });
+        running = undefined;
+      });
   };
   pass();
   const timer = setInterval(pass, intervalMs);
