@@ -25,6 +25,7 @@ import { buildSearch, parseUrl } from "../src/dashboard/url.ts";
 import { allMerged, displaySteps, finished, formatElapsed, timeAgo } from "../src/dashboard/pipeline-info.ts";
 import { diffRequests, diffUrl } from "../src/dashboard/diff-requests.ts";
 import { highlightLines, languageOf } from "../src/dashboard/highlight.tsx";
+import { chunkActivity } from "../src/dashboard/status.tsx";
 
 const root = mkdtempSync(join(tmpdir(), "pipeship-test-"));
 process.env.PIPESHIP_HOME = join(root, "home");
@@ -618,7 +619,7 @@ function makeStack(n: number, commits = 1, name = "repo") {
   worktrees.forEach((wt, i) => sh(clone, "worktree", "add", "-q", wt, `c${i + 1}`));
   const { id } = createPipeline({ repos: [{ path: clone, base: "main" }], title: "stack" });
   worktrees.forEach((worktree, i) =>
-    upsertChunk(id, { name: `c${i + 1}`, branch: `c${i + 1}`, worktree, pr: `https://github.com/o/r/pull/${i + 1}`, status: "pr" }),
+    upsertChunk(id, { name: `c${i + 1}`, branch: `c${i + 1}`, worktree, pr: `https://github.com/o/r/pull/${i + 1}`, status: "done" }),
   );
   return { id, dir, origin, clone, worktrees };
 }
@@ -928,7 +929,7 @@ test("combine: three PRs fold top-down into the bottom PR, and nothing else move
   const s = readState(stack.id);
   expect(gh.calls).toEqual(["merge 3 --merge", "merge 2 --merge", "patch 1 body"]);
   expect(s.merge).toMatchObject({ status: "done", mode: "combine", message: "combined 3 PRs into #1" });
-  expect(chunkStatuses(stack.id)).toEqual(["pr", "merged", "merged"]);
+  expect(chunkStatuses(stack.id)).toEqual(["done", "merged", "merged"]);
   // origin main is untouched; c1 holds every commit; c2 and c3 only moved forward (no force push).
   expect(after.main).toBe(before.main);
   expect(sh(stack.origin, "ls-tree", "--name-only", "c1").split("\n")).toEqual(["base.txt", "f1.txt", "f2.txt", "f3.txt"]);
@@ -1021,7 +1022,7 @@ test("combine: a resume after a failing check on #2 skips #3, which is already m
   await mergeStack(stack.id, gh.deps, "combine");
   expect(readState(stack.id).merge).toMatchObject({ status: "failed", current: "c2" });
   expect(gh.calls).toEqual(["merge 3 --merge"]);
-  expect(chunkStatuses(stack.id)).toEqual(["pr", "pr", "merged"]);
+  expect(chunkStatuses(stack.id)).toEqual(["done", "done", "merged"]);
 
   gh.prs[2]!.checks = [];
   const { done } = startMerge(stack.id, gh.deps, "combine");
@@ -1037,7 +1038,7 @@ test("combine: a failed description update keeps the merges and lists each PR on
   gh.prs[1]!.bodyFails = true;
   await mergeStack(stack.id, gh.deps, "combine");
   expect(readState(stack.id).merge?.error).toBe("could not update the description of #1: HTTP 500. The PRs are combined; edit the description by hand.");
-  expect(chunkStatuses(stack.id)).toEqual(["pr", "merged"]);
+  expect(chunkStatuses(stack.id)).toEqual(["done", "merged"]);
 
   gh.prs[1]!.bodyFails = false;
   await mergeStack(stack.id, gh.deps, "combine");
@@ -1261,8 +1262,8 @@ test("upsertChunk fills the repo for one repo, and asks for it with several", ()
   upsertChunk(two.id, { name: "c1", repo: "web" });
   upsertChunk(two.id, { name: "c2", repo: "/x/app" });
   expect(readState(two.id).chunks.map((c) => c.repo)).toEqual(["/x/web", "/x/app"]);
-  upsertChunk(two.id, { name: "c1", repo: "/x/web", status: "pr" });
-  expect(readState(two.id).chunks[0]).toMatchObject({ repo: "/x/web", status: "pr" });
+  upsertChunk(two.id, { name: "c1", repo: "/x/web", status: "done" });
+  expect(readState(two.id).chunks[0]).toMatchObject({ repo: "/x/web", status: "done" });
   expect(() => upsertChunk(two.id, { name: "c1", repo: "app" })).toThrow('chunk "c1" belongs to web');
   expect(() => upsertChunk(two.id, { name: "c3", repo: "nope" })).toThrow("unknown repo: nope (repos: app, web)");
 
@@ -1391,8 +1392,8 @@ function twoRepoStack() {
   const b = makeStack(1, 1, "merge-back");
   const { id } = createPipeline({ repos: [{ path: a.clone, base: "main" }, { path: b.clone, base: "main" }], title: "two" });
   const pr = "https://github.com/o/r/pull/1";
-  upsertChunk(id, { name: "a-c1", repo: "merge-front", branch: "c1", worktree: a.worktrees[0], pr, status: "pr" });
-  upsertChunk(id, { name: "b-c1", repo: "merge-back", branch: "c1", worktree: b.worktrees[0], pr, status: "pr" });
+  upsertChunk(id, { name: "a-c1", repo: "merge-front", branch: "c1", worktree: a.worktrees[0], pr, status: "done" });
+  upsertChunk(id, { name: "b-c1", repo: "merge-back", branch: "c1", worktree: b.worktrees[0], pr, status: "done" });
   return { id, a, b };
 }
 
@@ -1420,7 +1421,7 @@ test("a merge over two repos needs a repo, and merges only that repo's stack", a
   await done;
   const s = readState(id);
   expect(s.merge).toMatchObject({ status: "done", repo: b.clone });
-  expect(s.chunks.map((c) => c.status)).toEqual(["pr", "merged"]);
+  expect(s.chunks.map((c) => c.status)).toEqual(["done", "merged"]);
   expect(ghB.calls).toEqual(["merge 1"]);
 });
 
@@ -1613,7 +1614,7 @@ test("pipelineDiff runs real git per chunk and for the whole stack", async () =>
   expect((await pipelineDiff(stack.id, null, "c2")).files.map((f) => f.path)).toEqual(["f2.txt"]);
 
   // A branch that exists nowhere.
-  upsertChunk(stack.id, { name: "ghost", branch: "feat/ghost", status: "pr" });
+  upsertChunk(stack.id, { name: "ghost", branch: "feat/ghost", status: "done" });
   const err = await pipelineDiff(stack.id, null, "ghost").catch((e) => e);
   expect(err).toBeInstanceOf(DiffError);
   expect(err).toMatchObject({ status: 409, code: "missing_ref", message: 'branch "feat/ghost" not found in repo' });
@@ -1639,7 +1640,7 @@ test("the diff route answers 200, 404, 400 and 409", async () => {
   const stack = makeStack(2);
   const other = makeStack(1, 1, "other");
   const multi = createPipeline({ repos: [{ path: stack.clone, base: "main" }, { path: other.clone, base: "main" }], title: "multi" });
-  upsertChunk(multi.id, { name: "m1", repo: other.clone, branch: "c1", status: "pr" });
+  upsertChunk(multi.id, { name: "m1", repo: other.clone, branch: "c1", status: "done" });
   const server = await serve(0);
   try {
     const get = async (path: string) => {
@@ -1659,7 +1660,7 @@ test("the diff route answers 200, 404, 400 and 409", async () => {
     expect(await get(`${multi.id}/diff?repo=nope`)).toMatchObject({ status: 400 });
     expect((await get(`${multi.id}/diff?repo=other`)).body.files.map((f: { path: string }) => f.path)).toEqual(["f1.txt"]);
 
-    upsertChunk(stack.id, { name: "ghost", branch: "feat/ghost", status: "pr" });
+    upsertChunk(stack.id, { name: "ghost", branch: "feat/ghost", status: "done" });
     expect(await get(`${stack.id}/diff?chunk=ghost`)).toMatchObject({ status: 409, body: { code: "missing_ref" } });
   } finally {
     server.stop(true);
@@ -1693,9 +1694,15 @@ test("displaySteps shows a running step as waiting while the user is needed", ()
 test("allMerged and finished", () => {
   expect(allMerged({ chunks: [] })).toBe(false);
   expect(allMerged({ chunks: [{ name: "a", pr: "u", status: "merged" }] as never })).toBe(true);
-  expect(allMerged({ chunks: [{ name: "a", pr: "u", status: "merged" }, { name: "b", pr: "v", status: "pr" }] as never })).toBe(false);
+  expect(allMerged({ chunks: [{ name: "a", pr: "u", status: "merged" }, { name: "b", pr: "v", status: "done" }] as never })).toBe(false);
   expect(finished({ status: "ready" })).toBe(true);
   expect(finished({ status: "running" })).toBe(false);
+});
+
+test("chunkActivity labels the chunks an agent works on", () => {
+  expect(chunkActivity("coding")).toBe("Coding…");
+  expect(chunkActivity("cleaning")).toBe("Cleaning…");
+  for (const status of ["done", "merged", "failed", "merging"]) expect(chunkActivity(status)).toBeUndefined();
 });
 
 test("languageOf maps extensions and file names", () => {
