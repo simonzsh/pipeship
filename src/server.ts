@@ -1,11 +1,15 @@
+import { spawn } from "node:child_process";
+import { mkdirSync, openSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 import tailwind from "bun-plugin-tailwind";
-import { errorMessage, failStaleMerges, MergeError, startMerge } from "./merge.ts";
+import { errorMessage, failStaleMerges, isMergeRunning, MergeError, startMerge } from "./merge.ts";
 import { DiffError, pipelineDiff } from "./diff-git.ts";
 import type { DiffErrorBody } from "./diff.ts";
 import { startPrSync } from "./pr-sync.ts";
-import { listDashboardStates } from "./state.ts";
+import { home, listDashboardStates } from "./state.ts";
+import { currentVersion, getUpdateInfo, installUpdate, UpdateError, type InstallDeps } from "./update.ts";
 import {
-  archivePipeline, deletePipeline, isPreviewStarting, PreviewError, requestPreviewStart, stopPipeline, stopPreviewAndSettle,
+  anyPreviewStarting, archivePipeline, deletePipeline, isPreviewStarting, PreviewError, requestPreviewStart, stopPipeline, stopPreviewAndSettle,
 } from "./preview.ts";
 
 export const DEFAULT_PORT = 4400;
@@ -30,15 +34,58 @@ async function buildDashboard(): Promise<Record<string, Response>> {
   return routes;
 }
 
-export async function serve(port = DEFAULT_PORT, opts: { prSync?: boolean } = {}) {
+// After an update the old server may still hold the port for a moment: retry the bind.
+async function listen(options: Parameters<typeof Bun.serve>[0] & { port: number }, retryMs: number) {
+  const deadline = Date.now() + retryMs;
+  for (;;) {
+    try {
+      return Bun.serve(options);
+    } catch (err) {
+      if ((err as { code?: string }).code !== "EADDRINUSE" || Date.now() >= deadline) throw err;
+      await Bun.sleep(200);
+    }
+  }
+}
+
+export interface ServeOptions { prSync?: boolean; retryMs?: number; update?: Partial<InstallDeps> }
+
+export async function serve(port = DEFAULT_PORT, opts: ServeOptions = {}) {
   let sync: ReturnType<typeof startPrSync> | undefined;
   const assets = await buildDashboard();
-  const server = Bun.serve({
+  // Hand the port to the new version's launcher, then leave. Previews are detached and keep running.
+  const handoff = (launcher: string) => {
+    server.stop(true);
+    sync?.stop();
+    mkdirSync(home(), { recursive: true });
+    const out = openSync(join(home(), "dashboard.log"), "a");
+    const child = spawn(launcher, ["serve", "--port", String(server.port)], { cwd: home(), detached: true, stdio: ["ignore", out, out] });
+    child.unref();
+    writeFileSync(join(home(), "dashboard.pid"), String(child.pid));
+    process.exit(0);
+  };
+  const server = await listen({
     port,
     idleTimeout: 0, // keep SSE connections open
     routes: {
       ...assets,
-      "/api/health": () => Response.json({ app: "pipeship" }),
+      "/api/health": () => Response.json({ app: "pipeship", version: currentVersion() }),
+      "/api/update": async () => Response.json(await getUpdateInfo(), { headers: { "Cache-Control": "no-store" } }),
+      "/api/update/install": {
+        POST: async () => {
+          try {
+            const blocker = () =>
+              anyPreviewStarting() ? "A test environment is starting: wait for it, then update" :
+              isMergeRunning() ? "A merge is running: wait for it, then update" : undefined;
+            const result = await installUpdate({ blocker, ...opts.update });
+            if (!result.restarting) return Response.json({ restarting: false, message: result.message });
+            setTimeout(() => handoff(result.launcher), 300); // let the response go out first
+            return Response.json({ restarting: true, from: currentVersion() });
+          } catch (err) {
+            const status = err instanceof UpdateError ? err.status : 500;
+            return Response.json({ error: errorMessage(err) }, { status });
+          }
+        },
+      },
       "/api/pipelines": () => Response.json(listDashboardStates(isPreviewStarting)),
       "/api/pipelines/:id/diff": async (req) => {
         // Ids come from slug(): reject anything else before it reaches the filesystem.
@@ -140,7 +187,7 @@ export async function serve(port = DEFAULT_PORT, opts: { prSync?: boolean } = {}
       },
     },
     fetch: () => new Response("not found", { status: 404 }),
-  });
+  }, opts.retryMs ?? 0);
   failStaleMerges(); // after the port is open, so a slow state read cannot delay startup
   sync = opts.prSync ? startPrSync() : undefined; // after failStaleMerges: a dead merge must not hide its pipeline
   return server;

@@ -27,6 +27,8 @@ import { allMerged, displaySteps, finished, formatElapsed, timeAgo } from "../sr
 import { diffRequests, diffUrl } from "../src/dashboard/diff-requests.ts";
 import { highlightLines, languageOf } from "../src/dashboard/highlight.tsx";
 import { chunkActivity } from "../src/dashboard/status.tsx";
+import { compareVersions, currentVersion, getUpdateInfo, installUpdate, resetUpdateCache, UpdateError, type Installed } from "../src/update.ts";
+import { shouldReload } from "../src/dashboard/update-info.ts";
 
 const root = mkdtempSync(join(tmpdir(), "pipeship-test-"));
 process.env.PIPESHIP_HOME = join(root, "home");
@@ -2193,4 +2195,90 @@ syncTest("pr sync + merge: a chunk closed by the sync makes Combine PRs fail cle
   await startMerge(stack.id, gh.deps, "combine").done;
   expect(readState(stack.id).merge?.status).toBe("failed");
   expect(readState(stack.id).merge?.error).toContain("PR #2 is closed");
+});
+
+const fakeLatest = (version: string | Error) => {
+  const calls: string[] = [];
+  const fetch = (async (url: string) => {
+    calls.push(url);
+    if (version instanceof Error) throw version;
+    return Response.json({ version });
+  }) as unknown as typeof globalThis.fetch;
+  return { calls, fetch };
+};
+
+test("versions compare numerically", () => {
+  expect(compareVersions("0.10.0", "0.9.0")).toBe(1);
+  expect(compareVersions("0.9.0", "0.10.0")).toBe(-1);
+  expect(compareVersions("1.0", "1.0.0")).toBe(0);
+  expect(shouldReload("0.10.0", "0.11.0")).toBe(true);
+  expect(shouldReload("0.10.0", "0.10.0")).toBe(false);
+  expect(shouldReload("0.10.0", undefined)).toBe(false);
+});
+
+test("getUpdateInfo caches the latest version for one hour", async () => {
+  resetUpdateCache();
+  const f = fakeLatest("0.11.0");
+  let t = 1_000;
+  const deps = { fetch: f.fetch, now: () => t, current: "0.10.0" };
+  expect(await getUpdateInfo(deps)).toEqual({ current: "0.10.0", latest: "0.11.0", available: true, checkedAt: 1_000 });
+  t += 3_599_000;
+  await getUpdateInfo(deps);
+  expect(f.calls.length).toBe(1);
+  t += 2_000;
+  await getUpdateInfo(deps);
+  expect(f.calls.length).toBe(2);
+  expect((await getUpdateInfo({ ...deps, current: "0.11.0" })).available).toBe(false);
+  expect(currentVersion()).toMatch(/^\d+\.\d+\.\d+$/);
+});
+
+test("getUpdateInfo does not throw when the network fails", async () => {
+  resetUpdateCache();
+  const info = await getUpdateInfo({ fetch: fakeLatest(new Error("offline")).fetch, now: () => 1, current: "0.10.0" });
+  expect(info).toEqual({ current: "0.10.0", latest: null, available: false });
+});
+
+test("installUpdate refuses with 409 while a start or merge runs, without running claude", async () => {
+  const ran: string[] = [];
+  const run: Runner = async (cmd, args) => (ran.push([cmd, ...args].join(" ")), { code: 0, stdout: "", stderr: "" });
+  const err = await installUpdate({ run, blocker: () => "A test environment is starting" }).catch((e) => e);
+  expect(err).toBeInstanceOf(UpdateError);
+  expect([err.status, err.message]).toEqual([409, "A test environment is starting"]);
+  expect(ran).toEqual([]);
+});
+
+test("installUpdate restarts only when the install changed and the launcher exists", async () => {
+  const ran: string[] = [];
+  const run: Runner = async (cmd, args) => (ran.push([cmd, ...args].join(" ")), { code: 0, stdout: "", stderr: "" });
+  const old: Installed = { installPath: "/cache/0.10.0", version: "0.10.0" };
+  const same = await installUpdate({ run, readInstalled: () => old, launcherExists: () => true });
+  expect(same).toEqual({ restarting: false, message: expect.stringContaining("Already up to date") });
+  expect(ran).toEqual(["claude plugin update pipeship@pipeship"]);
+
+  const reads = [old, { installPath: "/cache/0.11.0", version: "0.11.0" }];
+  expect(await installUpdate({ run, readInstalled: () => reads.shift(), launcherExists: () => true })).toEqual({
+    restarting: true,
+    launcher: "/cache/0.11.0/scripts/pipeship",
+  });
+  const moved = [old, { installPath: "/cache/0.11.0", version: "0.11.0" }];
+  expect((await installUpdate({ run, readInstalled: () => moved.shift(), launcherExists: () => false })).restarting).toBe(false);
+  expect((await installUpdate({ run, readInstalled: () => undefined })).restarting).toBe(false);
+
+  const fail: Runner = async () => ({ code: 1, stdout: "", stderr: "boom" });
+  const err = await installUpdate({ run: fail, readInstalled: () => old }).catch((e) => e);
+  expect([err.status, err.message]).toEqual([500, "claude plugin update failed: boom"]);
+});
+
+test("POST /api/update/install does not restart when nothing changed, and /api/health has the version", async () => {
+  const run: Runner = async () => ({ code: 0, stdout: "", stderr: "" });
+  const server = await serve(0, { update: { run, readInstalled: () => ({ installPath: "/x", version: "1" }), launcherExists: () => true } });
+  try {
+    const base = `http://localhost:${server.port}`;
+    expect(((await (await fetch(`${base}/api/health`)).json()) as { version: string }).version).toBe(currentVersion());
+    const res = await fetch(`${base}/api/update/install`, { method: "POST" });
+    expect(res.status).toBe(200);
+    expect(((await res.json()) as { restarting: boolean }).restarting).toBe(false);
+  } finally {
+    server.stop(true);
+  }
 });
