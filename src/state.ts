@@ -85,7 +85,7 @@ export interface State {
   preview?: { url: string; port: number; pid?: number; log: string; services?: PreviewService[] };
   session?: Session;
   previewError?: string; // why the last dashboard "Start preview" failed
-  merge?: MergeRun; // last "Merge stack" run from the dashboard
+  merges?: Record<string, MergeRun>; // last dashboard merge run per repo, keyed by Repo.path
   stopRequested: boolean;
   createdAt: string;
   updatedAt: string;
@@ -184,7 +184,7 @@ export function readState(id: string): State {
   return upgrade(JSON.parse(readFileSync(path, "utf8")));
 }
 
-type Raw = State & { repo?: string; base?: string; waitingFor?: string; ticket: { ref?: string; url?: string } };
+type Raw = State & { merge?: MergeRun & { mode?: unknown }; repo?: string; base?: string; waitingFor?: string; ticket: { ref?: string; url?: string } };
 
 // Runs on every read and must accept any old file.
 function upgrade(raw: Raw): State {
@@ -208,8 +208,12 @@ function upgrade(raw: Raw): State {
   if (raw.status === "waiting_for_user" && !raw.waiting) raw.waiting = { step: raw.step, ...(raw.waitingFor && { reason: raw.waitingFor }) };
   delete raw.waitingFor;
   raw.status = pipelineStatus(raw);
-  // Runs saved before the single flow held a mode.
-  if (raw.merge) delete (raw.merge as { mode?: unknown }).mode;
+  // One run per pipeline became one per repo; old runs also held a mode.
+  if (raw.merge) {
+    const { mode: _, ...run } = raw.merge;
+    if (run.repo) (raw.merges ??= {})[run.repo] ??= run; // no repo with several repos: no key, dropped
+    delete raw.merge;
+  }
   // State files written before `links` existed hold one `ref` (sometimes "A-1,A-2") and one `url`.
   const { ref, url, ...ticket } = raw.ticket;
   if (ticket.links) return raw;

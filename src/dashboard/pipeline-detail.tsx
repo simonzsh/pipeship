@@ -1,7 +1,7 @@
 import { ArrowLeft, FolderGit2, GitMerge, Zap } from "lucide-react";
 import { useState } from "react";
-import { repoStacks } from "../repos.ts";
-import type { DashboardState } from "../state.ts";
+import { mergeRunning, repoStacks } from "../repos.ts";
+import type { DashboardState, MergeRun } from "../state.ts";
 import { PipelineActions, StartPreviewButton } from "./action-button";
 import { CodeTab, type DiffTarget } from "./code-tab";
 import { Badge } from "./components/ui/badge";
@@ -23,9 +23,7 @@ export function PipelineDetail({ p, onBack }: { p: DashboardState; onBack: () =>
   const [tab, setTab] = useState("test");
   const stacks = repoStacks(p);
   const multi = p.repos.length > 1;
-  // One merge runs per pipeline: the other repos' buttons hide meanwhile.
-  const busyFor = (path: string) => p.merge?.status === "running" && p.merge.repo !== path;
-  const merging = p.merge?.status === "running";
+  const merging = mergeRunning(p);
   const done = finished(p);
   // The server knows a dashboard start is in flight; a CLI start only shows as services still without a pid.
   const starting = p.previewStarting || (p.preview?.services?.some((s) => s.pid === undefined) ?? false);
@@ -37,7 +35,7 @@ export function PipelineDetail({ p, onBack }: { p: DashboardState; onBack: () =>
     setTab("code");
   };
   // The tree of one repo's stack, or a hint when it has no branch yet.
-  const tree = (repo: DashboardState["repos"][number], chunks: DashboardState["chunks"], merge: DashboardState["merge"]) => (
+  const tree = (repo: DashboardState["repos"][number], chunks: DashboardState["chunks"], merge: MergeRun | undefined) => (
     <>
       {chunks.length > 0 ? (
         <StackTree repo={repo} chunks={chunks} merge={merge} selected={target.chunk} onSelect={(chunk) => select({ chunk })} onSelectBase={() => select({})} />
@@ -61,8 +59,7 @@ export function PipelineDetail({ p, onBack }: { p: DashboardState; onBack: () =>
             </span>
             <div className="ml-auto flex items-center gap-2">
               <MergeButton
-                id={p.id} repo={st.repo.path} chunks={st.chunks} base={st.repo.base} merge={st.merge}
-                busy={busyFor(st.repo.path)} finished={done}
+                id={p.id} repo={st.repo.path} chunks={st.chunks} base={st.repo.base} merge={st.merge} finished={done}
               />
             </div>
           </div>

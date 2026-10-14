@@ -3,7 +3,7 @@ import { copyFileSync, existsSync, mkdirSync, openSync, readFileSync, readdirSyn
 import { connect, createServer } from "node:net";
 import { createHash } from "node:crypto";
 import { dirname, join } from "node:path";
-import { findRepo, repoName, sharesRepo, topChunk } from "./repos.ts";
+import { findRepo, mergeRunning, repoName, sharesRepo, topChunk } from "./repos.ts";
 import { allMerged, home, MERGED, listStates, pipelineDir, readState, updateState, type PreviewService, type Repo, type State } from "./state.ts";
 
 export interface ServiceRecipe {
@@ -517,7 +517,7 @@ export class PreviewError extends Error {
   }
 }
 
-// One dashboard-started preview per pipeline, like merge's `active` set.
+// One dashboard-started preview per pipeline, like merge's per-repo `active` set.
 const startsInFlight = new Set<string>();
 // Killing a service mid-start can fail the start with another message: remember the stop.
 const stoppedMidStart = new Set<string>();
@@ -596,7 +596,7 @@ export async function unarchivePipeline(id: string): Promise<State> {
 }
 
 // Once every PR is merged the pipeline has no work left. Never throws: callers are the merge and the PR sync.
-const archivable = (s: State) => ["ready", "done", "failed", "stopped"].includes(s.status) && s.merge?.status !== "running" && allMerged(s);
+const archivable = (s: State) => ["ready", "done", "failed", "stopped"].includes(s.status) && !mergeRunning(s) && allMerged(s);
 
 export async function archiveIfAllMerged(id: string): Promise<boolean> {
   try {
@@ -631,7 +631,7 @@ export async function deletePipeline(id: string, opts: { force?: boolean } = {})
   if (state.status === "running" || state.status === "waiting_for_user") {
     throw new Error("stop the pipeline before deleting it");
   }
-  if (state.merge?.status === "running") throw new Error("wait for the merge to finish before deleting");
+  if (mergeRunning(state)) throw new Error("wait for the merge to finish before deleting");
   await stopPreview(id);
 
   const dir = join(pipelineDir(id), "worktrees");

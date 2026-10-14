@@ -25,8 +25,14 @@ export function topChunk(state: Pick<State, "chunks">, repo: string): Chunk | un
   return chunksOf(state, repo).findLast((c) => c.worktree);
 }
 
-export function mergeOf(state: Pick<State, "merge">, repo: string): MergeRun | undefined {
-  return state.merge?.repo === repo ? state.merge : undefined;
+export function mergeOf(state: Pick<State, "merges">, repo: string): MergeRun | undefined {
+  return state.merges?.[repo];
+}
+
+// That repo's run is running, or any run when no repo is given.
+export function mergeRunning(s: Pick<State, "merges">, repo?: string): boolean {
+  if (repo !== undefined) return s.merges?.[repo]?.status === "running";
+  return Object.values(s.merges ?? {}).some((m) => m.status === "running");
 }
 
 export function sharesRepo(a: Pick<State, "repos">, b: Pick<State, "repos">): boolean {
@@ -41,7 +47,7 @@ export interface RepoStack {
 }
 
 // Chunks of an unknown repo are left out.
-export function repoStacks(state: Pick<State, "repos" | "chunks" | "merge">): RepoStack[] {
+export function repoStacks(state: Pick<State, "repos" | "chunks" | "merges">): RepoStack[] {
   return state.repos.map((repo) => ({
     repo,
     name: repoName(repo.path),
