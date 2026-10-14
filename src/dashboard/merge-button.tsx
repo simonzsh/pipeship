@@ -12,8 +12,8 @@ import { postAction, prNumber } from "./utils";
 
 type Mode = "combine" | "base";
 
-// Violet for every merge action: combining the stack and merging into the base. One button at a time.
-const TONE = "bg-violet-600 hover:bg-violet-700 text-white";
+// Outline buttons with a violet icon, like the stop and delete actions. One button at a time.
+const ICON = "text-violet-600 dark:text-violet-400";
 
 // Shown on finished pipelines with open PRs, and while a merge runs.
 // `busy`: another repo's merge runs, and only one merge runs per pipeline: the button stays, disabled.
@@ -43,7 +43,7 @@ export function MergeButton({ id, repo, chunks, base, merge, busy, finished }: {
   const waitTitle = busy ? "Another repo of this pipeline is merging" : undefined;
   if (running || starting) {
     return (
-      <Button size="xs" disabled className={`${TONE} disabled:opacity-80`} title={merge?.message}>
+      <Button variant="outline" size="xs" disabled title={merge?.message}>
         <Spinner /> Merging…
       </Button>
     );
@@ -58,8 +58,8 @@ export function MergeButton({ id, repo, chunks, base, merge, busy, finished }: {
     return (
       <>
         {failure}
-        <Button size="xs" className={TONE} onClick={run} disabled={busy} title={waitTitle ?? "Merge each PR into the branch below, from the top. One PR is left."}>
-          <GitMerge /> Combine PRs
+        <Button variant="outline" size="xs" onClick={run} disabled={busy} title={waitTitle ?? "Merge each PR into the branch below, from the top. One PR is left."}>
+          <GitMerge className={ICON} /> Combine PRs
         </Button>
       </>
     );
@@ -70,8 +70,8 @@ export function MergeButton({ id, repo, chunks, base, merge, busy, finished }: {
     <AlertDialog>
       {failure}
       <AlertDialogTrigger asChild>
-        <Button size="xs" className={TONE} disabled={busy} title={waitTitle}>
-          <GitMerge /> {into}
+        <Button variant="outline" size="xs" disabled={busy} title={waitTitle}>
+          <GitMerge className={ICON} /> {into}
         </Button>
       </AlertDialogTrigger>
       <AlertDialogContent>
@@ -85,7 +85,7 @@ export function MergeButton({ id, repo, chunks, base, merge, busy, finished }: {
         </label>
         <AlertDialogFooter>
           <AlertDialogCancel>Cancel</AlertDialogCancel>
-          <AlertDialogAction onClick={run} className={TONE}>Merge</AlertDialogAction>
+          <AlertDialogAction onClick={run}>Merge</AlertDialogAction>
         </AlertDialogFooter>
       </AlertDialogContent>
     </AlertDialog>
@@ -101,7 +101,7 @@ export function CombinedNote({ merge, chunks }: { merge: MergeRun; chunks: Chunk
   if (!left) return null;
   return (
     <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
-      <GitMerge className="size-3.5 shrink-0 text-violet-600 dark:text-violet-400" />
+      <GitMerge className={`size-3.5 shrink-0 ${ICON}`} />
       <span>
         {merge.message ?? "Combined the stack"} ·{" "}
         <a href={left} target="_blank" rel="noreferrer" className="underline underline-offset-2 hover:text-foreground">
