@@ -1017,6 +1017,25 @@ test("classifyPr: failed checks beat pending ones, BLOCKED waits for pending che
   expect(classifyPr(pr({ statusCheckRollup: [{ name: "a", status: "COMPLETED", conclusion: "SKIPPED" }] })).kind).toBe("ready");
 });
 
+test("classifyPr: waitChecks false ignores pending checks and keeps the real blocks", () => {
+  const pr = (over: Partial<PrView>): PrView => ({
+    number: 5, url: "u", state: "OPEN", baseRefName: "main", headRefName: "h", headRefOid: "o", isDraft: false,
+    mergeable: "MERGEABLE", mergeStateStatus: "CLEAN", reviewDecision: "", statusCheckRollup: [], ...over,
+  });
+  const running = { name: "ci", status: "IN_PROGRESS" };
+  const now = { waitChecks: false };
+  expect(classifyPr(pr({ statusCheckRollup: [running] }), now).kind).toBe("ready");
+  expect(classifyPr(pr({ statusCheckRollup: [{ context: "x", state: "PENDING" }] }), now).kind).toBe("ready");
+  // BLOCKED is final here, not transient.
+  expect(classifyPr(pr({ mergeStateStatus: "BLOCKED", statusCheckRollup: [running] }), now)).toEqual({
+    kind: "blocked", reason: "merge blocked by branch protection on #5",
+  });
+  expect(classifyPr(pr({ mergeable: "UNKNOWN" }), now).kind).toBe("wait");
+  expect(classifyPr(pr({ isDraft: true }), now).kind).toBe("blocked");
+  expect(classifyPr(pr({ reviewDecision: "REVIEW_REQUIRED" }), now).kind).toBe("blocked");
+  expect(classifyPr(pr({ statusCheckRollup: [running] })).kind).toBe("wait");
+});
+
 test("merge: a STALE check run is not a failure", () => {
   const v = { number: 1, url: "u", state: "OPEN", baseRefName: "main", headRefName: "h", headRefOid: "o", isDraft: false, mergeable: "MERGEABLE",
     mergeStateStatus: "CLEAN", reviewDecision: "", statusCheckRollup: [{ name: "a", status: "COMPLETED", conclusion: "STALE" }] } as PrView;
@@ -1122,14 +1141,71 @@ test("combine: waits for GitHub to show the new head of the PR below before merg
   const stack = makeStack(3);
   const gh = fakeGh(stack, 3);
   const oldC2 = sh(stack.origin, "rev-parse", "c2");
-  // Views 1-2 are before the fold of #3; views 3-4 still show the old head; then the new head, checks pending once.
+  // Views 1-2 are before the fold of #3; views 3-4 still show the old head; then the new head, with checks pending (combine does not wait for them).
   gh.prs[2]!.view = (n) =>
     n <= 4 ? (n <= 2 ? {} : { headRefOid: oldC2 }) : n === 5 ? { statusCheckRollup: [{ name: "ci", status: "IN_PROGRESS" }] } : {};
   await mergeStack(stack.id, gh.deps, "combine");
   expect(readState(stack.id).merge).toMatchObject({ status: "done", message: "combined 3 PRs into #1" });
   expect(gh.calls).toEqual(["merge 3 --merge", "merge 2 --merge", "patch 1 body"]);
-  expect(gh.prs[2]!.views).toBeGreaterThanOrEqual(6);
+  expect(gh.prs[2]!.views).toBeGreaterThanOrEqual(5);
   // The fake gh refuses a merge whose --match-head-commit is not the real tip, so the new sha was used.
+});
+
+test("combine: merges a PR whose checks are pending without polling for them", async () => {
+  const stack = makeStack(3);
+  const gh = fakeGh(stack, 3);
+  gh.prs[3]!.checks = [{ name: "ci", status: "IN_PROGRESS" }];
+  gh.prs[2]!.checks = [{ name: "ci", status: "QUEUED" }];
+  let sleeps = 0;
+  const sleep = gh.deps.sleep!;
+  gh.deps.sleep = async (ms) => (sleeps++, sleep(ms));
+  await mergeStack(stack.id, gh.deps, "combine");
+  expect(readState(stack.id).merge).toMatchObject({ status: "done", message: "combined 3 PRs into #1" });
+  expect(gh.calls).toEqual(["merge 3 --merge", "merge 2 --merge", "patch 1 body"]);
+  expect(sleeps).toBe(0);
+});
+
+test("combine: does not wait for checks to appear after a fold", async () => {
+  const stack = makeStack(3);
+  const gh = fakeGh(stack, 3);
+  gh.prs[2]!.view = (n) => ({ mergeStateStatus: n >= 1 ? "BLOCKED" : "CLEAN" });
+  await mergeStack(stack.id, gh.deps, "combine");
+  expect(readState(stack.id).merge?.error).toBe("merge blocked by branch protection on #2");
+  expect(gh.calls).toEqual(["merge 3 --merge"]);
+});
+
+test("combine: a failed check, a draft, a conflict or changes requested still block", async () => {
+  const cases: [(pr: ReturnType<typeof fakeGh>["prs"][number]) => void, string][] = [
+    [(pr) => (pr.checks = [{ name: "lint", status: "COMPLETED", conclusion: "FAILURE" }, { name: "ci", status: "IN_PROGRESS" }]), "check failed on #2: lint"],
+    [(pr) => (pr.isDraft = true), "#2 is a draft"],
+    [(pr) => (pr.mergeable = "CONFLICTING"), "#2 conflicts with c1"],
+    [(pr) => (pr.reviewDecision = "CHANGES_REQUESTED"), "changes requested on #2"],
+    [(pr) => (pr.reviewDecision = "REVIEW_REQUIRED"), "review required on #2"],
+  ];
+  for (const [set, error] of cases) {
+    const stack = makeStack(2);
+    const gh = fakeGh(stack, 2);
+    set(gh.prs[2]!);
+    await mergeStack(stack.id, gh.deps, "combine");
+    expect(readState(stack.id).merge).toMatchObject({ status: "failed", error });
+    expect(gh.calls).toEqual([]);
+  }
+});
+
+test("combine: still waits while mergeable is UNKNOWN, and gives up after 2 min", async () => {
+  const stack = makeStack(2);
+  const gh = fakeGh(stack, 2);
+  gh.prs[2]!.view = (n) => (n <= 3 ? { mergeable: "UNKNOWN" } : {});
+  await mergeStack(stack.id, gh.deps, "combine");
+  expect(readState(stack.id).merge?.status).toBe("done");
+  expect(gh.prs[2]!.views).toBeGreaterThanOrEqual(4);
+
+  const stuck = makeStack(2);
+  const ghStuck = fakeGh(stuck, 2);
+  ghStuck.prs[2]!.mergeable = "UNKNOWN";
+  await mergeStack(stuck.id, ghStuck.deps, "combine");
+  expect(readState(stuck.id).merge?.error).toContain("after 2 min");
+  expect(ghStuck.calls).toEqual([]);
 });
 
 test("combine: an exact URL match decides what is already listed, and other 'not allowed' errors do not squash", async () => {
