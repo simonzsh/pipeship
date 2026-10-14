@@ -1,6 +1,6 @@
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, realpathSync } from "node:fs";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { defaultRunner, errorMessage, type Runner } from "./merge.ts";
 
 export const LATEST_URL = "https://raw.githubusercontent.com/simonzsh/pipeship/main/.claude-plugin/plugin.json";
@@ -51,9 +51,26 @@ export async function getUpdateInfo(deps: Partial<UpdateDeps> = {}): Promise<Upd
 }
 
 export interface Installed { installPath: string; version: string }
+export type Harness = "claude" | "codex";
+
+const claudeDir = (env: NodeJS.ProcessEnv) => env.CLAUDE_CONFIG_DIR ?? join(homedir(), ".claude");
+const codexDir = (env: NodeJS.ProcessEnv) => env.CODEX_HOME ?? join(homedir(), ".codex");
+
+// Which plugin manager installed the running copy; undefined for a git checkout or any other path.
+export function detectHarness(
+  root = dirname(dirname(new URL(import.meta.url).pathname)),
+  env: NodeJS.ProcessEnv = process.env,
+): Harness | undefined {
+  let real = root;
+  try { real = realpathSync(root); } catch {}
+  const inside = (dir: string, segment: string) => real.startsWith(join(dir, "plugins") + "/") || real.includes(segment);
+  if (inside(claudeDir(env), "/.claude/plugins/")) return "claude";
+  if (inside(codexDir(env), "/.codex/plugins/")) return "codex";
+  return undefined;
+}
 
 export function readInstalled(env: NodeJS.ProcessEnv = process.env): Installed | undefined {
-  const file = join(env.CLAUDE_CONFIG_DIR ?? join(homedir(), ".claude"), "plugins", "installed_plugins.json");
+  const file = join(claudeDir(env), "plugins", "installed_plugins.json");
   try {
     const data = JSON.parse(readFileSync(file, "utf8"));
     const entry = (data.plugins ?? data)[PLUGIN_KEY]?.[0];
@@ -63,9 +80,39 @@ export function readInstalled(env: NodeJS.ProcessEnv = process.env): Installed |
   }
 }
 
+// Codex lists installs without a path: it is rebuilt from the cache layout.
+export async function readCodexInstalled(run: Runner, env: NodeJS.ProcessEnv = process.env): Promise<Installed | undefined> {
+  try {
+    const res = await run("codex", ["plugin", "list", "--json"], { cwd: homedir(), timeoutMs: 30_000 });
+    if (res.code !== 0) return undefined;
+    const list: { pluginId?: string; name?: string; marketplaceName?: string; version?: string }[] = JSON.parse(res.stdout).installed ?? [];
+    const e = list.find((p) => p.pluginId === PLUGIN_KEY);
+    if (!e?.name || !e.marketplaceName || !e.version) return undefined;
+    return { installPath: join(codexDir(env), "plugins", "cache", e.marketplaceName, e.name, e.version), version: e.version };
+  } catch {
+    return undefined;
+  }
+}
+
+export interface Strategy {
+  label: string;
+  commands: [string, string[]][];
+  read: (run: Runner) => Installed | undefined | Promise<Installed | undefined>;
+}
+
+export const strategies: Record<Harness, Strategy> = {
+  claude: { label: "Claude Code", commands: [["claude", ["plugin", "update", PLUGIN_KEY]]], read: () => readInstalled() },
+  codex: {
+    label: "Codex",
+    commands: [["codex", ["plugin", "marketplace", "upgrade", "pipeship"]], ["codex", ["plugin", "add", PLUGIN_KEY]]],
+    read: (run) => readCodexInstalled(run),
+  },
+};
+
 export interface InstallDeps {
   run: Runner;
-  readInstalled: () => Installed | undefined;
+  harness: Harness | undefined; // injectable; defaults to detectHarness()
+  readInstalled: () => Installed | undefined | Promise<Installed | undefined>;
   launcherExists: (path: string) => boolean;
   blocker: () => string | undefined; // why a restart is unsafe right now
 }
@@ -74,24 +121,31 @@ export type InstallResult = { restarting: true; launcher: string } | { restartin
 
 let installing = false;
 
-// Runs `claude plugin update`; restarts only when the installed plugin really moved to a new dir or version.
+// Runs the harness update commands; restarts only when the installed plugin really moved to a new dir or version.
 export async function installUpdate(deps: Partial<InstallDeps> = {}): Promise<InstallResult> {
-  const { run = defaultRunner, readInstalled: read = readInstalled, launcherExists = existsSync, blocker = () => undefined } = deps;
+  const { run = defaultRunner, launcherExists = existsSync, blocker = () => undefined } = deps;
+  const harness = "harness" in deps ? deps.harness : detectHarness();
   const busy = blocker();
   if (busy) throw new UpdateError(busy, 409);
+  if (!harness) return { restarting: false, message: "This copy is not installed through a plugin manager (Claude Code or Codex): update it with git" };
+  const strategy = strategies[harness];
+  const read = deps.readInstalled ?? (() => strategy.read(run));
   if (installing) throw new UpdateError("An update is already running", 409);
   installing = true;
   try {
-    const before = read();
-    let res;
-    try {
-      res = await run("claude", ["plugin", "update", PLUGIN_KEY], { cwd: homedir(), timeoutMs: 120_000 });
-    } catch (err) {
-      throw new UpdateError(`claude plugin update failed: ${errorMessage(err)}`, 500);
+    const before = await read();
+    for (const [cmd, args] of strategy.commands) {
+      const name = `${cmd} ${args.slice(0, 2).join(" ")}`;
+      let res;
+      try {
+        res = await run(cmd, args, { cwd: homedir(), timeoutMs: 120_000 });
+      } catch (err) {
+        throw new UpdateError(`${name} failed: ${errorMessage(err)}`, 500);
+      }
+      if (res.code !== 0) throw new UpdateError(`${name} failed: ${(res.stderr || res.stdout).trim() || `exit ${res.code}`}`, 500);
     }
-    if (res.code !== 0) throw new UpdateError(`claude plugin update failed: ${(res.stderr || res.stdout).trim() || `exit ${res.code}`}`, 500);
-    const after = read();
-    if (!after) return { restarting: false, message: "The plugin is not installed through Claude Code yet: nothing to update" };
+    const after = await read();
+    if (!after) return { restarting: false, message: `The plugin is not installed through ${strategy.label} yet: nothing to update` };
     if (after.installPath === before?.installPath && after.version === before?.version) {
       return { restarting: false, message: "Already up to date: the plugin did not change" };
     }

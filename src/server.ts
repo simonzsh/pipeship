@@ -7,7 +7,7 @@ import { DiffError, pipelineDiff } from "./diff-git.ts";
 import type { DiffErrorBody } from "./diff.ts";
 import { startPrSync } from "./pr-sync.ts";
 import { home, listDashboardStates } from "./state.ts";
-import { currentVersion, getUpdateInfo, installUpdate, UpdateError, type InstallDeps } from "./update.ts";
+import { currentVersion, detectHarness, getUpdateInfo, installUpdate, UpdateError, type InstallDeps } from "./update.ts";
 import {
   anyPreviewStarting, archivePipeline, deletePipeline, isPreviewStarting, PreviewError, requestPreviewStart, stopPipeline, stopPreviewAndSettle,
 } from "./preview.ts";
@@ -81,7 +81,7 @@ export async function serve(port = DEFAULT_PORT, opts: ServeOptions = {}) {
     routes: {
       ...assets,
       "/api/health": () => Response.json({ app: "pipeship", version: currentVersion() }),
-      "/api/update": async () => Response.json(await getUpdateInfo(), { headers: { "Cache-Control": "no-store" } }),
+      "/api/update": async () => Response.json({ ...(await getUpdateInfo()), harness: detectHarness() ?? null }, { headers: { "Cache-Control": "no-store" } }),
       "/api/update/install": {
         POST: async () => {
           if (restarting) return Response.json({ restarting: true, from: currentVersion() });

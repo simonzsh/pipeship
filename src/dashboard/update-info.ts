@@ -1,4 +1,4 @@
-export interface UpdateInfo { current: string; latest: string | null; available: boolean }
+export interface UpdateInfo { current: string; latest: string | null; available: boolean; harness?: "claude" | "codex" | null }
 
 // The page reloads once the restarted server reports another version than the one it had before.
 export const shouldReload = (before: string, after: string | undefined) => !!after && after !== before;

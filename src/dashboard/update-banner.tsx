@@ -62,11 +62,14 @@ export function UpdateBanner({ live }: { live: boolean }) {
           <span className="text-sm font-medium">Update available</span>
           <span className="truncate text-xs text-muted-foreground">{info.current} → {info.latest}</span>
         </div>
-        <Button size="xs" disabled={updating} onClick={install}>
-          {updating && <Loader2 className="animate-spin" />}
-          {updating ? "Updating…" : "Update"}
-        </Button>
+        {info.harness && (
+          <Button size="xs" disabled={updating} onClick={install}>
+            {updating && <Loader2 className="animate-spin" />}
+            {updating ? "Updating…" : "Update"}
+          </Button>
+        )}
       </div>
+      {!info.harness && <p className="text-xs text-muted-foreground">Not installed through a plugin manager: update it with git.</p>}
       {error && <p className="text-xs text-destructive">{error}</p>}
     </div>
   );
