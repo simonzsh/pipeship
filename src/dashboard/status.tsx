@@ -3,7 +3,6 @@ import type { ComponentType } from "react";
 import type { Status } from "../state.ts";
 import { Badge } from "./components/ui/badge";
 import { LogoLoader } from "./logo-loader";
-import { Spinner } from "./components/ui/spinner";
 
 type StatusConfig = {
   label: string;
@@ -100,10 +99,10 @@ export function statusConfig(status: string): StatusConfig {
 }
 
 // A chunk's status is free text from the skill: "done", "merged", "closed" and "failed" are final, anything else is in progress.
-// "closed" comes from the PR sync (PR closed without merge). "merging" comes from the dashboard while a merge runs on that chunk: violet, so it does not look like an agent coding.
-const NO_ACTIVITY = ["done", "merged", "closed", "failed", "merging"];
+// "closed" comes from the PR sync (PR closed without merge). "merging" comes from the dashboard while a merge runs on that chunk.
+const NO_ACTIVITY = ["done", "merged", "closed", "failed"];
 
-// The label next to the spinner while an agent works on the chunk: "Coding…" at implement, "Cleaning…" at review.
+// The label next to the loader: "Coding…" at implement, "Cleaning…" at review, "Merging…" while the dashboard merges.
 export function chunkActivity(status: string): string | undefined {
   if (NO_ACTIVITY.includes(status)) return undefined;
   return `${status.charAt(0).toUpperCase()}${status.slice(1)}…`;
@@ -134,7 +133,8 @@ function chunkIcon(status: string, label: string) {
     );
   }
   if (status === "failed") return <XCircle className="size-4 text-red-600 dark:text-red-400" aria-label={label} />;
-  if (status === "merging") return <Spinner className="size-4 text-violet-600 dark:text-violet-400" label={label} />;
+  // Violet, so a merge does not look like an agent coding.
+  if (status === "merging") return <LogoLoader className="size-4 text-violet-600 dark:text-violet-400" label={label} />;
   return <LogoLoader className="size-4 text-blue-600 dark:text-blue-400" label={label} />;
 }
 

@@ -2092,7 +2092,8 @@ test("allMerged and finished", () => {
 test("chunkActivity labels the chunks an agent works on", () => {
   expect(chunkActivity("coding")).toBe("Coding…");
   expect(chunkActivity("cleaning")).toBe("Cleaning…");
-  for (const status of ["done", "merged", "closed", "failed", "merging"]) expect(chunkActivity(status)).toBeUndefined();
+  expect(chunkActivity("merging")).toBe("Merging…");
+  for (const status of ["done", "merged", "closed", "failed"]) expect(chunkActivity(status)).toBeUndefined();
 });
 
 test("languageOf maps extensions and file names", () => {

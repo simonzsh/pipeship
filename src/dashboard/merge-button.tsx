@@ -1,5 +1,4 @@
 import { GitMerge } from "lucide-react";
-import { Spinner } from "./components/ui/spinner";
 import { useState } from "react";
 import type { Chunk, MergeRun } from "../state.ts";
 import {
@@ -8,6 +7,7 @@ import {
 } from "./components/ui/alert-dialog";
 import { Button } from "./components/ui/button";
 import { Checkbox } from "./components/ui/checkbox";
+import { LogoLoader } from "./logo-loader";
 import { postAction, prNumber } from "./utils";
 
 // Outline buttons with a violet icon, like the stop and delete actions. One button at a time.
@@ -41,7 +41,7 @@ export function MergeButton({ id, repo, chunks, base, merge, busy, finished }: {
   if (running || starting) {
     return (
       <Button variant="outline" size="xs" disabled title={merge?.message}>
-        <Spinner /> Merging…
+        <LogoLoader className="size-4 text-violet-600 dark:text-violet-400" label="Merging" /> Merging…
       </Button>
     );
   }
