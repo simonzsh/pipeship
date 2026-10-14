@@ -10,6 +10,7 @@ export function UpdateBanner({ live }: { live: boolean }) {
   // The version at click time: later /api/update refreshes must not change what the reload check compares to.
   const [from, setFrom] = useState<string>();
   const updating = from !== undefined;
+  const [restarting, setRestarting] = useState(false);
   const [error, setError] = useState<string>();
   const wasLive = useRef(live);
 
@@ -44,7 +45,8 @@ export function UpdateBanner({ live }: { live: boolean }) {
       const res = await fetch("/api/update/install", { method: "POST" });
       if (!res.ok) throw new Error(await responseError(res));
       const data: { restarting?: boolean; message?: string } = await res.json();
-      if (!data.restarting) {
+      if (data.restarting) setRestarting(true);
+      else {
         setError(data.message ?? "Nothing to update");
         setFrom(undefined);
       }
@@ -66,7 +68,7 @@ export function UpdateBanner({ live }: { live: boolean }) {
         {info.harness && (
           <Button size="xs" variant="outline" disabled={updating} onClick={install}>
             {updating && <Loader2 className="animate-spin" />}
-            {updating ? "Restarting…" : "Update & restart"}
+            {restarting ? "Restarting…" : updating ? "Updating…" : "Update & restart"}
           </Button>
         )}
       </div>
