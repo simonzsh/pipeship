@@ -7,7 +7,7 @@ import {
 } from "../src/state.ts";
 import { chunksOf, diffRange, repoName, repoStacks, sharesRepo, stackRows, topChunk } from "../src/repos.ts";
 import {
-  archivePipeline, DASHBOARD_PORT, deletePipeline, findRecipe, isAlive, mainService, normalizeRecipe, pickPorts, previewLines, resolveEnv,
+  archiveIfAllMerged, archivePipeline, DASHBOARD_PORT, deletePipeline, findRecipe, isAlive, mainService, normalizeRecipe, pickPorts, previewLines, resolveEnv,
   requestPreviewStart, savedRecipePath, startOrder, startPreview, stopPipeline, stopPreview, stopPreviewAndSettle, type Service, unarchivePipeline,
 } from "../src/preview.ts";
 import { diffTotals, parseDiff } from "../src/diff.ts";
@@ -2444,6 +2444,30 @@ syncTest("pr sync: auto-archive stops the preview of a ready pipeline", async ()
     expect(readState(id).preview).toBeUndefined();
     expect(isAlive(pid)).toBe(false);
   } finally {
+    await stopPreviewQuiet(id);
+  }
+});
+
+syncTest("auto-archive writes archivedAt before it stops the preview", async () => {
+  const out = join(root, "state-at-sigterm.json");
+  // The service copies state.json when it gets SIGTERM, so the copy shows the state at kill time.
+  const id = donePipeline({ start: `trap 'cp "$STATE_FILE" "$OUT_FILE"; exit 0' TERM; ${SERVER.start} & wait` });
+  process.env.STATE_FILE = join(pipelineDir(id), "state.json");
+  process.env.OUT_FILE = out;
+  upsertChunk(id, { name: "c", pr: prUrl(117) });
+  await requestPreviewStart(id).done;
+  const pid = readState(id).preview!.services![0]!.pid!;
+  upsertChunk(id, { name: "c", status: "merged" });
+  try {
+    expect(await archiveIfAllMerged(id)).toBe(true);
+    expect(isAlive(pid)).toBe(false);
+    expect(existsSync(out)).toBe(true);
+    expect(JSON.parse(readFileSync(out, "utf8")).archivedAt).toBeString();
+    expect(readState(id).status).toBe("archived");
+    expect(readState(id).preview).toBeUndefined();
+  } finally {
+    delete process.env.STATE_FILE;
+    delete process.env.OUT_FILE;
     await stopPreviewQuiet(id);
   }
 });

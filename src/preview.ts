@@ -600,12 +600,18 @@ export async function archiveIfAllMerged(id: string): Promise<boolean> {
   try {
     const s = readState(id);
     if (!["ready", "done", "failed", "stopped"].includes(s.status) || s.merge?.status === "running" || !allMerged(s)) return false;
-    await stopPreview(id);
-    // Re-check: the status may have changed while the preview stopped.
+    // Archive first: the merge can run in this pipeline's own preview server, and stopping it kills this process.
+    // Archiving first makes sure the archive survives.
     const after = updateState(id, (x) => {
-      if (["ready", "done", "failed", "stopped"].includes(x.status) && allMerged(x)) x.archivedAt = new Date().toISOString();
+      if (["ready", "done", "failed", "stopped"].includes(x.status) && x.merge?.status !== "running" && allMerged(x)) x.archivedAt = new Date().toISOString();
     });
-    return after.status === "archived";
+    if (after.status !== "archived") return false;
+    try {
+      await stopPreview(id);
+    } catch (err) {
+      console.error(`auto-archive ${id}: ${err instanceof Error ? err.message : String(err)}`);
+    }
+    return true;
   } catch (err) {
     console.error(`auto-archive ${id}: ${err instanceof Error ? err.message : String(err)}`);
     return false;
