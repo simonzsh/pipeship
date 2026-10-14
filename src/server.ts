@@ -6,8 +6,8 @@ import { errorMessage, failStaleMerges, isMergeRunning, MergeError, startMerge }
 import { DiffError, pipelineDiff } from "./diff-git.ts";
 import type { DiffErrorBody } from "./diff.ts";
 import { startPrSync } from "./pr-sync.ts";
-import { home, listDashboardStates } from "./state.ts";
-import { currentVersion, detectHarness, getUpdateInfo, installUpdate, UpdateError, type InstallDeps } from "./update.ts";
+import { home, listDashboardStates, type Harness } from "./state.ts";
+import { currentHarness, currentVersion, getUpdateInfo, installUpdate, UpdateError, type InstallDeps } from "./update.ts";
 import {
   anyPreviewStarting, archivePipeline, deletePipeline, isPreviewStarting, PreviewError, requestPreviewStart, stopPipeline, stopPreviewAndSettle,
 } from "./preview.ts";
@@ -56,7 +56,7 @@ export function spawnDashboard(command: string, args: string[]) {
   writeFileSync(join(home(), "dashboard.pid"), String(child.pid));
 }
 
-export interface ServeOptions { prSync?: boolean; retryMs?: number; update?: Partial<InstallDeps> }
+export interface ServeOptions { prSync?: boolean; retryMs?: number; harness?: Harness | null; update?: Partial<InstallDeps> }
 
 export async function serve(port = DEFAULT_PORT, opts: ServeOptions = {}) {
   let sync: ReturnType<typeof startPrSync> | undefined;
@@ -81,7 +81,7 @@ export async function serve(port = DEFAULT_PORT, opts: ServeOptions = {}) {
     routes: {
       ...assets,
       "/api/health": () => Response.json({ app: "pipeship", version: currentVersion() }),
-      "/api/update": async () => Response.json({ ...(await getUpdateInfo()), harness: detectHarness() ?? null }, { headers: { "Cache-Control": "no-store" } }),
+      "/api/update": async () => Response.json(await getUpdateInfo({ harness: opts.harness }), { headers: { "Cache-Control": "no-store" } }),
       "/api/update/install": {
         POST: async () => {
           if (restarting) return Response.json({ restarting: true, from: currentVersion() });
@@ -89,7 +89,7 @@ export async function serve(port = DEFAULT_PORT, opts: ServeOptions = {}) {
             const blocker = () =>
               anyPreviewStarting() ? "A test environment is starting: wait for it, then update" :
               isMergeRunning() ? "A merge is running: wait for it, then update" : undefined;
-            const result = await installUpdate({ blocker, ...opts.update });
+            const result = await installUpdate(opts.harness !== undefined ? opts.harness : currentHarness(), { blocker, ...opts.update });
             if (!result.restarting) return Response.json({ restarting: false, message: result.message });
             restarting = true;
             setTimeout(() => handoff(result.launcher), 300); // let the response go out first

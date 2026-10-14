@@ -1,7 +1,8 @@
 import { ArrowUpCircle, Loader2 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { Button } from "./components/ui/button";
-import { responseError, shouldReload, type UpdateInfo } from "./update-info";
+import { shouldReload, type UpdateInfo } from "./update-info";
+import { responseError } from "./utils";
 
 const REFRESH_MS = 600_000;
 
@@ -11,7 +12,6 @@ export function UpdateBanner({ live }: { live: boolean }) {
   const [updating, setUpdating] = useState(false);
   const [error, setError] = useState<string>();
   const wasLive = useRef(live);
-  const oldVersion = useRef<string | undefined>(undefined);
 
   useEffect(() => {
     const load = () =>
@@ -27,7 +27,7 @@ export function UpdateBanner({ live }: { live: boolean }) {
     const check = () =>
       fetch("/api/health")
         .then((r) => r.json())
-        .then((h) => shouldReload(oldVersion.current ?? "", h.version) && location.reload(), () => {});
+        .then((h) => shouldReload(info?.current ?? "", h.version) && location.reload(), () => {});
     if (live && !wasLive.current) check();
     wasLive.current = live;
     const timer = setInterval(check, 3000);
@@ -37,7 +37,6 @@ export function UpdateBanner({ live }: { live: boolean }) {
   const install = async () => {
     setError(undefined);
     setUpdating(true);
-    oldVersion.current = info?.current ?? "";
     wasLive.current = live;
     try {
       const res = await fetch("/api/update/install", { method: "POST" });

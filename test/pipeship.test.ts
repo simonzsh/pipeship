@@ -1,4 +1,4 @@
-import { afterAll, beforeEach, expect, test } from "bun:test";
+import { afterAll, beforeEach, describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync, existsSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -27,7 +27,8 @@ import { allMerged, displaySteps, finished, formatElapsed, timeAgo } from "../sr
 import { diffRequests, diffUrl } from "../src/dashboard/diff-requests.ts";
 import { highlightLines, languageOf } from "../src/dashboard/highlight.tsx";
 import { chunkActivity } from "../src/dashboard/status.tsx";
-import { compareVersions, currentVersion, getUpdateInfo, detectHarness, installUpdate, readCodexInstalled, resetUpdateCache, UpdateError, type Installed } from "../src/update.ts";
+import { compareVersions, currentVersion, getUpdateInfo, detectHarness, installUpdate, readCodexInstalled, resetUpdateCache, UpdateError } from "../src/update.ts";
+import type { Harness } from "../src/state.ts";
 import { shouldReload } from "../src/dashboard/update-info.ts";
 
 const root = mkdtempSync(join(tmpdir(), "pipeship-test-"));
@@ -2220,8 +2221,8 @@ test("getUpdateInfo caches the latest version for one hour", async () => {
   resetUpdateCache();
   const f = fakeLatest("0.11.0");
   let t = 1_000;
-  const deps = { fetch: f.fetch, now: () => t, current: "0.10.0" };
-  expect(await getUpdateInfo(deps)).toEqual({ current: "0.10.0", latest: "0.11.0", available: true, checkedAt: 1_000 });
+  const deps = { fetch: f.fetch, now: () => t, current: "0.10.0", harness: null };
+  expect(await getUpdateInfo(deps)).toEqual({ current: "0.10.0", latest: "0.11.0", available: true, harness: null });
   t += 3_599_000;
   await getUpdateInfo(deps);
   expect(f.calls.length).toBe(1);
@@ -2234,93 +2235,109 @@ test("getUpdateInfo caches the latest version for one hour", async () => {
 
 test("getUpdateInfo does not throw when the network fails", async () => {
   resetUpdateCache();
-  const info = await getUpdateInfo({ fetch: fakeLatest(new Error("offline")).fetch, now: () => 1, current: "0.10.0" });
-  expect(info).toEqual({ current: "0.10.0", latest: null, available: false });
+  const info = await getUpdateInfo({ fetch: fakeLatest(new Error("offline")).fetch, now: () => 1, current: "0.10.0", harness: null });
+  expect(info).toEqual({ current: "0.10.0", latest: null, available: false, harness: null });
 });
 
 test("installUpdate refuses with 409 while a start or merge runs, without running claude", async () => {
   const ran: string[] = [];
   const run: Runner = async (cmd, args) => (ran.push([cmd, ...args].join(" ")), { code: 0, stdout: "", stderr: "" });
-  const err = await installUpdate({ harness: "claude", run, blocker: () => "A test environment is starting" }).catch((e) => e);
+  const err = await installUpdate("claude", { run, blocker: () => "A test environment is starting" }).catch((e) => e);
   expect(err).toBeInstanceOf(UpdateError);
   expect([err.status, err.message]).toEqual([409, "A test environment is starting"]);
   expect(ran).toEqual([]);
 });
 
-test("installUpdate restarts only when the install changed and the launcher exists", async () => {
-  const ran: string[] = [];
-  const run: Runner = async (cmd, args) => (ran.push([cmd, ...args].join(" ")), { code: 0, stdout: "", stderr: "" });
-  const old: Installed = { installPath: "/cache/0.10.0", version: "0.10.0" };
-  const same = await installUpdate({ harness: "claude", run, readInstalled: () => old, launcherExists: () => true });
-  expect(same).toEqual({ restarting: false, message: expect.stringContaining("Already up to date") });
-  expect(ran).toEqual(["claude plugin update pipeship@pipeship"]);
-
-  const reads = [old, { installPath: "/cache/0.11.0", version: "0.11.0" }];
-  expect(await installUpdate({ harness: "claude", run, readInstalled: () => reads.shift(), launcherExists: () => true })).toEqual({
-    restarting: true,
-    launcher: "/cache/0.11.0/scripts/pipeship",
-  });
-  const moved = [old, { installPath: "/cache/0.11.0", version: "0.11.0" }];
-  expect((await installUpdate({ harness: "claude", run, readInstalled: () => moved.shift(), launcherExists: () => false })).restarting).toBe(false);
-  expect((await installUpdate({ harness: "claude", run, readInstalled: () => undefined })).restarting).toBe(false);
-
-  const fail: Runner = async () => ({ code: 1, stdout: "", stderr: "boom" });
-  const err = await installUpdate({ harness: "claude", run: fail, readInstalled: () => old }).catch((e) => e);
-  expect([err.status, err.message]).toEqual([500, "claude plugin update failed: boom"]);
-});
-
 test("detectHarness reads the real path and honors the config dir overrides", () => {
-  expect(detectHarness("/home/u/.claude/plugins/cache/pipeship/pipeship/0.11.0", {})).toBe("claude");
-  expect(detectHarness("/home/u/.codex/plugins/cache/pipeship/pipeship/0.11.0", {})).toBe("codex");
-  expect(detectHarness("/home/u/src/pipeship", {})).toBeUndefined();
+  const env = { CLAUDE_CONFIG_DIR: "/home/u/.claude", CODEX_HOME: "/home/u/.codex" };
+  expect(detectHarness("/home/u/.claude/plugins/cache/pipeship/pipeship/0.11.0", env)).toBe("claude");
+  expect(detectHarness("/home/u/.codex/plugins/cache/pipeship/pipeship/0.11.0", env)).toBe("codex");
+  expect(detectHarness("/home/u/src/pipeship", env)).toBeUndefined();
   expect(detectHarness("/opt/cc/plugins/cache/p", { CLAUDE_CONFIG_DIR: "/opt/cc" })).toBe("claude");
   expect(detectHarness("/opt/cx/plugins/cache/p", { CODEX_HOME: "/opt/cx" })).toBe("codex");
 });
 
-const codexList = (version: string) => JSON.stringify({ installed: [{ pluginId: "pipeship@pipeship", name: "pipeship", marketplaceName: "pipeship", version }] });
-const codexRunner = (versions: string[], ran: string[], code = 0): Runner => async (cmd, args) => {
-  const line = [cmd, ...args].join(" ");
-  ran.push(line);
-  return { code, stdout: line.includes("list") ? codexList(versions.shift() ?? "0") : "", stderr: code ? "boom" : "" };
-};
+const codexList = (version?: string) =>
+  JSON.stringify({ installed: version ? [{ pluginId: "pipeship@pipeship", name: "pipeship", marketplaceName: "pipeship", version }] : [] });
+
+// Fake harness CLI. The installed version steps through `versions` once the last update command ran ([] = not installed).
+// Claude's installs are read from a file under env, Codex's from `codex plugin list`.
+function fakeHarness(harness: Harness, versions: string[], code = 0) {
+  const home = mkdtempSync(join(root, "harness-"));
+  const env = harness === "claude" ? { CLAUDE_CONFIG_DIR: home } : { CODEX_HOME: home };
+  const ran: string[] = [];
+  let i = 0;
+  const writeClaude = () => {
+    const v = versions[i];
+    if (!v) return;
+    mkdirSync(join(home, "plugins"), { recursive: true });
+    writeFileSync(join(home, "plugins", "installed_plugins.json"), JSON.stringify({ plugins: { "pipeship@pipeship": [{ installPath: `/cache/${v}`, version: v }] } }));
+  };
+  writeClaude();
+  const last = harness === "claude" ? "claude plugin update pipeship@pipeship" : "codex plugin add pipeship@pipeship";
+  const run: Runner = async (cmd, args) => {
+    const line = [cmd, ...args].join(" ");
+    ran.push(line);
+    if (code) return { code, stdout: "", stderr: "boom" };
+    if (line === last) (i = Math.min(i + 1, versions.length - 1), writeClaude());
+    return { code: 0, stdout: line.includes("list") ? codexList(versions[i]) : "", stderr: "" };
+  };
+  return { run, env, ran };
+}
+
+const launcherOf = (harness: Harness, v: string) =>
+  harness === "claude" ? `/cache/${v}/scripts/pipeship` : expect.stringMatching(new RegExp(`plugins/cache/pipeship/pipeship/${v.replace(/\./g, "\\.")}/scripts/pipeship$`));
 
 test("codex: reads the install path from the cache layout", async () => {
-  const got = await readCodexInstalled(codexRunner(["0.11.0"], []), { CODEX_HOME: "/h" });
+  const got = await readCodexInstalled(async () => ({ code: 0, stdout: codexList("0.11.0"), stderr: "" }), { CODEX_HOME: "/h" });
   expect(got).toEqual({ installPath: "/h/plugins/cache/pipeship/pipeship/0.11.0", version: "0.11.0" });
 });
 
-test("codex: runs marketplace upgrade then add, and restarts on a new version", async () => {
-  const ran: string[] = [];
-  const res = await installUpdate({ harness: "codex", run: codexRunner(["0.10.0", "0.11.0"], ran), launcherExists: () => true });
-  expect(ran).toEqual([
+test("codex: runs marketplace upgrade then add", async () => {
+  const f = fakeHarness("codex", ["0.10.0", "0.11.0"]);
+  await installUpdate("codex", { run: f.run, env: f.env, launcherExists: () => true });
+  expect(f.ran).toEqual([
     "codex plugin list --json",
     "codex plugin marketplace upgrade pipeship",
     "codex plugin add pipeship@pipeship",
     "codex plugin list --json",
   ]);
-  expect(res.restarting).toBe(true);
-  expect((res as { launcher: string }).launcher).toMatch(/plugins\/cache\/pipeship\/pipeship\/0\.11\.0\/scripts\/pipeship$/);
 });
 
-test("codex: unchanged version or missing launcher means no restart, a failing command is a 500", async () => {
-  const same = await installUpdate({ harness: "codex", run: codexRunner(["0.10.0", "0.10.0"], []), launcherExists: () => true });
-  expect(same).toEqual({ restarting: false, message: expect.stringContaining("Already up to date") });
-  const noLauncher = await installUpdate({ harness: "codex", run: codexRunner(["0.10.0", "0.11.0"], []), launcherExists: () => false });
-  expect(noLauncher.restarting).toBe(false);
-  const err = await installUpdate({ harness: "codex", run: codexRunner(["0.10.0"], [], 1) }).catch((e) => e);
-  expect([err.status, err.message]).toEqual([500, "codex plugin marketplace failed: boom"]);
+describe.each(["claude", "codex"] as const)("installUpdate with %s", (harness) => {
+  test("restarts when the install moved to a new version", async () => {
+    const f = fakeHarness(harness, ["0.10.0", "0.11.0"]);
+    const res = await installUpdate(harness, { run: f.run, env: f.env, launcherExists: () => true });
+    expect(res).toEqual({ restarting: true, launcher: launcherOf(harness, "0.11.0") });
+  });
+
+  test.each([
+    ["the version did not change", ["0.10.0", "0.10.0"], true, "Already up to date"],
+    ["the new version has no launcher", ["0.10.0", "0.11.0"], false, "has no launcher"],
+    ["the plugin is not installed", [], true, "not installed through"],
+  ])("does not restart when %s", async (_name, versions, launcher, message) => {
+    const f = fakeHarness(harness, versions);
+    const res = await installUpdate(harness, { run: f.run, env: f.env, launcherExists: () => launcher });
+    expect(res).toEqual({ restarting: false, message: expect.stringContaining(message) });
+  });
+
+  test("a failing command is a 500", async () => {
+    const f = fakeHarness(harness, ["0.10.0"], 1);
+    const err = await installUpdate(harness, { run: f.run, env: f.env }).catch((e) => e);
+    expect([err.status, err.message]).toEqual([500, harness === "claude" ? "claude plugin update failed: boom" : "codex plugin marketplace failed: boom"]);
+  });
 });
 
 test("a copy outside a plugin manager gets a message and runs no command", async () => {
-  const ran: string[] = [];
-  const res = await installUpdate({ harness: undefined, run: codexRunner([], ran) });
+  const f = fakeHarness("codex", []);
+  const res = await installUpdate(null, { run: f.run, env: f.env });
   expect(res).toEqual({ restarting: false, message: expect.stringContaining("not installed through a plugin manager") });
-  expect(ran).toEqual([]);
+  expect(f.ran).toEqual([]);
 });
 
 test("POST /api/update/install does not restart when nothing changed, and /api/health has the version", async () => {
-  const run: Runner = async () => ({ code: 0, stdout: "", stderr: "" });
-  const server = await serve(0, { update: { harness: "claude", run, readInstalled: () => ({ installPath: "/x", version: "1" }), launcherExists: () => true } });
+  const f = fakeHarness("claude", ["1", "1"]);
+  const server = await serve(0, { harness: "claude", update: { run: f.run, env: f.env, launcherExists: () => true } });
   try {
     const base = `http://localhost:${server.port}`;
     expect(((await (await fetch(`${base}/api/health`)).json()) as { version: string }).version).toBe(currentVersion());
