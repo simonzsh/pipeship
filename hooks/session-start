@@ -1,0 +1,6 @@
+#!/bin/sh
+# SessionStart hook: remind the agent of the unfinished pipelines of this session.
+# Never fails and never installs anything: no output means no reminder.
+command -v bun >/dev/null 2>&1 || exit 0
+root="$(cd "$(dirname "$(realpath "$0")")/.." && pwd)"
+exec bun "$root/src/hook.ts"

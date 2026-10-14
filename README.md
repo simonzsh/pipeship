@@ -42,6 +42,8 @@ Type `/pipeship:ship` followed by the ticket (`/ship` if you use the dev link):
 
 You can also ask in plain words: "ship ABC-123 with pipeship".
 
+A SessionStart hook keeps long sessions on track. After startup, resume, clear or compact, it re-injects a short reminder: the pipelines of this session that are not finished, their step and folder, the key rules, and the path of the skill to re-read. It stays silent when no pipeline of the session is unfinished.
+
 ### In Codex
 
 In Codex, `$` calls a skill by name (type `$` to pick one from a list):
