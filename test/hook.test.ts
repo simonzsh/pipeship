@@ -81,7 +81,7 @@ describe("reminder", () => {
     expect(out).not.toContain("\n");
     const json = JSON.parse(out);
     expect(json.hookSpecificOutput.hookEventName).toBe("SessionStart");
-    expect(json.hookSpecificOutput.additionalContext).toContain("a ");
+    expect(json.hookSpecificOutput.additionalContext).toContain('a "Ticket a"');
   });
 
   test("parseHookInput returns {} for bad or empty input", () => {
