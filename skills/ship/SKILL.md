@@ -30,7 +30,7 @@ pipeship step <id> <step> running|done|skipped|failed
 pipeship mode <id> quick|full         # switch the mode after creation; quick skips the pending plan step
 pipeship wait <id> <step> [--reason <question>]   # pause for the user on this step: the step runs, the card shows the question
 pipeship status <id> running|ready|done|failed   # waiting_for_user only through "wait"
-pipeship archive <id>                            # done or failed only; the user archives, not the agent
+pipeship archive <id>                            # done, failed or stopped only; the user archives, not the agent
 pipeship chunk <id> <name> [--repo r] [--worktree p] [--branch b] [--status s] [--pr url]   # --repo (name or path) needed for a new chunk with several repos
 pipeship recipe <repo>...              # the saved recipe to start the app for these repos, or "none"
 pipeship preview <id> [<worktree>] [--recipe file]   # starts the app, prints the URL(s); each service runs from the top worktree of its repo

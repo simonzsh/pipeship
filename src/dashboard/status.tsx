@@ -1,4 +1,4 @@
-import { Archive, CheckCheck, CheckCircle2, GitMerge, GitPullRequestClosed, Loader2, MessageCircleQuestion, XCircle, type LucideIcon } from "lucide-react";
+import { Archive, CheckCheck, CheckCircle2, GitMerge, GitPullRequestClosed, Loader2, MessageCircleQuestion, Square, XCircle, type LucideIcon } from "lucide-react";
 import type { Status } from "../state.ts";
 import { Badge } from "./components/ui/badge";
 
@@ -66,6 +66,16 @@ const STATUS: Record<Status, StatusConfig> = {
     dot: "bg-red-500",
     text: "text-red-700 dark:text-red-400",
     group: "Failed",
+  },
+  stopped: {
+    label: "Stopped",
+    icon: Square,
+    badge: "bg-muted text-muted-foreground ring-1 ring-inset ring-border",
+    tint: "bg-muted/40",
+    hover: "hover:bg-muted",
+    dot: "bg-muted-foreground/60",
+    text: "text-muted-foreground",
+    group: "Stopped",
   },
   archived: {
     label: "Archived",

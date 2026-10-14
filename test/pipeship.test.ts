@@ -125,7 +125,7 @@ test("preview starts the app, copies local files, and stop kills it", async () =
 
   const pid = state.preview!.pid!;
   const stopped = await stopPipeline(id);
-  expect(stopped.status).toBe("done");
+  expect(stopped.status).toBe("stopped");
   expect(stopped.stopRequested).toBe(true);
   expect(isAlive(pid)).toBe(false);
 
@@ -561,7 +561,7 @@ test("stop during a slow start leaves no service running", async () => {
   expect(await pending).toBeInstanceOf(Error);
   const after = readState(id);
   expect(after.preview).toBeUndefined();
-  expect(after.status).toBe("done");
+  expect(after.status).toBe("stopped");
   // The front service is never spawned, and the back one is dead.
   expect(during.find((x) => x.name === "web")!.pid).toBeUndefined();
   expect(isAlive(during.find((x) => x.name === "api")!.pid!)).toBe(false);
@@ -1154,16 +1154,17 @@ test("setMode quick sets the mode and skips only pending quick steps; full only 
 });
 
 test("groupByStatus orders groups, hides empty ones and keeps the order inside a group", () => {
-  const order = ["waiting_for_user", "ready", "running", "done", "failed", "archived"];
+  const order = ["waiting_for_user", "ready", "running", "done", "failed", "stopped", "archived"];
   const items = [
     { id: "a", status: "running" },
     { id: "b", status: "archived" },
     { id: "c", status: "waiting_for_user" },
     { id: "d", status: "running" },
     { id: "e", status: "waiting_for_user" },
+    { id: "f", status: "stopped" },
   ];
   const groups = groupByStatus(items, order);
-  expect(groups.map((g) => g.status)).toEqual(["waiting_for_user", "running", "archived"]);
+  expect(groups.map((g) => g.status)).toEqual(["waiting_for_user", "running", "stopped", "archived"]);
   expect(groups[0]!.items.map((i) => i.id)).toEqual(["c", "e"]);
   expect(groups[1]!.items.map((i) => i.id)).toEqual(["a", "d"]);
   expect(groupByStatus([], order)).toEqual([]);
@@ -1714,7 +1715,7 @@ test("allMerged and finished", () => {
   expect(allMerged({ chunks: [{ name: "a", pr: "u", status: "merged" }] as never })).toBe(true);
   expect(allMerged({ chunks: [{ name: "a", pr: "u", status: "merged" }, { name: "b", pr: "v", status: "done" }] as never })).toBe(false);
   expect(finished({ status: "ready" })).toBe(true);
-  for (const status of ["done", "failed", "archived"] as const) expect(finished({ status })).toBe(true);
+  for (const status of ["done", "failed", "stopped", "archived"] as const) expect(finished({ status })).toBe(true);
   expect(finished({ status: "running" })).toBe(false);
   expect(finished({ status: "waiting_for_user" })).toBe(false);
 });
@@ -1901,7 +1902,7 @@ test("a stop during a start is not recorded as previewError", async () => {
   expect(readState(id).status).toBe("done");
 }, 30_000);
 
-test("archive is refused unless the pipeline is done or failed", async () => {
+test("archive is refused unless the pipeline is done, failed or stopped", async () => {
   const id = donePipeline(SERVER);
   const server = await serve(0);
   const post = (pid: string) => fetch(`http://localhost:${server.port}/api/pipelines/${pid}/archive`, { method: "POST" });
@@ -1916,13 +1917,13 @@ test("archive is refused unless the pipeline is done or failed", async () => {
       expect(readState(id).status).toBe(status);
     }
     expect((await post("nope")).status).toBe(404);
-    setStatus(id, "done");
+    setStatus(id, "stopped");
     expect((await post(id)).status).toBe(200);
     expect(readState(id).status).toBe("archived");
   } finally {
     server.stop(true);
   }
-  await expect(archivePipeline(id)).rejects.toThrow("only a done or failed");
+  await expect(archivePipeline(id)).rejects.toThrow("only a done, failed or stopped");
 });
 
 test("archiving a failed pipeline stops its preview", async () => {
@@ -1974,7 +1975,7 @@ test("old state files get the new statuses", () => {
   write(stopped, { status: "stopped" });
   write(readyIdle, { status: "ready" });
   write(readyWithPreview, { status: "ready", preview: { url: "http://localhost:1", port: 1, pid: 1, log: "x", repo, worktree: repo } });
-  expect(readState(stopped).status).toBe("archived");
+  expect(readState(stopped).status).toBe("stopped");
   expect(readState(readyIdle).status).toBe("done");
   expect(readState(readyWithPreview).status).toBe("ready");
 });
@@ -2030,6 +2031,13 @@ syncTest("pr sync: the last PR merged archives a done pipeline", async () => {
   const id = syncPipeline("sync archive", [111]);
   setStatus(id, "done");
   await syncPrStatuses({ run: syncGh({ [prUrl(111)]: { state: "MERGED" } }).run, log: () => {} });
+  expect(readState(id).status).toBe("archived");
+});
+
+syncTest("pr sync: the last PR merged archives a stopped pipeline", async () => {
+  const id = syncPipeline("sync archive stopped", [116]);
+  setStatus(id, "stopped");
+  await syncPrStatuses({ run: syncGh({ [prUrl(116)]: { state: "MERGED" } }).run, log: () => {} });
   expect(readState(id).status).toBe("archived");
 });
 

@@ -153,7 +153,7 @@ Choix et raisons :
   "ticket": { "source": "linear | notion | github | url | text | …", "ref": "ABC-123", "url": "…", "title": "…", "file": "ticket.md" },
   "mode": "full | quick",
   "repo": "/chemin/vers/le/repo",
-  "status": "running | waiting_for_user | ready | done | failed | archived",
+  "status": "running | waiting_for_user | ready | done | failed | stopped | archived",
   "step": "explore | questions | plan | implement | review | stack | preview",
   "steps": [{ "name": "explore", "status": "pending | running | done | skipped", "startedAt": "…", "endedAt": "…" }],
   "chunks": [{ "name": "api", "worktree": "…", "branch": "…", "status": "…", "pr": "https://…" }],

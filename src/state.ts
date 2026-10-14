@@ -6,7 +6,7 @@ import { assertRepoName, findRepo, repoName } from "./repos.ts";
 export const STEPS = ["explore", "questions", "plan", "implement", "review", "stack", "preview"] as const;
 export type StepName = (typeof STEPS)[number];
 export type StepStatus = "pending" | "running" | "done" | "skipped" | "failed";
-export const STATUSES = ["running", "waiting_for_user", "ready", "done", "failed", "archived"] as const;
+export const STATUSES = ["running", "waiting_for_user", "ready", "done", "failed", "stopped", "archived"] as const;
 export type Status = (typeof STATUSES)[number];
 export type Mode = "full" | "quick";
 
@@ -193,10 +193,8 @@ function upgrade(raw: Raw): State {
     }
   }
   if (preview) delete preview.worktree;
-  // "stopped" became "archived", and "ready" used to hold without a preview.
-  const old = raw.status as string;
-  if (old === "stopped") raw.status = "archived";
-  else if (old === "ready" && !raw.preview) raw.status = "done";
+  // "ready" used to hold without a preview.
+  if (raw.status === "ready" && !raw.preview) raw.status = "done";
   // Merge runs saved before combine mode existed were all base merges.
   if (raw.merge && !raw.merge.mode) raw.merge.mode = "base";
   // State files written before `links` existed hold one `ref` (sometimes "A-1,A-2") and one `url`.

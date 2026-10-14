@@ -567,9 +567,9 @@ export async function stopPipeline(id: string): Promise<State> {
     s.stopRequested = true;
   });
   await stopPreview(id);
-  // "done" claims every step finished: a failed or archived pipeline keeps its status.
+  // A failed or archived pipeline keeps its status.
   return updateState(id, (s) => {
-    if (s.status !== "failed" && s.status !== "archived") s.status = "done";
+    if (s.status !== "failed" && s.status !== "archived") s.status = "stopped";
     delete s.waitingFor;
   });
 }
@@ -585,8 +585,8 @@ export async function stopPreviewAndSettle(id: string): Promise<State> {
 // Archived is final: only Delete remains.
 export async function archivePipeline(id: string): Promise<State> {
   const state = readStateOr404(id);
-  if (state.status !== "done" && state.status !== "failed") {
-    throw new PreviewError(`only a done or failed pipeline can be archived (status: ${state.status})`, 409);
+  if (!["done", "failed", "stopped"].includes(state.status)) {
+    throw new PreviewError(`only a done, failed or stopped pipeline can be archived (status: ${state.status})`, 409);
   }
   await stopPreview(id);
   return updateState(id, (s) => {
@@ -598,11 +598,11 @@ export async function archivePipeline(id: string): Promise<State> {
 export async function archiveIfAllMerged(id: string): Promise<boolean> {
   try {
     const s = readState(id);
-    if (!["ready", "done", "failed"].includes(s.status) || s.merge?.status === "running" || !allMerged(s)) return false;
+    if (!["ready", "done", "failed", "stopped"].includes(s.status) || s.merge?.status === "running" || !allMerged(s)) return false;
     await stopPreview(id);
     // Re-check: the status may have changed while the preview stopped.
     const after = updateState(id, (x) => {
-      if (["ready", "done", "failed"].includes(x.status) && allMerged(x)) x.status = "archived";
+      if (["ready", "done", "failed", "stopped"].includes(x.status) && allMerged(x)) x.status = "archived";
     });
     return after.status === "archived";
   } catch (err) {

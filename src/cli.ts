@@ -34,7 +34,7 @@ const USAGE = `pipeship — state, test environments and dashboard for the /pipe
   preview <id> [<worktree>] [--recipe file]   start the test environment: each service runs from the top worktree of its repo;
                                <worktree> overrides it for a one-repo pipeline; a --recipe that works is saved for the pipeline's repos
   stop <id>                    stop the pipeline and its test servers
-  archive <id>                 archive a done or failed pipeline (its test servers stop); only delete remains after that
+  archive <id>                 archive a done, failed or stopped pipeline (its test servers stop); only delete remains after that
   delete <id> [--force]        delete its worktrees and files (branches and PRs stay); --force drops uncommitted changes
   dashboard [start|stop] [--port n]   start the dashboard in the background (default) or stop it
   serve [--port n]             run the dashboard in the foreground`;

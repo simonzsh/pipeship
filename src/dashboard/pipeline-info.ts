@@ -35,5 +35,5 @@ export function displaySteps(p: Pick<State, "steps" | "status"> & Partial<Pick<S
 export { allMerged } from "../state.ts";
 
 export function finished(p: Pick<State, "status">): boolean {
-  return p.status === "ready" || p.status === "done" || p.status === "failed" || p.status === "archived";
+  return p.status === "ready" || p.status === "done" || p.status === "failed" || p.status === "stopped" || p.status === "archived";
 }

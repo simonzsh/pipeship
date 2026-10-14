@@ -106,7 +106,7 @@ export function PipelineActions({ p, merging, starting }: { p: State; merging: b
   } else if (p.status === "running" || p.status === "waiting_for_user" || (p.status === "failed" && p.preview)) {
     actions.push("stopPipeline");
   }
-  if (p.status === "done" || p.status === "failed") actions.push("archive");
+  if (p.status === "done" || p.status === "failed" || p.status === "stopped") actions.push("archive");
   if (!merging && finished(p)) actions.push("delete");
   return actions.map((name) => <ActionButton key={name} id={p.id} action={name} hasServers={!!p.preview} />);
 }
