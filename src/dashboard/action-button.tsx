@@ -71,7 +71,7 @@ const ACTIONS: Record<"stopPipeline" | "stopServer" | "archive" | "unarchive" | 
     button: "Delete",
     title: "Delete this pipeline?",
     description:
-      "The test servers stop, and the worktrees and pipeline files are deleted. Branches and PRs stay. Uncommitted changes block the deletion.",
+      "The test servers stop, and the worktrees and pipeline files are deleted. The local branches of merged PRs are deleted too; other branches and PRs stay. Uncommitted changes block the deletion.",
     confirm: "Delete",
   },
 };
