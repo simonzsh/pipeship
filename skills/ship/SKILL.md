@@ -47,8 +47,8 @@ Steps: `explore`, `questions`, `plan`, `implement`, `review`, `stack`, `preview`
 - **The user can change the steps at any time** ("skip the review", "ask me your questions anyway"). Update the state with `pipeship step <id> <step> skipped|pending` and continue.
 - **Keep the steps that later steps need**: the test environment needs a worktree; PRs need commits.
 - On failure: `pipeship step <id> <step> failed`, explain what failed, and ask the user what to do.
-- **The checks** are the **fast checks** (typecheck, lint, format, repo rule scripts: they run in full) plus the **targeted tests** for the diff: test files added or changed, tests of the changed modules, and cross-cutting tests the diff can break (infra, env, routes, imports). Never run the full suite: CI runs it on each PR. Exception: if CI does not run the full suite on PRs, or the user asks for it, run it once on the top of the stack, before step 6.
-- **Report the tests.** Every report that mentions checks lists the tests that ran and says CI covers the rest.
+- **The checks** are the **fast checks** (typecheck, lint, format, repo rule scripts: they run in full) plus the **targeted tests** for the diff: test files added or changed, tests of the changed modules, and cross-cutting tests the diff can break (infra, env, routes, imports). Do not run the full suite: CI runs it on each PR. Exception: if CI does not run the full suite on PRs, or the user asks for it, run it once only, on the top of the stack, before step 6.
+- **Report the tests.** Every report that mentions checks lists the tests that ran and says that CI covers the rest. If the full suite ran locally instead, say so.
 - **One test suite at a time on the machine.** Never run two suites in parallel (several subagents, several worktrees). Subagents that run together run only their targeted tests.
 - **Every pause for the user names its step**: `pipeship wait <id> <step> --reason "<the question, in one short line>"`, then stop. This covers the questions of step 2, an approval that the repo or workspace rules require (CLAUDE.md, AGENTS.md…) before a push or a PR, and any decision you cannot make. The step shows amber on the dashboard and the card shows the question. When the user answers, the next `step` call ends the wait.
 - **A step that waits does not block an independent later step.** Example: when `stack` needs approval, run `preview` on the top worktree first, then run `wait` and ask once for everything that waits. Run `wait` last: any step that starts ends the wait.
@@ -128,8 +128,10 @@ Write a short summary to `<dir>/review.md`. List the tests that ran and say that
 
 Before you push, check the rules of the repo and of the workspace (CLAUDE.md, AGENTS.md…). If they require the user's approval for a push or for a PR the team can see, run step 7 first, then `pipeship wait <id> stack --reason "Push <n> branches and open <n> PRs?"`, ask, and stop. Push only after an explicit yes. On a no, `pipeship step <id> stack skipped`.
 
+If the exception in **The checks** applies (CI does not run the full suite on PRs, or the user asks for it), run the full suite once now, on the top of each repo's stack. If it fails, fix it before you push.
+
 1. Push every chunk branch.
-2. In stack order, open one PR per chunk: `gh pr create --head <branch> --base <previous branch>` (the first PR of each repo targets that repo's base). Title from the ticket and chunk; body: what this chunk does, a link to the ticket, and the stack position ("2/3"), the tests that ran, and that CI covers the rest.
+2. In stack order, open one PR per chunk: `gh pr create --head <branch> --base <previous branch>` (the first PR of each repo targets that repo's base). Title from the ticket and chunk; body: what this chunk does, a link to the ticket, the stack position ("2/3"), the tests that ran, and a note that CI covers the rest.
 3. `pipeship chunk <id> <chunk> --pr <url>`. The chunk stays `done`: the dashboard shows the PR link. The dashboard later sets `merged` or `closed` from GitHub.
 
 With several repos, once every PR exists, add a "Related PRs" list with the other repos' PRs to each PR body (`gh pr edit <url> --body-file <file>`).
@@ -158,7 +160,7 @@ If the preview fails to start, it prints the log tail: diagnose, fix the recipe 
 
 ## End
 
-Give the user a short summary: the test URL, the PRs in stack order (per repo), what the verification covered (or why it was skipped), and the tests that ran (CI covers the rest), and anything to check by hand. Point to the test guide: the user finds it in the pipeline's Test tab. The test servers keep running on purpose; the user stops them with the dashboard's "Stop preview" button and starts them again with "Start preview".
+Give the user a short summary: the test URL, the PRs in stack order (per repo), what the verification covered (or why it was skipped), the tests that ran (CI covers the rest), and anything to check by hand. Point to the test guide: the user finds it in the pipeline's Test tab. The test servers keep running on purpose; the user stops them with the dashboard's "Stop preview" button and starts them again with "Start preview".
 
 ## Test environment recipe
 
