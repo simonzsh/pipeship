@@ -2662,27 +2662,31 @@ test("detectHarness reads the real path and honors the config dir overrides", ()
 const codexList = (version?: string) =>
   JSON.stringify({ installed: version ? [{ pluginId: "pipeship@pipeship", name: "pipeship", marketplaceName: "pipeship", version }] : [] });
 
-// Fake harness CLI. The installed version steps through `versions` once the last update command ran ([] = not installed).
-// Claude's installs are read from a file under env, Codex's from `codex plugin list`.
-function fakeHarness(harness: Harness, versions: string[], code = 0) {
+const LAST_UPDATE_CMD: Record<Harness, string> = { claude: "claude plugin update pipeship@pipeship", codex: "codex plugin add pipeship@pipeship" };
+
+// Fake harness CLIs. Each installed version steps through its list once that harness's last update command ran ([] = not installed).
+// Claude's installs are read from a file under env, Codex's from `codex plugin list`. `code` fails the running harness's commands.
+function fakeHarness(harness: Harness, versions: string[], code = 0, extra: { other?: string[]; failOther?: boolean } = {}) {
+  const other: Harness = harness === "claude" ? "codex" : "claude";
+  const plan = { [harness]: versions, [other]: extra.other ?? [] } as Record<Harness, string[]>;
   const home = mkdtempSync(join(root, "harness-"));
-  const env = harness === "claude" ? { CLAUDE_CONFIG_DIR: home } : { CODEX_HOME: home };
+  const env = { CLAUDE_CONFIG_DIR: join(home, "claude"), CODEX_HOME: join(home, "codex") };
   const ran: string[] = [];
-  let i = 0;
+  const at = { claude: 0, codex: 0 };
   const writeClaude = () => {
-    const v = versions[i];
+    const v = plan.claude[at.claude];
     if (!v) return;
-    mkdirSync(join(home, "plugins"), { recursive: true });
-    writeFileSync(join(home, "plugins", "installed_plugins.json"), JSON.stringify({ plugins: { "pipeship@pipeship": [{ installPath: `/cache/${v}`, version: v }] } }));
+    mkdirSync(join(env.CLAUDE_CONFIG_DIR, "plugins"), { recursive: true });
+    writeFileSync(join(env.CLAUDE_CONFIG_DIR, "plugins", "installed_plugins.json"), JSON.stringify({ plugins: { "pipeship@pipeship": [{ installPath: `/cache/${v}`, version: v }] } }));
   };
   writeClaude();
-  const last = harness === "claude" ? "claude plugin update pipeship@pipeship" : "codex plugin add pipeship@pipeship";
   const run: Runner = async (cmd, args) => {
     const line = [cmd, ...args].join(" ");
     ran.push(line);
-    if (code) return { code, stdout: "", stderr: "boom" };
-    if (line === last) (i = Math.min(i + 1, versions.length - 1), writeClaude());
-    return { code: 0, stdout: line.includes("list") ? codexList(versions[i]) : "", stderr: "" };
+    const h = cmd as Harness;
+    if ((code && h === harness) || (extra.failOther && h === other && !line.includes("list"))) return { code: code || 1, stdout: "", stderr: "boom" };
+    if (line === LAST_UPDATE_CMD[h]) (at[h] = Math.min(at[h] + 1, plan[h].length - 1), writeClaude());
+    return { code: 0, stdout: line.includes("list") ? codexList(plan.codex[at.codex]) : "", stderr: "" };
   };
   return { run, env, ran };
 }
@@ -2727,6 +2731,36 @@ describe.each(["claude", "codex"] as const)("installUpdate with %s", (harness) =
     const f = fakeHarness(harness, ["0.10.0"], 1);
     const err = await installUpdate(harness, { run: f.run, env: f.env }).catch((e) => e);
     expect([err.status, err.message]).toEqual([500, harness === "claude" ? "claude plugin update failed: boom" : "codex plugin marketplace failed: boom"]);
+  });
+});
+
+describe.each(["claude", "codex"] as const)("installUpdate from %s with both harnesses installed", (harness) => {
+  const other: Harness = harness === "claude" ? "codex" : "claude";
+
+  test("updates both and restarts from the running copy", async () => {
+    const f = fakeHarness(harness, ["98.0.0", "99.0.0"], 0, { other: ["98.0.0", "99.0.0"] });
+    const res = await installUpdate(harness, { run: f.run, env: f.env, launcherExists: () => true });
+    expect(res).toEqual({ restarting: true, launcher: launcherOf(harness, "99.0.0"), warning: undefined });
+    expect(f.ran).toContain(LAST_UPDATE_CMD[harness]);
+    expect(f.ran).toContain(LAST_UPDATE_CMD[other]);
+  });
+
+  test("restarts from the other copy when only it moved to a newer version", async () => {
+    const f = fakeHarness(harness, ["99.0.0", "99.0.0"], 0, { other: ["98.0.0", "99.0.0"] });
+    const res = await installUpdate(harness, { run: f.run, env: f.env, launcherExists: () => true });
+    expect(res).toEqual({ restarting: true, launcher: launcherOf(other, "99.0.0"), warning: undefined });
+  });
+
+  test("does not restart when only the other copy moved to a version not newer than the running one", async () => {
+    const f = fakeHarness(harness, ["0.0.1", "0.0.1"], 0, { other: ["0.0.1", "0.0.2"] });
+    const res = await installUpdate(harness, { run: f.run, env: f.env, launcherExists: () => true });
+    expect(res).toEqual({ restarting: false, message: expect.stringContaining(`Updated ${other}`) });
+  });
+
+  test("a failing other copy does not block the running one, and is reported", async () => {
+    const f = fakeHarness(harness, ["98.0.0", "99.0.0"], 0, { other: ["98.0.0", "99.0.0"], failOther: true });
+    const res = await installUpdate(harness, { run: f.run, env: f.env, launcherExists: () => true });
+    expect(res).toMatchObject({ restarting: true, warning: expect.stringContaining("failed: boom") });
   });
 });
 
