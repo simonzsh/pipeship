@@ -14,6 +14,8 @@ type Mode = "combine" | "base";
 
 // Outline buttons with a violet icon, like the stop and delete actions. One button at a time.
 const ICON = "text-violet-600 dark:text-violet-400";
+// The dialog's confirm button stays solid violet: AlertDialogAction is red by default.
+const CONFIRM = "bg-violet-600 text-white hover:bg-violet-700";
 
 // Shown on finished pipelines with open PRs, and while a merge runs.
 // `busy`: another repo's merge runs, and only one merge runs per pipeline: the button stays, disabled.
@@ -85,7 +87,7 @@ export function MergeButton({ id, repo, chunks, base, merge, busy, finished }: {
         </label>
         <AlertDialogFooter>
           <AlertDialogCancel>Cancel</AlertDialogCancel>
-          <AlertDialogAction onClick={run}>Merge</AlertDialogAction>
+          <AlertDialogAction variant="default" onClick={run} className={CONFIRM}>Merge</AlertDialogAction>
         </AlertDialogFooter>
       </AlertDialogContent>
     </AlertDialog>
