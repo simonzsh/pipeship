@@ -29,7 +29,8 @@ pipeship get <id>                      # read state: check stopRequested and ski
 pipeship step <id> <step> running|done|skipped|failed
 pipeship mode <id> quick|full         # switch the mode after creation; quick skips the pending plan step
 pipeship wait <id> <step> [--reason <question>]   # pause for the user on this step: the step runs, the card shows the question
-pipeship status <id> running|ready|failed         # waiting_for_user only through "wait"
+pipeship status <id> running|ready|done|failed   # waiting_for_user only through "wait"
+pipeship archive <id>                            # done, failed or stopped only; the user archives, not the agent
 pipeship chunk <id> <name> [--repo r] [--worktree p] [--branch b] [--status s] [--pr url]   # --repo (name or path) needed for a new chunk with several repos
 pipeship recipe <repo>...              # the saved recipe to start the app for these repos, or "none"
 pipeship preview <id> [<worktree>] [--recipe file]   # starts the app, prints the URL(s); each service runs from the top worktree of its repo
@@ -131,7 +132,7 @@ If a repo has no remote, skip its PRs and tell the user.
 
 ## Step 7 — preview and verify
 
-Run the changed code, front end or back end. An API, MCP or engine change needs a running server as much as a UI change: unit tests do not show what a real client gets. Mark this step `skipped` only when nothing the change touches can run (a pure library with no server, a CLI you cannot start, a docs-only change), and say why in the final summary. Once every step is done or skipped, the pipeline becomes `ready` on its own.
+Run the changed code, front end or back end. An API, MCP or engine change needs a running server as much as a UI change: unit tests do not show what a real client gets. Mark this step `skipped` only when nothing the change touches can run (a pure library with no server, a CLI you cannot start, a docs-only change), and say why in the final summary. Once every step is done or skipped, the pipeline becomes `ready` on its own if a preview runs, else `done`.
 
 1. **Start.** First run `pipeship recipe <repo>...` again with the final repo list. If the list changed since step 1, update the `repo` names in the draft. Then run `pipeship preview <id>`. It uses each repo's top worktree. Add `--recipe <dir>/recipe.json` if there is a draft. It copies local files, installs, starts each service of the recipe on its own free port (back ends first, then fronts), waits until each answers, and marks the pipeline `ready`, unless a step waits for the user. A draft recipe that works is saved, so later pipelines in this repo skip this work. Give the user the URLs it prints (the first is the main front).
    Services the app needs (a local database, a queue) belong in a `start` command of the recipe, so the dashboard's "Stop preview" button stops them with the app (see "Test environment recipe"). Run other one-off setup yourself; for test data, see **Data** below.

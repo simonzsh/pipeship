@@ -99,7 +99,7 @@ export function PipelineDetail({ p, onBack }: { p: DashboardState; onBack: () =>
               </div>
             </div>
             <div className="flex shrink-0 flex-wrap items-center gap-2">
-              {p.status === "ready" && (!p.preview || starting) && <StartPreviewButton id={p.id} starting={starting} />}
+              {(p.status === "done" || p.status === "ready") && (!p.preview || starting) && <StartPreviewButton id={p.id} starting={starting} />}
               <PipelineActions p={p} merging={merging} starting={starting} />
             </div>
           </div>

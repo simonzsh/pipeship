@@ -153,7 +153,7 @@ Choix et raisons :
   "ticket": { "source": "linear | notion | github | url | text | …", "ref": "ABC-123", "url": "…", "title": "…", "file": "ticket.md" },
   "mode": "full | quick",
   "repo": "/chemin/vers/le/repo",
-  "status": "running | waiting_for_user | ready | failed | stopped",
+  "status": "running | waiting_for_user | ready | done | failed | stopped | archived",
   "step": "explore | questions | plan | implement | review | stack | preview",
   "steps": [{ "name": "explore", "status": "pending | running | done | skipped", "startedAt": "…", "endedAt": "…" }],
   "chunks": [{ "name": "api", "worktree": "…", "branch": "…", "status": "…", "pr": "https://…" }],
@@ -193,7 +193,7 @@ Format de la recette :
 1. Le dashboard écrit `stopRequested: true` dans le fichier d'état.
 2. Le skill lit ce drapeau entre deux étapes et s'arrête.
 3. Le serveur tue les processus listés dans `pids` et `preview.pid` (avec `kill <PID>`, jamais `pkill -f`).
-4. Le serveur vérifie que les processus sont arrêtés, puis passe l'état à `stopped`.
+4. Le serveur vérifie que les processus sont arrêtés, puis passe l'état à `done`.
 
 ## 6. Ordre de construction
 

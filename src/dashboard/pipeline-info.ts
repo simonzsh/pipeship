@@ -32,11 +32,8 @@ export function displaySteps(p: Pick<State, "steps" | "status"> & Partial<Pick<S
   });
 }
 
-export function allMerged(p: Pick<State, "chunks">): boolean {
-  const prChunks = p.chunks.filter((c) => c.pr);
-  return prChunks.length > 0 && prChunks.every((c) => c.status === "merged");
-}
+export { allMerged } from "../state.ts";
 
 export function finished(p: Pick<State, "status">): boolean {
-  return p.status === "ready" || p.status === "failed" || p.status === "stopped";
+  return p.status === "ready" || p.status === "done" || p.status === "failed" || p.status === "stopped" || p.status === "archived";
 }

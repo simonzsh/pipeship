@@ -1,10 +1,11 @@
-import { Loader2, Play, Square, Trash2, type LucideIcon } from "lucide-react";
+import { Archive, Loader2, Play, Square, Trash2, type LucideIcon } from "lucide-react";
+import type { VariantProps } from "class-variance-authority";
 import { useState } from "react";
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription,
   AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger,
 } from "./components/ui/alert-dialog";
-import { Button } from "./components/ui/button";
+import { Button, buttonVariants } from "./components/ui/button";
 import type { State } from "../state.ts";
 import { finished } from "./pipeline-info";
 import { postAction } from "./utils";
@@ -18,10 +19,11 @@ interface ActionDef {
   description: string;
   serversNote?: string; // appended when the pipeline has test servers
   confirm: string;
+  variant?: VariantProps<typeof buttonVariants>["variant"]; // confirm button style, destructive by default
 }
 
 // Once the agents are done, the only things left to stop are the test servers.
-const ACTIONS: Record<"stopPipeline" | "stopServer" | "delete", ActionDef> = {
+const ACTIONS: Record<"stopPipeline" | "stopServer" | "archive" | "delete", ActionDef> = {
   stopPipeline: {
     endpoint: "stop",
     icon: Square,
@@ -41,6 +43,16 @@ const ACTIONS: Record<"stopPipeline" | "stopServer" | "delete", ActionDef> = {
     description: "The preview stops. The code, branches and PRs stay in place.",
     confirm: "Stop",
   },
+  archive: {
+    endpoint: "archive",
+    icon: Archive,
+    iconClass: "text-muted-foreground",
+    button: "Archive",
+    title: "Archive this pipeline?",
+    description: "The pipeline moves to the archived group and its preview stops. You cannot undo it: you can only delete it after.",
+    confirm: "Archive",
+    variant: "default",
+  },
   delete: {
     endpoint: "delete",
     icon: Trash2,
@@ -57,7 +69,7 @@ type ActionName = keyof typeof ACTIONS;
 
 // Test servers usually start at the last step: only mention them when some exist.
 function ActionButton({ id, action, hasServers }: { id: string; action: ActionName; hasServers?: boolean }) {
-  const { endpoint, icon: Icon, iconClass, button, title, description, serversNote, confirm } = ACTIONS[action];
+  const { endpoint, icon: Icon, iconClass, button, title, description, serversNote, confirm, variant } = ACTIONS[action];
   const [error, setError] = useState<string>();
   const run = async () => {
     setError(undefined);
@@ -78,21 +90,20 @@ function ActionButton({ id, action, hasServers }: { id: string; action: ActionNa
         </AlertDialogHeader>
         <AlertDialogFooter>
           <AlertDialogCancel>Cancel</AlertDialogCancel>
-          <AlertDialogAction onClick={run}>{confirm}</AlertDialogAction>
+          <AlertDialogAction variant={variant} onClick={run}>{confirm}</AlertDialogAction>
         </AlertDialogFooter>
       </AlertDialogContent>
     </AlertDialog>
   );
 }
 
-// The stop and delete buttons of a pipeline. Renders nothing when no action applies.
+// The stop, archive and delete buttons of a pipeline. Renders nothing when no action applies.
 export function PipelineActions({ p, merging, starting }: { p: State; merging: boolean; starting: boolean }) {
   const actions: ActionName[] = [];
-  if (p.status === "ready") {
-    if (p.preview && !starting) actions.push("stopServer");
-  } else if (p.status === "running" || p.status === "waiting_for_user" || (p.status === "failed" && p.preview)) {
-    actions.push("stopPipeline");
-  }
+  // Only agents at work can be stopped. Once they are done, a failed or done pipeline may still run its preview.
+  if (p.status === "running" || p.status === "waiting_for_user") actions.push("stopPipeline");
+  else if (p.preview && !starting) actions.push("stopServer");
+  if (p.status === "done" || p.status === "failed" || p.status === "stopped") actions.push("archive");
   if (!merging && finished(p)) actions.push("delete");
   return actions.map((name) => <ActionButton key={name} id={p.id} action={name} hasServers={!!p.preview} />);
 }

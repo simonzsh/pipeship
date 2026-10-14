@@ -1,4 +1,4 @@
-import { CircleDashed, Workflow } from "lucide-react";
+import { ChevronDown, ChevronRight, CircleDashed, Workflow } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { createRoot } from "react-dom/client";
 import type { DashboardState } from "../state.ts";
@@ -33,6 +33,8 @@ function App() {
   const [url, setUrl] = useState<UrlState>(() => parseUrl(location.search));
   const [live, setLive] = useState(false);
   const [, tick] = useState(0);
+  // Archived pipelines are history: the group starts collapsed.
+  const [archivedOpen, setArchivedOpen] = useState(false);
 
   useEffect(() => {
     const events = new EventSource("/api/events");
@@ -62,12 +64,13 @@ function App() {
   const selected = repos.some(([r]) => r === url.repo) ? url.repo : null;
   const shown = selected ? pipelines?.filter((p) => p.repos.some((r) => r.path === selected)) : pipelines;
   const groups = shown ? groupByStatus(shown, STATUS_ORDER) : [];
-  // Only states that are present, stopped ones left out: "3 pipelines · 1 waiting for you · 2 running".
+  // Only states that are present, archived ones left out, total included: "3 pipelines · 1 waiting for you · 2 running".
+  const active = shown?.filter((p) => p.status !== "archived") ?? [];
   const summary = shown
     ? [
-        `${shown.length} ${shown.length === 1 ? "pipeline" : "pipelines"}`,
+        `${active.length} ${active.length === 1 ? "pipeline" : "pipelines"}`,
         ...groups
-          .filter((g) => g.status !== "stopped")
+          .filter((g) => g.status !== "archived")
           .map((g) => `${g.items.length} ${statusConfig(g.status).label.toLowerCase()}`),
       ].join(" · ")
     : "Loading…";
@@ -146,14 +149,30 @@ function App() {
             <div className="flex min-h-0 flex-1 flex-col gap-5 overflow-y-auto px-3 py-4">
               {groups.map((g) => {
                 const { group, dot, text } = statusConfig(g.status);
+                const collapsed = g.status === "archived" && !archivedOpen;
+                const title = (
+                  <>
+                    <span className={cn("size-1.5 rounded-full", dot)} />
+                    <h2 className={cn("text-xs font-medium", text)}>{group} · {g.items.length}</h2>
+                    <div className="h-px flex-1 bg-border" />
+                  </>
+                );
                 return (
                   <section key={g.status} className="flex flex-col gap-1.5">
-                    <div className="flex items-center gap-2 px-1">
-                      <span className={cn("size-1.5 rounded-full", dot)} />
-                      <h2 className={cn("text-xs font-medium", text)}>{group} · {g.items.length}</h2>
-                      <div className="h-px flex-1 bg-border" />
-                    </div>
-                    {g.items.map((p) => (
+                    {g.status === "archived" ? (
+                      <button
+                        type="button"
+                        aria-expanded={!collapsed}
+                        onClick={() => setArchivedOpen(!archivedOpen)}
+                        className="flex cursor-pointer items-center gap-2 px-1"
+                      >
+                        {collapsed ? <ChevronRight className="size-3 text-muted-foreground" /> : <ChevronDown className="size-3 text-muted-foreground" />}
+                        {title}
+                      </button>
+                    ) : (
+                      <div className="flex items-center gap-2 px-1">{title}</div>
+                    )}
+                    {!collapsed && g.items.map((p) => (
                       <PipelineListItem key={p.id} p={p} selected={p.id === current.id} onSelect={() => selectPipeline(p.id)} />
                     ))}
                   </section>

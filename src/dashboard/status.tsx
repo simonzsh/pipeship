@@ -1,4 +1,4 @@
-import { CheckCircle2, GitMerge, GitPullRequestClosed, Loader2, MessageCircleQuestion, Square, XCircle, type LucideIcon } from "lucide-react";
+import { Archive, CheckCheck, CheckCircle2, GitMerge, GitPullRequestClosed, Loader2, MessageCircleQuestion, Square, XCircle, type LucideIcon } from "lucide-react";
 import type { Status } from "../state.ts";
 import { Badge } from "./components/ui/badge";
 
@@ -14,7 +14,7 @@ type StatusConfig = {
   group: string;
 };
 
-// One entry per status. The key order is the group order on the dashboard (most urgent first).
+// One entry per status. The key order is the group order on the dashboard (most urgent first). Keep "archived" last: it is the fallback.
 const STATUS: Record<Status, StatusConfig> = {
   waiting_for_user: {
     label: "Waiting for you",
@@ -46,6 +46,17 @@ const STATUS: Record<Status, StatusConfig> = {
     text: "text-blue-700 dark:text-blue-400",
     group: "In progress",
   },
+  // Green-grey: finished like "ready", but quieter because no preview runs.
+  done: {
+    label: "Done",
+    icon: CheckCheck,
+    badge: "bg-teal-700/15 text-teal-900 ring-1 ring-inset ring-teal-700/30 dark:text-teal-200",
+    tint: "bg-teal-700/5",
+    hover: "hover:bg-teal-700/10",
+    dot: "bg-teal-700/70",
+    text: "text-teal-800 dark:text-teal-300",
+    group: "Done",
+  },
   failed: {
     label: "Failed",
     icon: XCircle,
@@ -65,6 +76,16 @@ const STATUS: Record<Status, StatusConfig> = {
     dot: "bg-muted-foreground/60",
     text: "text-muted-foreground",
     group: "Stopped",
+  },
+  archived: {
+    label: "Archived",
+    icon: Archive,
+    badge: "bg-muted text-muted-foreground ring-1 ring-inset ring-border",
+    tint: "bg-muted/40",
+    hover: "hover:bg-muted",
+    dot: "bg-muted-foreground/60",
+    text: "text-muted-foreground",
+    group: "Archived",
   },
 };
 

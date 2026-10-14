@@ -116,7 +116,7 @@ Each pipeline's header shows the logo of the agent that runs the pipeline (Claud
 
 ### Actions
 
-The header can request a pipeline stop (the agents stop after their current step), stop the test servers ("Stop preview", the pipeline stays ready) and start them again ("Start preview", with no confirmation; a failure shows in the Test tab), and delete a finished pipeline: its worktrees and files go, its branches and PRs stay.
+The header can request a pipeline stop (the agents stop after their current step; the pipeline shows "Stopped"), stop the test servers ("Stop preview": a ready pipeline becomes done) and start them again ("Start preview" on a done pipeline, with no confirmation; a failure shows in the Test tab). A pipeline is `ready` while its preview runs and `done` when every step is finished and no preview runs. A done, failed or stopped pipeline can be archived ("Archive", with a confirmation): it moves to the collapsed "Archived" group, out of the header count, and cannot be unarchived. A pipeline whose PRs are all merged (by the merge engine or on GitHub) is archived by itself when it is ready, done, failed or stopped, and its preview stops. A finished pipeline can be deleted: its worktrees and files go, its branches and PRs stay.
 
 The PR stack is always visible, with one row per repo, its path and its merge button. A finished pipeline's PRs merge in two steps, one button at a time. The green "Combine PRs" button merges each PR into the branch below, from the top, so one PR is left. The violet "Merge into <base>" button then squash-merges that PR into the base branch, after a confirmation. Both wait for the checks and stop at the first PR that cannot merge, with the reason in the pipeline's detail. Only one merge runs at a time.
 

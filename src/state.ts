@@ -6,7 +6,7 @@ import { assertRepoName, findRepo, repoName } from "./repos.ts";
 export const STEPS = ["explore", "questions", "plan", "implement", "review", "stack", "preview"] as const;
 export type StepName = (typeof STEPS)[number];
 export type StepStatus = "pending" | "running" | "done" | "skipped" | "failed";
-export const STATUSES = ["running", "waiting_for_user", "ready", "failed", "stopped"] as const;
+export const STATUSES = ["running", "waiting_for_user", "ready", "done", "failed", "stopped", "archived"] as const;
 export type Status = (typeof STATUSES)[number];
 export type Mode = "full" | "quick";
 
@@ -26,6 +26,12 @@ export interface Chunk {
 
 // Chunk.status stays free text; the merge engine writes this value.
 export const MERGED = "merged";
+
+// True when the pipeline has PRs and all of them are merged. Server and dashboard share it.
+export function allMerged(p: Pick<State, "chunks">): boolean {
+  const prChunks = p.chunks.filter((c) => c.pr);
+  return prChunks.length > 0 && prChunks.every((c) => c.status === MERGED);
+}
 // Written by the dashboard's PR sync for a PR closed without merge.
 export const CLOSED = "closed";
 
@@ -187,6 +193,8 @@ function upgrade(raw: Raw): State {
     }
   }
   if (preview) delete preview.worktree;
+  // "ready" used to hold without a preview.
+  if (raw.status === "ready" && !raw.preview) raw.status = "done";
   // Merge runs saved before combine mode existed were all base merges.
   if (raw.merge && !raw.merge.mode) raw.merge.mode = "base";
   // State files written before `links` existed hold one `ref` (sometimes "A-1,A-2") and one `url`.
@@ -260,9 +268,9 @@ export function setStep(id: string, name: StepName, status: StepStatus): State {
     }
     if (status === "done" || status === "failed") step.endedAt = now;
     if (status === "failed") s.status = "failed";
-    // A skipped preview never reaches the code that marks the pipeline ready.
+    // Ready means a preview runs. A skipped preview leaves the pipeline done.
     const finished = s.steps.every((x) => x.status === "done" || x.status === "skipped");
-    if (finished && (s.status === "running" || s.status === "waiting_for_user")) s.status = "ready";
+    if (finished && (s.status === "running" || s.status === "waiting_for_user")) s.status = s.preview ? "ready" : "done";
   });
 }
 

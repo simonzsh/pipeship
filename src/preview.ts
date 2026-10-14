@@ -4,7 +4,7 @@ import { connect, createServer } from "node:net";
 import { createHash } from "node:crypto";
 import { dirname, join } from "node:path";
 import { findRepo, repoName, sharesRepo, topChunk } from "./repos.ts";
-import { home, listStates, pipelineDir, readState, updateState, type PreviewService, type Repo, type State } from "./state.ts";
+import { allMerged, home, listStates, pipelineDir, readState, updateState, type PreviewService, type Repo, type State } from "./state.ts";
 
 export interface ServiceRecipe {
   name: string;
@@ -527,14 +527,17 @@ const stoppedMidStart = new Set<string>();
 // The dashboard cannot wait minutes for a start: failures go to state.previewError instead.
 export const isPreviewStarting = (id: string) => startsInFlight.has(id);
 
-export function requestPreviewStart(id: string): { state: State; done: Promise<void> } {
-  let state: State;
+function readStateOr404(id: string): State {
   try {
-    state = readState(id);
+    return readState(id);
   } catch (err) {
     throw new PreviewError((err as Error).message, 404);
   }
-  if (state.status !== "ready") throw new PreviewError("the pipeline is not ready: no preview to start", 409);
+}
+
+export function requestPreviewStart(id: string): { state: State; done: Promise<void> } {
+  const state = readStateOr404(id);
+  if (state.status !== "done") throw new PreviewError("the pipeline is not done: no preview to start", 409);
   if (startsInFlight.has(id)) throw new PreviewError("a preview is already starting", 409);
   // Before the guard is set: a throw here must not leave the id marked in flight.
   const cleared = updateState(id, (s) => {
@@ -564,10 +567,48 @@ export async function stopPipeline(id: string): Promise<State> {
     s.stopRequested = true;
   });
   await stopPreview(id);
+  // A failed or archived pipeline keeps its status.
   return updateState(id, (s) => {
-    s.status = "stopped";
+    if (s.status !== "failed" && s.status !== "archived") s.status = "stopped";
     delete s.waitingFor;
   });
+}
+
+// The "Stop preview" button: a ready pipeline goes back to done. Other statuses stay.
+export async function stopPreviewAndSettle(id: string): Promise<State> {
+  await stopPreview(id);
+  return updateState(id, (s) => {
+    if (s.status === "ready") s.status = "done";
+  });
+}
+
+// Archived is final: only Delete remains.
+export async function archivePipeline(id: string): Promise<State> {
+  const state = readStateOr404(id);
+  if (!["done", "failed", "stopped"].includes(state.status)) {
+    throw new PreviewError(`only a done, failed or stopped pipeline can be archived (status: ${state.status})`, 409);
+  }
+  await stopPreview(id);
+  return updateState(id, (s) => {
+    s.status = "archived";
+  });
+}
+
+// Once every PR is merged the pipeline has no work left. Never throws: callers are the merge and the PR sync.
+export async function archiveIfAllMerged(id: string): Promise<boolean> {
+  try {
+    const s = readState(id);
+    if (!["ready", "done", "failed", "stopped"].includes(s.status) || s.merge?.status === "running" || !allMerged(s)) return false;
+    await stopPreview(id);
+    // Re-check: the status may have changed while the preview stopped.
+    const after = updateState(id, (x) => {
+      if (["ready", "done", "failed", "stopped"].includes(x.status) && allMerged(x)) x.status = "archived";
+    });
+    return after.status === "archived";
+  } catch (err) {
+    console.error(`auto-archive ${id}: ${err instanceof Error ? err.message : String(err)}`);
+    return false;
+  }
 }
 
 // The worktree folders are flat: try each repo until one owns the worktree.

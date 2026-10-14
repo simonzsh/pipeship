@@ -1,4 +1,4 @@
-import { isAlive } from "./preview.ts";
+import { archiveIfAllMerged, isAlive } from "./preview.ts";
 import { chunksOf, repoName } from "./repos.ts";
 import { listStates, lookupRepo, MERGED, readState, updateState, upsertChunk, type Chunk, type MergeMode, type MergeRun, type Repo, type State } from "./state.ts";
 
@@ -361,6 +361,7 @@ export async function mergeStack(
     const x = makeCtx(id, found.path, d);
     const chunks = chunksOf(s, found.path).filter((c) => c.pr);
     await (mode === "combine" ? combine(x, chunks) : mergeIntoBase(x, found, chunks));
+    if (readState(id).merge?.status === "done") await archiveIfAllMerged(id);
   } catch (err) {
     try {
       updateState(id, (s) => {
