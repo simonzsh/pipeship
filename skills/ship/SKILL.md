@@ -115,10 +115,13 @@ When all are done, **restack**: in stack order, rebase each chunk branch onto th
 
 ## Step 5 — review
 
-1. **Global review** (one subagent, model `opus`, top worktree, diff `<base>..<top branch>`; with several repos, the top worktree and diff of every repo): duplicated helpers across chunks, contract mismatches, integration bugs. Parallel agents cannot see each other — only this review finds these.
-2. **Cleanup per chunk** (one subagent per chunk, model `sonnet`, status `cleaning`): simplification, dead code, repo conventions, readability. Use the `simplify` and `code-review` skills if available.
-3. Fix each problem **in the worktree of the chunk that owns the code**, commit, then restack the later chunks of that repo.
-4. **Safety rule**: after every pass that changes code, re-run the checks for the diff of the pass. If a check fails, fix it or revert the pass.
+Start the global review and the cleanups together, in the same message. Wait for all of them before you fix anything.
+
+1. **Global review** (one subagent, model `opus`, top worktree, diff `<base>..<top branch>`; with several repos, the top worktree and diff of every repo): duplicated helpers across chunks, contract mismatches, integration bugs. Parallel agents cannot see each other — only this review finds these. It is read-only: it reports its findings and changes no file. It reads the top worktree as it is when step 5 starts.
+2. **Cleanup per chunk** (one subagent per chunk, model `sonnet`, status `cleaning`): simplification, dead code, repo conventions, readability. Use the `simplify` and `code-review` skills if available. Each subagent works in its own chunk worktree, runs only the fast checks, and commits.
+3. **Fix** each finding of the global review **in the worktree of the chunk that owns the code**, then commit. A cleanup may have changed that code: check before you fix.
+4. **Restack once** for the whole step, in stack order, per repo.
+5. **Safety rule**: after the restack, re-run the checks once: the fast checks and the targeted tests for the diff. If a check fails, fix it or revert the pass. Run one test suite at a time.
 
 In `quick` mode, skip the global review. Run one cleanup pass (one subagent, model `sonnet`) on the whole diff, with the same skills: simplification, dead code, repo conventions. It covers every chunk, so all chunks are `cleaning` together. Then run the checks once, for the whole diff.
 
