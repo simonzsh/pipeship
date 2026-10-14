@@ -65,10 +65,11 @@ export function UpdateBanner({ live }: { live: boolean }) {
         {info.harness && (
           <Button size="xs" disabled={updating} onClick={install}>
             {updating && <Loader2 className="animate-spin" />}
-            {updating ? "Updating…" : "Update"}
+            {updating ? "Restarting…" : "Update & restart"}
           </Button>
         )}
       </div>
+      {info.harness && !updating && <p className="text-xs text-muted-foreground">The dashboard restarts. Test environments and pipelines keep running.</p>}
       {!info.harness && <p className="text-xs text-muted-foreground">Not installed through a plugin manager: update it with git.</p>}
       {error && <p className="text-xs text-destructive">{error}</p>}
     </div>
