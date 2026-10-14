@@ -57,19 +57,18 @@ export function UpdateBanner({ live }: { live: boolean }) {
   return (
     <div className="flex flex-col gap-2 border-t px-3 py-3">
       <div className="flex items-center gap-2">
-        <ArrowUpCircle className="size-4 shrink-0 text-violet-600 dark:text-violet-400" />
+        <ArrowUpCircle className="size-4 shrink-0 text-muted-foreground" />
         <div className="flex min-w-0 flex-1 flex-col">
           <span className="text-sm font-medium">Update available</span>
           <span className="truncate text-xs text-muted-foreground">{info.current} → {info.latest}</span>
         </div>
         {info.harness && (
-          <Button size="xs" disabled={updating} onClick={install}>
+          <Button size="xs" variant="outline" disabled={updating} onClick={install}>
             {updating && <Loader2 className="animate-spin" />}
             {updating ? "Restarting…" : "Update & restart"}
           </Button>
         )}
       </div>
-      {info.harness && !updating && <p className="text-xs text-muted-foreground">The dashboard restarts. Test environments and pipelines keep running.</p>}
       {!info.harness && <p className="text-xs text-muted-foreground">Not installed through a plugin manager: update it with git.</p>}
       {error && <p className="text-xs text-destructive">{error}</p>}
     </div>
