@@ -118,7 +118,7 @@ Start the global review and the cleanups together, in the same message. Wait for
 4. **Restack once** for the whole step, in stack order, per repo.
 5. **Safety rule**: after the restack, re-run the checks once: the fast checks and the targeted tests for the diff. If a check fails, fix it or revert the pass. Run one test suite at a time.
 
-In `quick` mode, skip the global review. Run one cleanup pass (one subagent, model `sonnet`, same brief) on the whole diff. It covers every chunk, so all chunks are `cleaning` together. Then run the checks once, for the whole diff.
+In `quick` mode, skip the global review. Run one cleanup pass (one subagent, model `sonnet`, same brief) on the whole diff. Give it the worktree of every chunk and tell it that it runs in quick mode. It covers every chunk, so all chunks are `cleaning` together. Then run the checks once, for the whole diff.
 
 Write a short summary to `<dir>/review.md`. List the tests that ran and say that CI covers the rest.
 
