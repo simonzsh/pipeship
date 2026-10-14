@@ -5,13 +5,13 @@ import { join } from "node:path";
 import {
   addRepo, createPipeline, listStates, pipelineDir, pipelineStatus, readState, setMode, setStep, updateState, upsertChunk, waitForUser, type State,
 } from "../src/state.ts";
-import { chunksOf, diffRange, repoName, repoStacks, sharesRepo, topChunk } from "../src/repos.ts";
+import { chunksOf, diffRange, repoName, repoStacks, sharesRepo, stackRows, topChunk } from "../src/repos.ts";
 import {
   archivePipeline, DASHBOARD_PORT, deletePipeline, findRecipe, isAlive, mainService, normalizeRecipe, pickPorts, previewLines, resolveEnv,
   requestPreviewStart, savedRecipePath, startOrder, startPreview, stopPipeline, stopPreview, stopPreviewAndSettle, type Service, unarchivePipeline,
 } from "../src/preview.ts";
 import { diffTotals, parseDiff } from "../src/diff.ts";
-import { DiffError, gitDiff, pipelineDiff, resolveRef } from "../src/diff-git.ts";
+import { baseRef, DiffError, gitDiff, headRef, pipelineDiff } from "../src/diff-git.ts";
 import { DEFAULT_PORT, serve } from "../src/server.ts";
 import {
   classifyPr, defaultRunner, DEFAULT_LIMITS, failStaleMerges, mergeStack, MergeError, resolveMergeRepo, startMerge, type MergeDeps, type PrView, type Runner,
@@ -1790,6 +1790,36 @@ test("parseDiff handles no-newline markers, quoted and spaced paths, truncation,
   expect(() => parseDiff("@@ nonsense\n+++\n\0\ndiff --git\n@@ -x\n \\ \n")).not.toThrow();
 });
 
+test("diffRange and stackRows follow the PR bases from GitHub", () => {
+  const repo = { path: "/r/a", base: "main" };
+  // c1 merged and its branch deleted: GitHub retargeted c2 to main. c3 still targets c2. c4 targets a branch outside the stack.
+  const chunks = [
+    { name: "c1", repo: "/r/a", branch: "b1", prBase: "main" },
+    { name: "c2", repo: "/r/a", branch: "b2", prBase: "main" },
+    { name: "c3", repo: "/r/a", branch: "b3", prBase: "b2" },
+    { name: "c4", repo: "/r/a", branch: "b4", prBase: "develop" },
+    { name: "c5", repo: "/r/a", branch: "b5" }, // no PR yet: on the previous branched chunk
+  ];
+  const s = { repos: [repo], chunks };
+  expect(diffRange(s, repo, "c2")).toEqual({ from: "main", to: "b2" });
+  expect(diffRange(s, repo, "c3")).toEqual({ from: "b2", to: "b3" });
+  expect(diffRange(s, repo, "c5")).toEqual({ from: "b4", to: "b5" });
+  // Whole stack: from the root of the top chunk's chain.
+  expect(diffRange(s, repo)).toEqual({ from: "develop", to: "b5" });
+  expect(diffRange({ repos: [repo], chunks: chunks.slice(0, 3) }, repo)).toEqual({ from: "main", to: "b3" });
+
+  const rows = stackRows(chunks, repo).map((r) => (r.kind === "root" ? r.branch : `${"  ".repeat(r.depth)}${r.chunk.name}@${r.rise}`));
+  expect(rows).toEqual(["main", "  c1@1", "  c2@2", "    c3@1", "develop", "  c4@1", "    c5@1"]);
+
+  // Two PRs that target each other: the cycle is cut at the repo base.
+  const loop = [
+    { name: "x", repo: "/r/a", branch: "bx", prBase: "by" },
+    { name: "y", repo: "/r/a", branch: "by", prBase: "bx" },
+  ];
+  expect(stackRows(loop, repo).map((r) => (r.kind === "chunk" ? `${r.chunk.name}:${r.depth}` : r.branch))).toEqual(["main", "x:1", "y:2"]);
+  expect(diffRange({ repos: [repo], chunks: loop }, repo)).toEqual({ from: "main", to: "by" });
+});
+
 test("diffRange picks the previous branched chunk, or the base", () => {
   const repos = [{ path: "/r/a", base: "main" }, { path: "/r/b", base: "dev" }];
   const chunks = [
@@ -1821,7 +1851,7 @@ test("pipelineDiff runs real git per chunk and for the whole stack", async () =>
   expect(await names("c2")).toEqual(["f2.txt"]);
   const all = await pipelineDiff(stack.id, stack.clone, null);
   expect(all.files.map((f) => f.path)).toEqual(["f1.txt", "f2.txt", "f3.txt"]);
-  expect(all).toMatchObject({ chunk: null, from: "main", to: "c3", range: "main...c3", additions: 3, deletions: 0, truncated: false, name: "repo" });
+  expect(all).toMatchObject({ chunk: null, from: "main", to: "c3", range: "origin/main...c3", additions: 3, deletions: 0, truncated: false, name: "repo" });
 
   // Three dots: a commit on main after the fork stays out.
   commitFile(stack.clone, "later.txt", "later\n", "later on main");
@@ -1830,12 +1860,14 @@ test("pipelineDiff runs real git per chunk and for the whole stack", async () =>
   // Local branch deleted, origin copy kept: falls back to origin/c1.
   sh(stack.clone, "worktree", "remove", "--force", stack.worktrees[0]!);
   sh(stack.clone, "branch", "-D", "c1");
-  expect(await resolveRef(stack.clone, "c1")).toBe("refs/remotes/origin/c1");
-  expect(await resolveRef(stack.clone, "c3")).toBe("refs/heads/c3");
-  expect(await resolveRef(stack.clone, "nope")).toBeUndefined();
+  expect(await headRef(stack.clone, "c1")).toBe("refs/remotes/origin/c1");
+  expect(await headRef(stack.clone, "c3")).toBe("refs/heads/c3");
+  expect(await headRef(stack.clone, "nope")).toBeUndefined();
+  expect(await baseRef(stack.clone, "c3")).toBe("refs/remotes/origin/c3");
   const viaOrigin = await pipelineDiff(stack.id, null, "c1");
-  expect(viaOrigin.range).toBe("main...origin/c1");
+  expect(viaOrigin.range).toBe("origin/main...origin/c1");
   expect(viaOrigin.files.map((f) => f.path)).toEqual(["f1.txt"]);
+  expect(viaOrigin.origin).toBeNull();
 
   // A tag named like a branch must not win over the branch.
   sh(stack.clone, "tag", "c2", "main");
@@ -1846,6 +1878,30 @@ test("pipelineDiff runs real git per chunk and for the whole stack", async () =>
   const err = await pipelineDiff(stack.id, null, "ghost").catch((e) => e);
   expect(err).toBeInstanceOf(DiffError);
   expect(err).toMatchObject({ status: 409, code: "missing_ref", message: 'branch "feat/ghost" not found in repo' });
+});
+
+test("pipelineDiff compares against the base on origin, not a stale local copy", async () => {
+  const stack = makeStack(2);
+  // Someone else pushes to main; the chunk is rebased on it, but the local main stays old.
+  const other = join(stack.dir, "other");
+  sh(stack.dir, "clone", "-q", stack.origin, other);
+  commitFile(other, "upstream.txt", "upstream\n", "upstream change");
+  sh(other, "push", "-q", "origin", "main");
+  sh(stack.worktrees[0]!, "pull", "-q", "--rebase", "origin", "main");
+  const res = await pipelineDiff(stack.id, null, "c1");
+  expect(res.range).toBe("origin/main...c1");
+  expect(res.files.map((f) => f.path)).toEqual(["f1.txt"]);
+  expect(sh(stack.clone, "rev-parse", "origin/main")).toBe(sh(stack.origin, "rev-parse", "main"));
+
+  // c1 was rebased locally: its origin copy is behind and ahead at once. c2 matches origin.
+  expect(res.origin).toEqual({ ahead: 2, behind: 1 });
+  expect((await pipelineDiff(stack.id, null, "c2")).origin).toEqual({ ahead: 0, behind: 0 });
+  commitFile(stack.worktrees[1]!, "wip.txt", "wip\n", "not pushed");
+  expect((await pipelineDiff(stack.id, null, "c2")).origin).toEqual({ ahead: 1, behind: 0 });
+
+  // Offline: the fetch fails and the diff uses the refs already there.
+  sh(stack.clone, "remote", "set-url", "origin", join(stack.dir, "gone.git"));
+  expect((await pipelineDiff(stack.id, null, "c2")).files.map((f) => f.path)).toEqual(["f2.txt", "wip.txt"]);
 });
 
 test("gitDiff caps the output and cuts on a file boundary", async () => {
@@ -1877,7 +1933,7 @@ test("the diff route answers 200, 404, 400 and 409", async () => {
     };
     const ok = await get(`${stack.id}/diff?chunk=c2`);
     expect(ok.status).toBe(200);
-    expect(ok.body).toMatchObject({ chunk: "c2", from: "c1", to: "c2", range: "c1...c2", additions: 1, truncated: false });
+    expect(ok.body).toMatchObject({ chunk: "c2", from: "c1", to: "c2", range: "origin/c1...c2", additions: 1, truncated: false });
     expect(ok.body.files[0]).toMatchObject({ path: "f2.txt", status: "added" });
     expect((await get(`${stack.id}/diff`)).body.files).toHaveLength(2);
 
@@ -2224,7 +2280,7 @@ function syncTest(name: string, fn: () => Promise<void>) {
 }
 
 // Fake gh for the PR sync: answers `pr view` from a url -> reply map and records the calls.
-function syncGh(replies: Record<string, { state?: string; mergedAt?: string | null } | "fail" | "throw" | "badjson" | "hang">) {
+function syncGh(replies: Record<string, { state?: string; mergedAt?: string | null; baseRefName?: string } | "fail" | "throw" | "badjson" | "hang">) {
   const calls: string[] = [];
   const run: Runner = async (_cmd, args) => {
     const url = args[2]!;
@@ -2255,6 +2311,22 @@ syncTest("pr sync: a PR merged outside pipeship sets the chunk to merged", async
   expect(chunkStatuses(id)).toEqual(["merged"]);
   expect(allMerged(readState(id))).toBe(true);
   expect(logs).toEqual([`pr sync: ${id}/c1 -> merged`]);
+});
+
+syncTest("pr sync: records the PR base and follows a retarget", async () => {
+  const id = syncPipeline("sync base", [121, 122]);
+  const logs: string[] = [];
+  await syncPrStatuses({ run: syncGh({ [prUrl(121)]: { state: "OPEN", baseRefName: "main" }, [prUrl(122)]: { state: "OPEN", baseRefName: "c1" } }).run, log: (l) => logs.push(l) });
+  expect(readState(id).chunks.map((c) => c.prBase)).toEqual(["main", "c1"]);
+  expect(logs).toEqual([`pr sync: ${id}/c1 base main`, `pr sync: ${id}/c2 base c1`]);
+  // c1 merged on GitHub, which retargets c2 to main.
+  logs.length = 0;
+  await syncPrStatuses({ run: syncGh({ [prUrl(121)]: { state: "MERGED", baseRefName: "main" }, [prUrl(122)]: { state: "OPEN", baseRefName: "main" } }).run, log: (l) => logs.push(l) });
+  expect(readState(id).chunks.map((c) => c.prBase)).toEqual(["main", "main"]);
+  expect(logs).toEqual([`pr sync: ${id}/c1 -> merged`, `pr sync: ${id}/c2 base main`]);
+  // A new PR on the chunk drops the old base until the next sync.
+  upsertChunk(id, { name: "c2", pr: prUrl(123) });
+  expect(readState(id).chunks[1]!.prBase).toBeUndefined();
 });
 
 syncTest("pr sync: the last PR merged archives a done pipeline", async () => {

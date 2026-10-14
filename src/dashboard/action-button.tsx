@@ -79,7 +79,7 @@ const ACTIONS: Record<"stopPipeline" | "stopServer" | "archive" | "unarchive" | 
 type ActionName = keyof typeof ACTIONS;
 
 // Test servers usually start at the last step: only mention them when some exist.
-function ActionButton({ id, action, hasServers }: { id: string; action: ActionName; hasServers?: boolean }) {
+function ActionButton({ id, action, hasServers, disabledTitle }: { id: string; action: ActionName; hasServers?: boolean; disabledTitle?: string }) {
   const { endpoint, icon: Icon, iconClass, button, title, description, serversNote, confirm, variant } = ACTIONS[action];
   const [error, setError] = useState<string>();
   const run = async () => {
@@ -90,7 +90,7 @@ function ActionButton({ id, action, hasServers }: { id: string; action: ActionNa
     <AlertDialog>
       {error && <span className="text-xs text-destructive">{error}</span>}
       <AlertDialogTrigger asChild>
-        <Button variant="outline" size="xs">
+        <Button variant="outline" size="xs" disabled={!!disabledTitle} title={disabledTitle}>
           <Icon className={iconClass} /> {button}
         </Button>
       </AlertDialogTrigger>
@@ -116,8 +116,10 @@ export function PipelineActions({ p, merging, starting }: { p: State; merging: b
   else if (p.preview && !starting) actions.push("stopServer");
   if (p.status === "done" || p.status === "failed" || p.status === "stopped") actions.push("archive");
   if (p.status === "archived") actions.push("unarchive");
-  if (!merging && finished(p)) actions.push("delete");
-  return actions.map((name) => <ActionButton key={name} id={p.id} action={name} hasServers={!!p.preview} />);
+  if (finished(p)) actions.push("delete");
+  // Delete would remove the worktrees a merge runs in: it waits, disabled.
+  const disabledTitle = (name: ActionName) => (name === "delete" && merging ? "Wait for the merge to end" : undefined);
+  return actions.map((name) => <ActionButton key={name} id={p.id} action={name} hasServers={!!p.preview} disabledTitle={disabledTitle(name)} />);
 }
 
 // No confirm dialog: starting loses nothing. The POST returns at once, so the label follows the preview too.

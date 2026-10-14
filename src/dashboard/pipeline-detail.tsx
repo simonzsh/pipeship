@@ -1,6 +1,6 @@
-import { ArrowLeft, FolderGit2, GitMerge, Loader2, Zap } from "lucide-react";
+import { ArrowLeft, FolderGit2, GitMerge, Zap } from "lucide-react";
 import { useState } from "react";
-import { repoName, repoStacks } from "../repos.ts";
+import { repoStacks } from "../repos.ts";
 import type { DashboardState } from "../state.ts";
 import { PipelineActions, StartPreviewButton } from "./action-button";
 import { CodeTab, type DiffTarget } from "./code-tab";
@@ -37,10 +37,10 @@ export function PipelineDetail({ p, onBack }: { p: DashboardState; onBack: () =>
     setTab("code");
   };
   // The tree of one repo's stack, or a hint when it has no branch yet.
-  const tree = (base: string | undefined, chunks: DashboardState["chunks"], merge: DashboardState["merge"]) => (
+  const tree = (repo: DashboardState["repos"][number], chunks: DashboardState["chunks"], merge: DashboardState["merge"]) => (
     <>
       {chunks.length > 0 ? (
-        <StackTree base={base} chunks={chunks} merge={merge} selected={target.chunk} onSelect={(chunk) => select({ chunk })} onSelectBase={() => select({})} />
+        <StackTree repo={repo} chunks={chunks} merge={merge} selected={target.chunk} onSelect={(chunk) => select({ chunk })} onSelectBase={() => select({})} />
       ) : (
         <p className="text-xs text-muted-foreground">No branch yet</p>
       )}
@@ -67,7 +67,7 @@ export function PipelineDetail({ p, onBack }: { p: DashboardState; onBack: () =>
               />
             </div>
           </div>
-          {tree(st.repo.base, st.chunks, st.merge)}
+          {tree(st.repo, st.chunks, st.merge)}
         </div>
       ))
     );
@@ -140,14 +140,7 @@ export function PipelineDetail({ p, onBack }: { p: DashboardState; onBack: () =>
 
       <div className="min-h-0 flex-1 overflow-y-auto">
         <div className="flex flex-col gap-3 px-6 pt-5">
-          <div className="flex flex-wrap items-center gap-2">
-            <h3 className="mr-auto text-sm font-semibold">Pull request stack</h3>
-            {multi && p.merge?.status === "running" && (
-              <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
-                <Loader2 className="size-3.5 animate-spin" /> Merging {repoName(p.merge.repo)}…
-              </span>
-            )}
-          </div>
+          <h3 className="text-sm font-semibold">Pull request stack</h3>
           {stack}
         </div>
 
