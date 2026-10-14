@@ -34,7 +34,7 @@ const USAGE = `pipeship — state, test environments and dashboard for the /pipe
   stop <id>                    stop the pipeline and its test servers
   archive <id>                 archive a done, failed or stopped pipeline (its test servers stop)
   unarchive <id>               unarchive an archived pipeline; its test servers stay stopped
-  delete <id> [--force]        delete its worktrees and files (branches and PRs stay); --force drops uncommitted changes
+  delete <id> [--force]        delete its worktrees and files (local branches of merged PRs go; other branches and PRs stay); --force drops uncommitted changes
   dashboard [start|stop] [--port n]   start the dashboard in the background (default) or stop it
   serve [--port n]             run the dashboard in the foreground`;
 

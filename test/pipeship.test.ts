@@ -887,6 +887,43 @@ test("base: one PR is squash-merged into main with a single gh call and no git w
   expect(sh(stack.origin, "rev-parse", "c1")).toBe(before);
 });
 
+const remoteBranches = (origin: string) => sh(origin, "branch", "--format=%(refname:short)").split("\n").sort();
+
+test("base: with deleteBranches, the remote branches of the stack go, the base stays", async () => {
+  const stack = makeStack(2);
+  const gh = fakeGh(stack, 2);
+  await mergeStack(stack.id, gh.deps, "combine");
+  await mergeStack(stack.id, gh.deps, "base", undefined, true);
+  expect(readState(stack.id).merge).toMatchObject({ status: "done", message: "merged #1 into main" });
+  expect(remoteBranches(stack.origin)).toEqual(["main"]);
+});
+
+test("base: without deleteBranches, the remote branches stay", async () => {
+  const stack = makeStack(1);
+  await mergeStack(stack.id, fakeGh(stack, 1).deps, "base");
+  expect(remoteBranches(stack.origin)).toEqual(["c1", "main"]);
+});
+
+test("base: a branch already deleted is no error, any other failure only shows in the message", async () => {
+  const stack = makeStack(2);
+  const gh = fakeGh(stack, 2);
+  await mergeStack(stack.id, gh.deps, "combine");
+  sh(stack.origin, "branch", "-D", "c2");
+  await mergeStack(stack.id, gh.deps, "base", undefined, true);
+  expect(readState(stack.id).merge?.message).toBe("merged #1 into main");
+  const other = makeStack(1);
+  const fake = fakeGh(other, 1);
+  const run = fake.deps.run!;
+  const deps = { ...fake.deps, run: (c: string, a: string[], o: { cwd: string }) => (a[0] === "push" ? Promise.resolve({ code: 1, stdout: "", stderr: "denied\n" }) : run(c, a, o)) };
+  await mergeStack(other.id, deps, "base", undefined, true);
+  expect(readState(other.id).merge).toMatchObject({ status: "done", message: "merged #1 into main; could not delete c1" });
+});
+
+test("startMerge: deleteBranches must be a boolean", () => {
+  const stack = makeStack(1);
+  expect(() => startMerge(stack.id, fakeGh(stack, 1).deps, "base", undefined, "yes")).toThrow("deleteBranches must be a boolean");
+});
+
 test("merge engine: finishing the last PR archives a done pipeline, not a running one", async () => {
   const stack = makeStack(1);
   finishSteps(stack.id);
@@ -1000,6 +1037,15 @@ test("merge: stale runs are failed unless their process is alive; delete waits f
   expect(readState(id).merge).toMatchObject({ status: "failed" });
   expect(readState(id).merge?.error).toContain("interrupted");
   await deletePipeline(id);
+});
+
+test("delete: the local branches of merged chunks go, the others stay", async () => {
+  const stack = makeStack(2);
+  finishSteps(stack.id);
+  stack.worktrees.forEach((wt) => sh(stack.clone, "worktree", "remove", "--force", wt));
+  upsertChunk(stack.id, { name: "c1", status: "merged" });
+  await deletePipeline(stack.id);
+  expect(sh(stack.clone, "branch", "--format=%(refname:short)").split("\n").sort()).toEqual(["c2", "main"]);
 });
 
 test("classifyPr: failed checks beat pending ones, BLOCKED waits for pending checks", () => {

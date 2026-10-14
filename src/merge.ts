@@ -140,6 +140,7 @@ export function startMerge(
   deps: Partial<MergeDeps> = {},
   rawMode?: unknown,
   rawRepo?: unknown,
+  rawDelete?: unknown,
 ): { state: State; done: Promise<void> } {
   let s: State;
   try {
@@ -154,6 +155,7 @@ export function startMerge(
   const open = chunksOf(s, repo.path).filter((c) => c.pr && c.status !== MERGED).length;
   if (open === 0) throw new MergeError("no open PR to merge", 400);
   const mode = resolveMergeMode(rawMode, open);
+  if (rawDelete !== undefined && rawDelete !== null && typeof rawDelete !== "boolean") throw new MergeError("deleteBranches must be a boolean", 400);
   if (mode === "combine" && open < 2) throw new MergeError("only one open PR: use Merge", 400);
   if (mode === "base" && open > 1) throw new MergeError("combine the PRs first", 400);
 
@@ -161,7 +163,7 @@ export function startMerge(
   updateState(id, (x) => {
     x.merge = runningMerge(mode, repo.path, new Date().toISOString());
   });
-  const done = mergeStack(id, deps, mode, repo.path).finally(() => active.delete(id));
+  const done = mergeStack(id, deps, mode, repo.path, rawDelete === true).finally(() => active.delete(id));
   return { state: readState(id), done };
 }
 
@@ -217,7 +219,7 @@ function makeCtx(id: string, repo: string, d: MergeDeps): Ctx {
   const mergePr: Ctx["mergePr"] = async (c, head, method, message) => {
     const url = c.pr!;
     const n = parsePrUrl(url).number;
-    // No -d: the remote branches stay.
+    // No -d: the branches of a stack go together, after the last merge (see deleteBranches).
     const args = (kind: string) => ["pr", "merge", url, kind, "--match-head-commit", head];
     let r = await gh(args(method === "merge" ? "--merge" : "--squash"));
     // Squash is the fallback only when the repo refuses merge commits, not for any other failure.
@@ -319,9 +321,22 @@ async function combine(x: Ctx, chunks: Chunk[]): Promise<void> {
   x.finish(`combined ${folded.length + 1} PRs into #${parsePrUrl(chunks[bottom]!.pr!).number}`);
 }
 
+// Deletes the stack's remote branches, never the base. Returns the branches that could not go:
+// a failure here must not undo a merge that already happened.
+async function deleteBranches(x: Ctx, chunks: Chunk[], keep: string[]): Promise<string[]> {
+  const names = [...new Set(chunks.map((c) => c.branch).filter((b): b is string => !!b && !keep.includes(b)))];
+  const left: string[] = [];
+  for (const b of names) {
+    const r = await x.d.run("git", ["push", "origin", "--delete", b], { cwd: x.repo });
+    // A branch already gone (deleted by GitHub or by hand) is the goal reached.
+    if (r.code !== 0 && !/remote ref does not exist/i.test(r.stderr)) left.push(b);
+  }
+  return left;
+}
+
 // Base: squash-merge the single PR left into the base branch. No rebase, push or retarget:
 // combine already put the whole stack on this PR's branch.
-async function mergeIntoBase(x: Ctx, repo: Repo, chunks: Chunk[]): Promise<void> {
+async function mergeIntoBase(x: Ctx, repo: Repo, chunks: Chunk[], remove: boolean): Promise<void> {
   const open = chunks.filter((c) => c.status !== MERGED);
   if (open.length !== 1) throw new Error(open.length ? "combine the PRs first" : "no open PR to merge");
   const c = open[0]!;
@@ -336,7 +351,8 @@ async function mergeIntoBase(x: Ctx, repo: Repo, chunks: Chunk[]): Promise<void>
     await x.waitReady(c, v, v.headRefOid, false, true);
     await x.mergePr(c, v.headRefOid, "squash", `merged #${n}`);
   }
-  x.finish(`merged #${n} into ${base}`);
+  const left = remove ? await deleteBranches(x, chunks, [base, repo.base ?? base]) : [];
+  x.finish(`merged #${n} into ${base}` + (left.length ? `; could not delete ${left.join(", ")}` : ""));
 }
 
 // Never throws: every failure ends up in state.merge. `repo` is a path or a name.
@@ -345,6 +361,7 @@ export async function mergeStack(
   deps: Partial<MergeDeps> = {},
   mode: MergeMode = "combine",
   repoRef?: string,
+  removeBranches = false,
 ): Promise<void> {
   const d: MergeDeps = {
     run: defaultRunner,
@@ -364,7 +381,7 @@ export async function mergeStack(
     });
     const x = makeCtx(id, found.path, d);
     const chunks = chunksOf(s, found.path).filter((c) => c.pr);
-    await (mode === "combine" ? combine(x, chunks) : mergeIntoBase(x, found, chunks));
+    await (mode === "combine" ? combine(x, chunks) : mergeIntoBase(x, found, chunks, removeBranches));
     if (readState(id).merge?.status === "done") await archiveIfAllMerged(id);
   } catch (err) {
     try {
