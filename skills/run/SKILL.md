@@ -169,7 +169,7 @@ The user may ask for changes after the end, or comment on a PR. Do not fix it al
 1. **Same work or new work.** A change to the same work reopens the pipeline: `pipeship step <id> implement running` (it unarchives and clears the stop request). Set each chunk concerned to `pipeship chunk <id> <chunk> --status coding`. Unrelated work is a new pipeline.
 2. **Record it.** Add the feedback to `<dir>/ticket.md` under `## Feedback <n>`. The subagents read only this file.
 3. **Implement.** One subagent per chunk concerned (model `sonnet`), in its existing worktree. Brief: `<skill dir>/prompts/implement.md`. Give it the feedback. It fixes and commits.
-4. **Restack once**, in stack order, then run the targeted checks for the diff of the feedback.
+4. **Restack once**, in stack order, then run the targeted checks for the diff of the feedback. Mark `implement` `done`.
 5. **Review the delta only.** Mark `review` `running`. Run one cleanup subagent (model `sonnet`, brief `<skill dir>/prompts/cleanup.md`, chunks `cleaning`) on the diff of the feedback. Run the global review (model `opus`, brief `<skill dir>/prompts/global-review.md`) only if the feedback touches several chunks or a contract. Then mark `review` `done`.
 6. **Push** the same branches: open PRs update on their own. Use `--force-with-lease` after a restack. If the PRs are already merged, open a new PR on the base of the repo.
 7. **Small feedback** (one line, a name, a text): you may fix it yourself. Commit in the chunk that owns the code, restack, re-run the checks, and update the steps.
