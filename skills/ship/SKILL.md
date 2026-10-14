@@ -42,14 +42,14 @@ Steps: `explore`, `questions`, `plan`, `implement`, `review`, `stack`, `preview`
 
 - **Each step**: `pipeship step <id> <step> running` when it starts, `done` when it ends.
 - **Each chunk**: set it to its activity (`coding`, `cleaning`) when its subagent starts. When that subagent reports, set the chunk to `done` (`failed` if it failed) at once, while the other subagents still run. The user follows each chunk live in the dashboard.
-- **Before each step**, run `pipeship get <id>`. If `stopRequested` is true, stop and tell the user. If the step is `skipped`, move on.
+- **Before each step**, run `pipeship get <id>`. If `stopRequested` is true, stop and tell the user, unless the user just asked you to resume. If the step is `skipped`, move on.
 - **The user can change the steps at any time** ("skip the review", "ask me your questions anyway"). Update the state with `pipeship step <id> <step> skipped|pending` and continue.
 - **Keep the steps that later steps need**: the test environment needs a worktree; PRs need commits.
 - On failure: `pipeship step <id> <step> failed`, explain what failed, and ask the user what to do.
 - **Every pause for the user names its step**: `pipeship wait <id> <step> --reason "<the question, in one short line>"`, then stop. This covers the questions of step 2, an approval that the repo or workspace rules require (CLAUDE.md, AGENTS.md…) before a push or a PR, and any decision you cannot make. The step shows amber on the dashboard and the card shows the question. When the user answers, the next `step` call ends the wait.
-- **A step that waits does not block an independent later step.** Example: while `stack` waits for approval, run `preview` on the top worktree, then ask once for everything that waits.
+- **A step that waits does not block an independent later step.** Example: when `stack` needs approval, run `preview` on the top worktree first, then run `wait` and ask once for everything that waits. Run `wait` last: any step that starts ends the wait.
 - While this pipeline runs, it replaces process skills such as brainstorming, writing-plans, using-git-worktrees, subagent-driven-development and finishing-a-development-branch. The only skills it uses are `simplify` and `code-review`, in step 5.
-- If the dashboard shows *Agent stopped*, the user can resume with the command copied from the agent logo in the pipeline header, then continue from the first step that is not done or skipped (`pipeship get <id>`).
+- If the dashboard shows *Agent stopped*, the user can resume with the command copied from the agent logo in the pipeline header, then continue from the first step that is not done or skipped (`pipeship get <id>`). Marking that step `running` clears `stopRequested`.
 - Stop every server you start outside `pipeship preview` before you finish: note its PID and run `kill <PID>`.
 
 ## Step 0 — Start
@@ -119,7 +119,7 @@ Write a short summary to `<dir>/review.md`.
 
 ## Step 6 — stack
 
-Before you push, check the rules of the repo and of the workspace (CLAUDE.md, AGENTS.md…). If they require the user's approval for a push or for a PR the team can see, run `pipeship wait <id> stack --reason "Push <n> branches and open <n> PRs?"` and ask. Run step 7 meanwhile, then stop. Push only after an explicit yes. On a no, `pipeship step <id> stack skipped`.
+Before you push, check the rules of the repo and of the workspace (CLAUDE.md, AGENTS.md…). If they require the user's approval for a push or for a PR the team can see, run step 7 first, then `pipeship wait <id> stack --reason "Push <n> branches and open <n> PRs?"`, ask, and stop. Push only after an explicit yes. On a no, `pipeship step <id> stack skipped`.
 
 1. Push every chunk branch.
 2. In stack order, open one PR per chunk: `gh pr create --head <branch> --base <previous branch>` (the first PR of each repo targets that repo's base). Title from the ticket and chunk; body: what this chunk does, a link to the ticket, and the stack position ("2/3").
@@ -133,7 +133,7 @@ If a repo has no remote, skip its PRs and tell the user.
 
 Run the changed code, front end or back end. An API, MCP or engine change needs a running server as much as a UI change: unit tests do not show what a real client gets. Mark this step `skipped` only when nothing the change touches can run (a pure library with no server, a CLI you cannot start, a docs-only change), and say why in the final summary. Once every step is done or skipped, the pipeline becomes `ready` on its own if a preview runs, else `done`.
 
-1. **Start.** First run `pipeship recipe <repo>...` again with the final repo list. If the list changed since step 1, update the `repo` names in the draft. Then run `pipeship preview <id>`. It uses each repo's top worktree. Add `--recipe <dir>/recipe.json` if there is a draft. It copies local files, installs, starts each service of the recipe on its own free port (back ends first, then fronts), waits until each answers, and marks the pipeline `ready`, unless a step waits for the user. A draft recipe that works is saved, so later pipelines in this repo skip this work. Give the user the URLs it prints (the first is the main front).
+1. **Start.** First run `pipeship recipe <repo>...` again with the final repo list. If the list changed since step 1, update the `repo` names in the draft. Then run `pipeship preview <id>`. It uses each repo's top worktree. Add `--recipe <dir>/recipe.json` if there is a draft. It copies local files, installs, starts each service of the recipe on its own free port (back ends first, then fronts), waits until each answers, and marks the `preview` step done. A draft recipe that works is saved, so later pipelines in this repo skip this work. Give the user the URLs it prints (the first is the main front).
    Services the app needs (a local database, a queue) belong in a `start` command of the recipe, so the dashboard's "Stop preview" button stops them with the app (see "Test environment recipe"). Run other one-off setup yourself; for test data, see **Data** below.
 2. **Verify.** Use the changed behaviour the way its client does, and write what you called and what came back to `<dir>/verify.md`: a UI change in a browser (the preview tools of your harness), an HTTP API with `curl`, an MCP or other protocol with a real client. Cover the main path and one failure path. If you cannot exercise it (no test data, a missing service), say so in the summary. Report as working only what you exercised.
 3. **Fix.** If verification fails, fix the code in the worktree of the chunk that owns it, commit, restack and re-run the checks. Push only if step 6 opened PRs.

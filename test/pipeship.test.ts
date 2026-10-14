@@ -1815,7 +1815,13 @@ test("timeAgo uses the given clock", () => {
 test("displaySteps shows a running step as waiting while the user is needed", () => {
   const steps = [{ name: "explore" as const, status: "done" as const }, { name: "plan" as const, status: "running" as const }];
   expect(displaySteps({ steps, status: "running" })[1]!.status).toBe("running");
-  expect(displaySteps({ steps, status: "waiting_for_user" }).map((s) => s.status)).toEqual(["done", "waiting"]);
+  expect(displaySteps({ steps, status: "waiting_for_user", waiting: { step: "plan" } }).map((s) => s.status)).toEqual(["done", "waiting"]);
+});
+
+test("displaySteps keeps a step that runs while another waits as running", () => {
+  const steps = [{ name: "stack" as const, status: "running" as const }, { name: "preview" as const, status: "running" as const }];
+  const out = displaySteps({ steps, status: "waiting_for_user", waiting: { step: "stack", reason: "Push?" } });
+  expect(out.map((s) => [s.status, s.note])).toEqual([["waiting", "Push?"], ["running", undefined]]);
 });
 
 test("allMerged and finished", () => {

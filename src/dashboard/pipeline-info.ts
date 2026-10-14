@@ -18,10 +18,10 @@ export function formatElapsed(startedAt: string, now = Date.now()): string {
   return `${Math.floor(seconds / 3600)}h${pad(Math.floor((seconds % 3600) / 60))}`;
 }
 
-// A running step of a pipeline that waits for the user shows as "waiting" and carries the question.
-export function displaySteps(p: Pick<State, "steps" | "status"> & Partial<Pick<State, "waiting">>): DisplayStep[] {
+// Only the step that waits shows as "waiting": another step may run meanwhile (preview while stack waits).
+export function displaySteps(p: Pick<State, "steps" | "status" | "waiting">): DisplayStep[] {
   return p.steps.map((s) => {
-    const waiting = s.status === "running" && p.status === "waiting_for_user";
+    const waiting = s.status === "running" && p.status === "waiting_for_user" && p.waiting?.step === s.name;
     return {
       name: s.name,
       status: waiting ? ("waiting" as const) : s.status,
