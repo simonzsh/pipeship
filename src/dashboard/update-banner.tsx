@@ -14,14 +14,18 @@ export function UpdateBanner({ live }: { live: boolean }) {
   const [error, setError] = useState<string>();
   const wasLive = useRef(live);
 
-  // One lookup on mount, then again when the tab regains focus: no timer per tab.
+  // One lookup on mount, then on tab focus and every 10 minutes: the server caches GitHub as long.
   useEffect(() => {
     const load = () =>
       fetch("/api/update").then((r) => (r.ok ? r.json() : undefined)).then((d) => d && setInfo(d), () => {});
     const onVisible = () => document.visibilityState === "visible" && load();
     load();
+    const timer = setInterval(load, 600_000);
     document.addEventListener("visibilitychange", onVisible);
-    return () => document.removeEventListener("visibilitychange", onVisible);
+    return () => {
+      clearInterval(timer);
+      document.removeEventListener("visibilitychange", onVisible);
+    };
   }, []);
 
   // Check the version on each SSE reconnect, and every 3 s as a fallback if the restart was too quick to see.

@@ -151,7 +151,7 @@ pipeship recognizes when a session runs in [T3 Code](https://github.com/pingdotg
 
 The pipeline starts the dashboard for you. To start or stop it yourself, use `/pipeship:dashboard` and `/pipeship:dashboard stop` in Claude Code, or `$dashboard` and `$dashboard stop` in Codex (from a terminal: `scripts/pipeship dashboard [stop]`). Stopping it leaves the pipelines and their test servers running.
 
-When a newer version is on GitHub (`main`, checked at most once an hour), the bottom of the left column shows **Update available** with an **Update** button. It works for Claude Code and Codex installs (a git checkout shows a hint instead of the button). It runs `claude plugin update pipeship@pipeship`, or `codex plugin marketplace upgrade pipeship` then `codex plugin add pipeship@pipeship`, restarts the dashboard on the same port and reloads the page. It refuses while a test environment is starting or a merge runs. Pipelines and their test servers keep running.
+When a newer version is on GitHub (`main`, checked at most once every 10 minutes), the bottom of the left column shows **Update available** with an **Update** button. It works for Claude Code and Codex installs (a git checkout shows a hint instead of the button). It runs `claude plugin update pipeship@pipeship`, or `codex plugin marketplace upgrade pipeship` then `codex plugin add pipeship@pipeship`, restarts the dashboard on the same port and reloads the page. It refuses while a test environment is starting or a merge runs. Pipelines and their test servers keep running.
 
 The page is React, Tailwind and [shadcn/ui](https://ui.shadcn.com) components (`src/dashboard/`). Bun builds it in memory when the dashboard starts: no Vite, no build step.
 

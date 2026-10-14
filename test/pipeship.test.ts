@@ -2331,13 +2331,13 @@ test("versions compare numerically", () => {
   expect(shouldReload("0.10.0", undefined)).toBe(false);
 });
 
-test("getUpdateInfo caches the latest version for one hour", async () => {
+test("getUpdateInfo caches the latest version for 10 minutes", async () => {
   resetUpdateCache();
   const f = fakeLatest("0.11.0");
   let t = 1_000;
   const deps = { fetch: f.fetch, now: () => t, current: "0.10.0", harness: null };
   expect(await getUpdateInfo(deps)).toEqual({ current: "0.10.0", latest: "0.11.0", available: true, harness: null });
-  t += 3_599_000;
+  t += 599_000;
   await getUpdateInfo(deps);
   expect(f.calls.length).toBe(1);
   t += 2_000;

@@ -7,7 +7,7 @@ import type { Harness } from "./state.ts";
 
 const LATEST_URL = "https://raw.githubusercontent.com/simonzsh/pipeship/main/.claude-plugin/plugin.json";
 const PLUGIN_KEY = "pipeship@pipeship";
-const CACHE_MS = 3_600_000;
+const CACHE_MS = 600_000;
 
 // What /api/update returns; harness is null for a copy no plugin manager installed.
 export interface UpdateInfo { current: string; latest: string | null; available: boolean; harness: Harness | null }
@@ -35,7 +35,7 @@ export function compareVersions(a: string, b: string): number {
   return 0;
 }
 
-// One cached lookup per process: GitHub is asked at most once an hour, a failure is retried on the next call.
+// One cached lookup per process: GitHub is asked at most once every 10 minutes, a failure is retried on the next call.
 let cache: { latest: string; checkedAt: number } | undefined;
 export const resetUpdateCache = () => void (cache = undefined);
 
