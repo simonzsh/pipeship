@@ -59,7 +59,7 @@ Steps: `explore`, `questions`, `plan`, `implement`, `review`, `stack`, `preview`
 - **A step that waits does not block an independent later step.** Example: when a step needs a decision, run the later steps that do not depend on it first, then run `wait` and ask once for everything that waits. Run `wait` last: any step that starts ends the wait.
 - While this pipeline runs, it replaces process skills such as brainstorming, writing-plans, using-git-worktrees, subagent-driven-development and finishing-a-development-branch. The only skills it uses are `simplify` and `code-review`, in step 5.
 - If the dashboard shows *Agent stopped*, the user can resume with the command copied from the agent logo in the pipeline header, then continue from the first step that is not done or skipped (`pipeship get <id>`). Marking that step `running` clears `stopRequested`.
-- To resume an archived pipeline, mark the step you reopen `running`: that unarchives it. Never archive or unarchive it yourself.
+- To resume an archived pipeline, mark the step you reopen `running`: that unarchives it. Never archive or unarchive it yourself. For feedback after the end, see **Feedback after the pipeline**.
 - Stop every server you start outside `pipeship preview` before you finish: note its PID and run `kill <PID>`.
 
 ## Step 0 — Start
@@ -161,3 +161,16 @@ If the preview fails to start, it prints the log tail: diagnose, fix the recipe 
 ## End
 
 Give the user a short summary: the test URL, the PRs in stack order (per repo), what the verification covered (or why it was skipped), the tests that ran (CI covers the rest), and anything to check by hand. Point to the test guide: the user finds it in the pipeline's Test tab. The test servers keep running on purpose; the user stops them with the dashboard's "Stop preview" button and starts them again with "Start preview".
+
+## Feedback after the pipeline
+
+The user may ask for changes after the end, or comment on a PR. Do not fix it alone with no state. Route it through implement and review.
+
+1. **Same work or new work.** A change to the same work reopens the pipeline: `pipeship step <id> implement running` (it unarchives and clears the stop request). Set each chunk concerned to `pipeship chunk <id> <chunk> --status coding`. Unrelated work is a new pipeline.
+2. **Record it.** Add the feedback to `<dir>/ticket.md` under `## Feedback <n>`. The subagents read only this file.
+3. **Implement.** One subagent per chunk concerned (model `sonnet`), in its existing worktree. Brief: `<skill dir>/prompts/implement.md`. Give it the feedback. It fixes and commits.
+4. **Restack once**, in stack order, then run the targeted checks for the diff of the feedback. Mark `implement` `done`.
+5. **Review the delta only.** Mark `review` `running`. Run one cleanup subagent (model `sonnet`, brief `<skill dir>/prompts/cleanup.md`, chunks `cleaning`) on the diff of the feedback. Run the global review (model `opus`, brief `<skill dir>/prompts/global-review.md`) only if the feedback touches several chunks or a contract. Then mark `review` `done`.
+6. **Push** the same branches: open PRs update on their own. Use `--force-with-lease` after a restack. If the PRs are already merged, open a new PR on the base of the repo.
+7. **Small feedback** (one line, a name, a text): you may fix it yourself. Commit in the chunk that owns the code, restack, re-run the checks, and update the steps.
+8. **Test again.** If the tested behaviour changed, run `pipeship preview <id>` again and update `<dir>/verify.md` and `<dir>/test.md`.
