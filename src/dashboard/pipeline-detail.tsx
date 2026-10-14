@@ -20,8 +20,7 @@ import { shortRepo } from "./utils";
 
 export function PipelineDetail({ p, onBack }: { p: DashboardState; onBack: () => void }) {
   const [target, setTarget] = useState<DiffTarget>({});
-  const hasTest = p.preview !== undefined || !!p.testGuide || !!p.previewError;
-  const [tab, setTab] = useState(hasTest ? "test" : "code");
+  const [tab, setTab] = useState("test");
   const stacks = repoStacks(p);
   const multi = p.repos.length > 1;
   // One merge runs per pipeline: the other repos' buttons hide meanwhile.
