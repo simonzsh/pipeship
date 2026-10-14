@@ -7,7 +7,7 @@ import { repoName } from "./repos.ts";
 import { detectSession, findT3Thread } from "./session.ts";
 import { DEFAULT_PORT, isDashboardUp, serve, spawnDashboard } from "./server.ts";
 import {
-  STEPS, addRepo, createPipeline, home, listStates, pipelineDir, readState, setMode, setStep, updateState, upsertChunk,
+  STEPS, addRepo, createPipeline, home, listStates, pipelineDir, readState, refreshSessionId, setMode, setStep, updateState, upsertChunk,
   waitForUser,
   type ChunkInput, type Mode, type StepName, type StepStatus,
 } from "./state.ts";
@@ -119,7 +119,8 @@ async function main() {
     case "list":
       return print(listStates().map((s) => `${s.id}\t${s.status}\t${s.step}\t${s.ticket.title}`).join("\n") || "no pipelines");
     case "step": {
-      const { session } = setStep(need(args[0], "<id>"), need(args[1], "<step>") as StepName, need(args[2], "<status>") as StepStatus);
+      setStep(need(args[0], "<id>"), need(args[1], "<step>") as StepName, need(args[2], "<status>") as StepStatus);
+      const session = refreshSessionId(args[0], detectSession());
       // T3 Code may record the session after `pipeship new`: look again at each step until found.
       const t3Thread = session && !session.t3Thread && findT3Thread(session);
       if (t3Thread) updateState(args[0], (s) => void (s.session!.t3Thread = t3Thread));

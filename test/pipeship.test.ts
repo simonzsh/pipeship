@@ -3,7 +3,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync, existsSync, readFileSync
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
-  addRepo, createPipeline, listStates, pipelineDir, pipelineStatus, readState, setMode, setStep, updateState, upsertChunk, waitForUser, type State,
+  addRepo, createPipeline, listStates, pipelineDir, pipelineStatus, readState, refreshSessionId, setMode, setStep, updateState, upsertChunk, waitForUser, type State,
 } from "../src/state.ts";
 import { chunksOf, diffRange, repoName, repoStacks, sharesRepo, stackRows, topChunk } from "../src/repos.ts";
 import {
@@ -473,6 +473,17 @@ test("step records the T3 Code thread once T3 Code knows the session", () => {
   step("done");
   expect(readState(state.id).session?.t3Thread).toEqual({ environmentId: T3_ENV, threadId: T3_THREAD });
   rmSync(process.env.T3CODE_HOME!, { recursive: true, force: true });
+});
+
+test("refreshSessionId records the new id after /clear for the same harness and cwd only", () => {
+  const NEW_ID = "cccccccc-2eaf-4c0e-b494-97ea2a18163f";
+  const state = createPipeline({ repos: [{ path: repo }], title: "t", source: "text", session: { harness: "claude", id: CLAUDE_ID, cwd: "/w" } });
+  refreshSessionId(state.id, { harness: "codex", id: NEW_ID, cwd: "/w" });
+  refreshSessionId(state.id, { harness: "claude", id: NEW_ID, cwd: "/elsewhere" });
+  refreshSessionId(state.id, undefined);
+  expect(readState(state.id).session?.id).toBe(CLAUDE_ID);
+  expect(refreshSessionId(state.id, { harness: "claude", id: NEW_ID, cwd: "/w" })?.id).toBe(NEW_ID);
+  expect(readState(state.id).session).toEqual({ harness: "claude", id: NEW_ID, cwd: "/w" });
 });
 
 const svc = (name: string, kind: string, extra: Partial<Service> = {}): Service => ({
