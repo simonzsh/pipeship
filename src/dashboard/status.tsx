@@ -1,10 +1,13 @@
-import { Archive, CheckCheck, CheckCircle2, GitMerge, GitPullRequestClosed, Loader2, MessageCircleQuestion, Square, XCircle, type LucideIcon } from "lucide-react";
+import { Archive, CheckCheck, CheckCircle2, GitMerge, GitPullRequestClosed, MessageCircleQuestion, Square, XCircle } from "lucide-react";
+import type { ComponentType } from "react";
 import type { Status } from "../state.ts";
 import { Badge } from "./components/ui/badge";
+import { LogoLoader } from "./logo-loader";
+import { Spinner } from "./components/ui/spinner";
 
 type StatusConfig = {
   label: string;
-  icon: LucideIcon;
+  icon: ComponentType<{ className?: string }>;
   badge: string;
   tint: string;
   // Only on clickable cards: a deeper shade of the tint, so hover keeps the status colour.
@@ -38,8 +41,8 @@ const STATUS: Record<Status, StatusConfig> = {
   },
   running: {
     label: "Running",
-    icon: Loader2,
-    badge: "bg-blue-500/20 text-blue-800 ring-1 ring-inset ring-blue-500/40 dark:text-blue-300 [&>svg]:animate-spin",
+    icon: LogoLoader,
+    badge: "bg-blue-500/20 text-blue-800 ring-1 ring-inset ring-blue-500/40 dark:text-blue-300",
     tint: "bg-blue-500/5",
     hover: "hover:bg-blue-500/10",
     dot: "bg-blue-500",
@@ -131,8 +134,8 @@ function chunkIcon(status: string, label: string) {
     );
   }
   if (status === "failed") return <XCircle className="size-4 text-red-600 dark:text-red-400" aria-label={label} />;
-  if (status === "merging") return <Loader2 className="size-4 animate-spin text-violet-600 dark:text-violet-400" aria-label={label} />;
-  return <Loader2 className="size-4 animate-spin text-blue-600 dark:text-blue-400" aria-label={label} />;
+  if (status === "merging") return <Spinner className="size-4 text-violet-600 dark:text-violet-400" label={label} />;
+  return <LogoLoader className="size-4 text-blue-600 dark:text-blue-400" label={label} />;
 }
 
 export function StatusBadge({ status }: { status: Status }) {

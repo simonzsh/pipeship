@@ -1,5 +1,6 @@
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { AlertCircle, ChevronDown, ChevronRight, ChevronsDownUp, ChevronsUpDown, Loader2, RefreshCw } from "lucide-react";
+import { AlertCircle, ChevronDown, ChevronRight, ChevronsDownUp, ChevronsUpDown, RefreshCw } from "lucide-react";
+import { Spinner } from "./components/ui/spinner";
 import type { DashboardState } from "../state.ts";
 import { repoName } from "../repos.ts";
 import type { DiffErrorBody, DiffFile, DiffHunk, DiffResponse, LineKind } from "../diff.ts";
@@ -329,7 +330,7 @@ export function CodeTab({ p, target, onTarget }: CodeTabProps) {
             </Button>
           )}
           <Button size="sm" variant="outline" onClick={() => setManual((n) => n + 1)} disabled={fetching}>
-            {fetching ? <Loader2 className="animate-spin" /> : <RefreshCw />} Refresh
+            {fetching ? <Spinner /> : <RefreshCw />} Refresh
           </Button>
         </span>
       </div>
@@ -349,7 +350,7 @@ export function CodeTab({ p, target, onTarget }: CodeTabProps) {
             )}
             {"loading" in r ? (
               <p className="flex items-center gap-2 px-6 text-sm text-muted-foreground">
-                <Loader2 className="size-4 animate-spin" /> Loading diff…
+                <Spinner className="size-4" /> Loading diff…
               </p>
             ) : "error" in r ? (
               <p className="mx-6 flex items-center gap-2 rounded-lg border bg-muted/50 px-3 py-2 text-sm text-muted-foreground">

@@ -101,3 +101,30 @@
 .dark .hljs-title, .dark .hljs-title.class_, .dark .hljs-title.function_, .dark .hljs-section { color: #d2a8ff; }
 .dark .hljs-built_in, .dark .hljs-symbol, .dark .hljs-bullet, .dark .hljs-name, .dark .hljs-tag { color: #7ee787; }
 .dark .hljs-deletion { color: #ffa198; }
+
+/* Dash of 1 with gap of 1 on a path of length 1: hidden at both ends of the cycle, so the loop has no jump. */
+.logo-outline {
+  stroke-dasharray: 1;
+  animation: logo-draw 1.8s ease-in-out infinite;
+}
+@keyframes logo-draw {
+  0% { stroke-dashoffset: 1; }
+  50%, 70% { stroke-dashoffset: 0; }
+  100% { stroke-dashoffset: -1; }
+}
+
+.logo-dot {
+  animation: logo-pulse 1.2s ease-in-out infinite;
+}
+.logo-dot-2 { animation-delay: 0.4s; }
+.logo-dot-3 { animation-delay: 0.8s; }
+@keyframes logo-pulse {
+  0%, 100% { opacity: 0.25; }
+  33% { opacity: 1; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .logo-outline,
+  .logo-dot {
+    animation: none;
+  }
+}

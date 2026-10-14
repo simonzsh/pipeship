@@ -1,4 +1,5 @@
-import { ChevronDown, ChevronRight, CircleDashed, Workflow } from "lucide-react";
+import { ChevronDown, ChevronRight, Workflow } from "lucide-react";
+import { Spinner } from "./components/ui/spinner";
 import { useEffect, useMemo, useState } from "react";
 import { createRoot } from "react-dom/client";
 import type { DashboardState } from "../state.ts";
@@ -114,7 +115,7 @@ function App() {
 
       {!pipelines && (
         <div className="flex justify-center py-14 text-muted-foreground">
-          <CircleDashed className="size-5 animate-spin" />
+          <Spinner className="size-5" label="Loading pipelines" />
         </div>
       )}
       {pipelines && ordered.length === 0 && (

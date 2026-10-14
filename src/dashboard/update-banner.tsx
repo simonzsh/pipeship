@@ -1,4 +1,5 @@
-import { ArrowUpCircle, Loader2 } from "lucide-react";
+import { ArrowUpCircle } from "lucide-react";
+import { Spinner } from "./components/ui/spinner";
 import { useEffect, useRef, useState } from "react";
 import { Button } from "./components/ui/button";
 import { shouldReload, type UpdateInfo } from "./update-info";
@@ -72,7 +73,7 @@ export function UpdateBanner({ live }: { live: boolean }) {
         </div>
         {info.harness && (
           <Button size="xs" variant="outline" disabled={updating} onClick={install}>
-            {updating && <Loader2 className="animate-spin" />}
+            {updating && <Spinner />}
             {restarting ? "Restarting…" : updating ? "Updating…" : "Update & restart"}
           </Button>
         )}
