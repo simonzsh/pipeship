@@ -256,28 +256,32 @@ function makeCtx(id: string, repo: string, d: MergeDeps): Ctx {
   return { id, repo, d, gh, view, progress, finish, mergePr, waitReady };
 }
 
-// Appends the folded PRs to the bottom PR's description, once each.
-async function listFoldedPrs(x: Ctx, bottom: Chunk, folded: string[]): Promise<void> {
+// Appends the folded PRs to the bottom PR's description, once each. The list is cosmetic:
+// a failure returns a warning and never blocks the merge.
+async function listFoldedPrs(x: Ctx, bottom: Chunk, folded: string[]): Promise<string | undefined> {
   if (!folded.length) return;
   const bottomUrl = bottom.pr!;
   const bn = parsePrUrl(bottomUrl);
-  x.progress(bottom, `updating the description of #${bn.number}`);
-  const fail = (why: string) =>
-    new Error(`could not update the description of #${bn.number}: ${why}. The PRs are combined; edit the description by hand.`);
-  const got = await x.gh(["pr", "view", bottomUrl, "--json", "body"]);
-  if (got.code !== 0) throw fail(firstLine(got.stderr));
-  const body: string = (JSON.parse(got.stdout) as { body?: string }).body ?? "";
-  // Exact match: .../pull/1 must not count as listed because .../pull/12 is.
-  const todo = folded.filter((u) => !new RegExp(`${u.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?!\\d)`).test(body));
-  if (!todo.length) return;
-  const line = `Combines ${todo.map((u) => `#${parsePrUrl(u).number}`).join(", ")} (merged into this branch):\n${todo.map((u) => `- ${u}`).join("\n")}`;
-  const patch = await x.gh(["api", "-X", "PATCH", `repos/${bn.owner}/${bn.repo}/pulls/${bn.number}`, "-f", `body=${body.trimEnd()}\n\n${line}\n`]);
-  if (patch.code !== 0) throw fail(firstLine(patch.stderr));
+  const warn = (why: string) => `could not list the combined PRs in #${bn.number}: ${why}`;
+  try {
+    x.progress(bottom, `updating the description of #${bn.number}`);
+    const got = await x.gh(["pr", "view", bottomUrl, "--json", "body"]);
+    if (got.code !== 0) return warn(firstLine(got.stderr));
+    const body: string = (JSON.parse(got.stdout) as { body?: string }).body ?? "";
+    // Exact match: .../pull/1 must not count as listed because .../pull/12 is.
+    const todo = folded.filter((u) => !new RegExp(`${u.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?!\\d)`).test(body));
+    if (!todo.length) return;
+    const line = `Combines ${todo.map((u) => `#${parsePrUrl(u).number}`).join(", ")} (merged into this branch):\n${todo.map((u) => `- ${u}`).join("\n")}`;
+    const patch = await x.gh(["api", "-X", "PATCH", `repos/${bn.owner}/${bn.repo}/pulls/${bn.number}`, "-f", `body=${body.trimEnd()}\n\n${line}\n`]);
+    if (patch.code !== 0) return warn(firstLine(patch.stderr));
+  } catch (err) {
+    return warn(errorMessage(err));
+  }
 }
 
 // Combine: fold each PR into the branch of the PR below, top first. No rebase, retarget or push:
 // origin and the base branch stay untouched, and the bottom PR collects the whole stack.
-async function combine(x: Ctx, chunks: Chunk[]): Promise<{ tip?: string }> {
+async function combine(x: Ctx, chunks: Chunk[]): Promise<{ tip?: string; warning?: string }> {
   const views = await Promise.all(chunks.map((c) => x.view(c.pr!)));
   const closed = views.find((v) => v.state === "CLOSED");
   if (closed) throw new Error(`PR #${closed.number} is closed`);
@@ -306,16 +310,15 @@ async function combine(x: Ctx, chunks: Chunk[]): Promise<{ tip?: string }> {
 
   // Every PR above the bottom one is merged now, including those from an earlier run.
   const folded = chunks.slice(bottom + 1).map((c) => c.pr!);
-  await listFoldedPrs(x, chunks[bottom]!, folded);
-  return { tip: foldTip };
+  return { tip: foldTip, warning: await listFoldedPrs(x, chunks[bottom]!, folded) };
 }
 
 // A previous run may have folded everything and failed on the description: relist (idempotent).
-async function relistFolded(x: Ctx, chunks: Chunk[]): Promise<void> {
+async function relistFolded(x: Ctx, chunks: Chunk[]): Promise<string | undefined> {
   const bottom = chunks.findIndex((c) => c.status !== MERGED);
   if (bottom < 0) return;
   const folded = chunks.slice(bottom + 1).filter((c) => c.status === MERGED).map((c) => c.pr!);
-  await listFoldedPrs(x, chunks[bottom]!, folded);
+  return listFoldedPrs(x, chunks[bottom]!, folded);
 }
 
 // Deletes the stack's remote branches, never the base. Returns the branches that could not go:
@@ -333,7 +336,7 @@ async function deleteBranches(x: Ctx, chunks: Chunk[], keep: string[]): Promise<
 
 // Squash-merge the single PR left into the base branch. No rebase, push or retarget:
 // combine already put the whole stack on this PR's branch. `afterFold` is the new head after a fold.
-async function mergeIntoBase(x: Ctx, repo: Repo, chunks: Chunk[], remove: boolean, afterFold?: string): Promise<void> {
+async function mergeIntoBase(x: Ctx, repo: Repo, chunks: Chunk[], remove: boolean, afterFold?: string, warning?: string): Promise<void> {
   const open = chunks.filter((c) => c.status !== MERGED);
   if (open.length !== 1) throw new Error(open.length ? `${open.length} PRs still open after the combine` : "no open PR to merge");
   const c = open[0]!;
@@ -350,7 +353,7 @@ async function mergeIntoBase(x: Ctx, repo: Repo, chunks: Chunk[], remove: boolea
     await x.mergePr(c, ready.headRefOid, "squash", `merged #${n}`);
   }
   const left = remove ? await deleteBranches(x, chunks, [base, repo.base ?? base]) : [];
-  x.finish(`merged #${n} into ${base}` + (left.length ? `; could not delete ${left.join(", ")}` : ""));
+  x.finish(`merged #${n} into ${base}` + (left.length ? `; could not delete ${left.join(", ")}` : "") + (warning ? `; ${warning}` : ""));
 }
 
 // Never throws: every failure ends up in state.merge. `repo` is a path or a name.
@@ -380,9 +383,10 @@ export async function mergeStack(
     // Re-read after the combine: it records the merged PRs in the state file.
     const prChunks = () => chunksOf(readState(id), found.path).filter((c) => c.pr);
     let tip: string | undefined;
-    if (prChunks().filter((c) => c.status !== MERGED).length > 1) tip = (await combine(x, prChunks())).tip;
-    else await relistFolded(x, prChunks());
-    await mergeIntoBase(x, found, prChunks(), removeBranches, tip);
+    let warning: string | undefined;
+    if (prChunks().filter((c) => c.status !== MERGED).length > 1) ({ tip, warning } = await combine(x, prChunks()));
+    else warning = await relistFolded(x, prChunks());
+    await mergeIntoBase(x, found, prChunks(), removeBranches, tip, warning);
     if (readState(id).merge?.status === "done") await archiveIfAllMerged(id);
   } catch (err) {
     try {

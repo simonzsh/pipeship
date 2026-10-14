@@ -1,6 +1,6 @@
 import { GitMerge } from "lucide-react";
 import { Spinner } from "./components/ui/spinner";
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import type { Chunk, MergeRun } from "../state.ts";
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription,
@@ -23,20 +23,18 @@ export function MergeButton({ id, repo, chunks, base, merge, busy, finished }: {
   const [error, setError] = useState<string>();
   // Like GitHub's "delete branch" offer after a merge; checked by default.
   const [deleteBranches, setDeleteBranches] = useState(true);
-  // The action just clicked, until the stream reports the run (or the POST fails).
-  const [starting, setStarting] = useState(false);
+  // The run's startedAt seen at the click (null: no click). Ends when the stream shows another run, or the POST fails.
+  const [clickedAt, setClickedAt] = useState<string | undefined | null>(null);
   const todo = chunks.filter((c) => c.pr && c.status !== "merged");
   const running = merge?.status === "running";
-  useEffect(() => {
-    if (running) setStarting(false);
-  }, [running]);
+  const starting = clickedAt !== null && merge?.startedAt === clickedAt;
   const run = async () => {
     setError(undefined);
-    setStarting(true);
+    setClickedAt(merge?.startedAt);
     const err = await postAction(id, "merge", { repo, deleteBranches });
     if (err) {
       setError(err);
-      setStarting(false);
+      setClickedAt(null);
     }
   };
   const waitTitle = busy ? "Another repo of this pipeline is merging" : undefined;

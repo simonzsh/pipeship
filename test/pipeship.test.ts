@@ -743,7 +743,7 @@ test("new records the base branch, and leaves it unset on a detached HEAD", () =
   expect(created("detached").repos).toEqual([{ path: repo }]);
 });
 
-// Merge stack: real git (local bare remote, rebase and push really run) behind a fake gh.
+// Merge stack: real git (local bare remote, read through ls-remote) behind a fake gh. The flow merges through gh and never rebases or pushes.
 const commitFile = (cwd: string, name: string, content: string, msg: string) => {
   writeFileSync(join(cwd, name), content);
   sh(cwd, "add", ".");
@@ -1313,19 +1313,17 @@ test("merge: a resume after a failing check on #2 skips #3, which is already mer
   expect(gh.gitCalls.every((g) => g.startsWith("ls-remote origin"))).toBe(true);
 });
 
-test("merge: a failed description update keeps the merges and lists each PR once on resume", async () => {
+test("merge: a failed description update never blocks the squash", async () => {
   const stack = makeStack(2);
   const gh = fakeGh(stack, 2);
   gh.prs[1]!.bodyFails = true;
   await mergeStack(stack.id, gh.deps);
-  expect(readState(stack.id).merge?.error).toBe("could not update the description of #1: HTTP 500. The PRs are combined; edit the description by hand.");
-  expect(chunkStatuses(stack.id)).toEqual(["done", "merged"]);
-
-  gh.prs[1]!.bodyFails = false;
-  await mergeStack(stack.id, gh.deps);
-  expect(gh.calls).toEqual(["merge 2 --merge", "patch 1 body", "patch 1 body", "merge 1"]);
-  expect(gh.prs[1]!.body.match(/pull\/2/g)).toHaveLength(1);
-  expect(readState(stack.id).merge?.status).toBe("done");
+  expect(gh.calls).toEqual(["merge 2 --merge", "patch 1 body", "merge 1"]);
+  expect(chunkStatuses(stack.id).every((st) => st === "merged")).toBe(true);
+  expect(readState(stack.id).merge).toMatchObject({
+    status: "done",
+    message: "merged #1 into main; could not list the combined PRs in #1: HTTP 500",
+  });
 });
 
 test("the merge route rejects a mode, and a run squashes with one or two open PRs", async () => {
