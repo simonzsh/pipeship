@@ -6,6 +6,7 @@ import {
   AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger,
 } from "./components/ui/alert-dialog";
 import { Button } from "./components/ui/button";
+import { Checkbox } from "./components/ui/checkbox";
 import { postAction, prNumber } from "./utils";
 
 type Mode = "combine" | "base";
@@ -78,8 +79,8 @@ export function MergeButton({ id, repo, chunks, base, merge, busy, finished }: {
           <AlertDialogDescription>Squash-merges the PR once its checks pass.</AlertDialogDescription>
         </AlertDialogHeader>
         <label className="flex items-center gap-2 text-sm">
-          <input type="checkbox" checked={deleteBranches} onChange={(e) => setDeleteBranches(e.target.checked)} />
-          Delete the remote branches of the stack after the merge
+          <Checkbox checked={deleteBranches} onCheckedChange={(v) => setDeleteBranches(v === true)} />
+          Delete the remote branches after the merge
         </label>
         <AlertDialogFooter>
           <AlertDialogCancel>Cancel</AlertDialogCancel>
