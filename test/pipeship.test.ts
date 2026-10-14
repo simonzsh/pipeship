@@ -1144,7 +1144,7 @@ test("setMode quick sets the mode and skips only pending quick steps; full only 
 });
 
 test("groupByStatus orders groups, hides empty ones and keeps the order inside a group", () => {
-  const order = ["waiting_for_user", "ready", "running", "failed", "archived"];
+  const order = ["waiting_for_user", "ready", "running", "done", "failed", "archived"];
   const items = [
     { id: "a", status: "running" },
     { id: "b", status: "archived" },
@@ -1943,6 +1943,14 @@ test("a done pipeline starts its preview, becomes ready, and is done again once 
     await stopPreviewQuiet(id);
   }
 }, 30_000);
+
+test("a stop request keeps a failed or archived pipeline's status", async () => {
+  for (const status of ["failed", "archived"] as const) {
+    const { id } = createPipeline({ repos: [{ path: repo }], title: "t", source: "text" });
+    setStatus(id, status);
+    expect((await stopPipeline(id)).status).toBe(status);
+  }
+});
 
 test("old state files get the new statuses", () => {
   const write = (id: string, patch: object) => {

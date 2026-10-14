@@ -3,14 +3,9 @@ import { errorMessage, failStaleMerges, MergeError, startMerge } from "./merge.t
 import { DiffError, pipelineDiff } from "./diff-git.ts";
 import type { DiffErrorBody } from "./diff.ts";
 import { startPrSync } from "./pr-sync.ts";
-import { listDashboardStates, readState } from "./state.ts";
+import { listDashboardStates } from "./state.ts";
 import {
-  archivePipeline,
-  deletePipeline, isPreviewStarting,
-  PreviewError,
-  requestPreviewStart,
-  stopPipeline,
-  stopPreviewAndSettle,
+  archivePipeline, deletePipeline, isPreviewStarting, PreviewError, requestPreviewStart, stopPipeline, stopPreviewAndSettle,
 } from "./preview.ts";
 
 export const DEFAULT_PORT = 4400;

@@ -527,13 +527,16 @@ const stoppedMidStart = new Set<string>();
 // The dashboard cannot wait minutes for a start: failures go to state.previewError instead.
 export const isPreviewStarting = (id: string) => startsInFlight.has(id);
 
-export function requestPreviewStart(id: string): { state: State; done: Promise<void> } {
-  let state: State;
+function readStateOr404(id: string): State {
   try {
-    state = readState(id);
+    return readState(id);
   } catch (err) {
     throw new PreviewError((err as Error).message, 404);
   }
+}
+
+export function requestPreviewStart(id: string): { state: State; done: Promise<void> } {
+  const state = readStateOr404(id);
   if (state.status !== "done") throw new PreviewError("the pipeline is not done: no preview to start", 409);
   if (startsInFlight.has(id)) throw new PreviewError("a preview is already starting", 409);
   // Before the guard is set: a throw here must not leave the id marked in flight.
@@ -564,8 +567,9 @@ export async function stopPipeline(id: string): Promise<State> {
     s.stopRequested = true;
   });
   await stopPreview(id);
+  // "done" claims every step finished: a failed or archived pipeline keeps its status.
   return updateState(id, (s) => {
-    s.status = "done";
+    if (s.status !== "failed" && s.status !== "archived") s.status = "done";
     delete s.waitingFor;
   });
 }
@@ -580,12 +584,7 @@ export async function stopPreviewAndSettle(id: string): Promise<State> {
 
 // Archived is final: only Delete remains.
 export async function archivePipeline(id: string): Promise<State> {
-  let state: State;
-  try {
-    state = readState(id);
-  } catch (err) {
-    throw new PreviewError((err as Error).message, 404);
-  }
+  const state = readStateOr404(id);
   if (state.status !== "done" && state.status !== "failed") {
     throw new PreviewError(`only a done or failed pipeline can be archived (status: ${state.status})`, 409);
   }

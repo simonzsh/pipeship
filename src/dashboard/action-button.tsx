@@ -97,7 +97,8 @@ function ActionButton({ id, action, hasServers }: { id: string; action: ActionNa
 // The stop, archive and delete buttons of a pipeline. Renders nothing when no action applies.
 export function PipelineActions({ p, merging, starting }: { p: State; merging: boolean; starting: boolean }) {
   const actions: ActionName[] = [];
-  if (p.status === "ready") {
+  // An agent can set "done" while its preview still runs.
+  if (p.status === "ready" || p.status === "done") {
     if (p.preview && !starting) actions.push("stopServer");
   } else if (p.status === "running" || p.status === "waiting_for_user" || (p.status === "failed" && p.preview)) {
     actions.push("stopPipeline");
