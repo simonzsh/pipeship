@@ -576,7 +576,7 @@ export async function stopPreviewAndSettle(id: string): Promise<State> {
   return readState(id);
 }
 
-// Archived is final: only Delete remains.
+// Archiving stops the preview; unarchiving does not restart it.
 export async function archivePipeline(id: string): Promise<State> {
   const state = readStateOr404(id);
   if (!["done", "failed", "stopped"].includes(state.status)) {
@@ -586,6 +586,13 @@ export async function archivePipeline(id: string): Promise<State> {
   return updateState(id, (s) => {
     s.archivedAt = new Date().toISOString();
   });
+}
+
+// The status derives again from the facts: done, failed or stopped.
+export async function unarchivePipeline(id: string): Promise<State> {
+  const state = readStateOr404(id);
+  if (state.status !== "archived") throw new PreviewError(`only an archived pipeline can be unarchived (status: ${state.status})`, 409);
+  return updateState(id, (s) => void delete s.archivedAt);
 }
 
 // Once every PR is merged the pipeline has no work left. Never throws: callers are the merge and the PR sync.

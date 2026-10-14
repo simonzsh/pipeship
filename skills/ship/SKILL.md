@@ -30,6 +30,7 @@ pipeship step <id> <step> running|done|skipped|failed
 pipeship mode <id> quick|full         # switch the mode after creation; quick skips the pending plan step
 pipeship wait <id> <step> [--reason <question>]   # pause for the user on this step: the step runs, the card shows the question
 pipeship archive <id>                            # done, failed or stopped only; the user archives, not the agent
+pipeship unarchive <id>                          # archived only; the user unarchives (dashboard or this command)
 pipeship chunk <id> <name> [--repo r] [--worktree p] [--branch b] [--status s] [--pr url]   # --repo (name or path) needed for a new chunk with several repos
 pipeship recipe <repo>...              # the saved recipe to start the app for these repos, or "none"
 pipeship preview <id> [<worktree>] [--recipe file]   # starts the app, prints the URL(s); each service runs from the top worktree of its repo
@@ -50,6 +51,7 @@ Steps: `explore`, `questions`, `plan`, `implement`, `review`, `stack`, `preview`
 - **A step that waits does not block an independent later step.** Example: when `stack` needs approval, run `preview` on the top worktree first, then run `wait` and ask once for everything that waits. Run `wait` last: any step that starts ends the wait.
 - While this pipeline runs, it replaces process skills such as brainstorming, writing-plans, using-git-worktrees, subagent-driven-development and finishing-a-development-branch. The only skills it uses are `simplify` and `code-review`, in step 5.
 - If the dashboard shows *Agent stopped*, the user can resume with the command copied from the agent logo in the pipeline header, then continue from the first step that is not done or skipped (`pipeship get <id>`). Marking that step `running` clears `stopRequested`.
+- To resume an archived pipeline, mark the step you reopen `running`: that unarchives it. Never archive or unarchive it yourself.
 - Stop every server you start outside `pipeship preview` before you finish: note its PID and run `kill <PID>`.
 
 ## Step 0 — Start

@@ -279,7 +279,11 @@ export function setStep(id: string, name: StepName, status: StepStatus): State {
     // The wait ends when any step starts or when the step it blocked moves on.
     if (s.waiting && (status === "running" || name === s.waiting.step)) delete s.waiting;
     // A step that starts again resumes a stopped pipeline.
-    if (status === "running") s.stopRequested = false;
+    // It also unarchives: the agent reopening an archived pipeline puts it back to work.
+    if (status === "running") {
+      s.stopRequested = false;
+      delete s.archivedAt;
+    }
     if (status === "done" || status === "failed") step.endedAt = now;
   });
 }

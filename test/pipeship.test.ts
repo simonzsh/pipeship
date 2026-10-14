@@ -8,7 +8,7 @@ import {
 import { chunksOf, diffRange, repoName, repoStacks, sharesRepo, topChunk } from "../src/repos.ts";
 import {
   archivePipeline, DASHBOARD_PORT, deletePipeline, findRecipe, isAlive, mainService, normalizeRecipe, pickPorts, previewLines, resolveEnv,
-  requestPreviewStart, savedRecipePath, startOrder, startPreview, stopPipeline, stopPreview, stopPreviewAndSettle, type Service,
+  requestPreviewStart, savedRecipePath, startOrder, startPreview, stopPipeline, stopPreview, stopPreviewAndSettle, type Service, unarchivePipeline,
 } from "../src/preview.ts";
 import { diffTotals, parseDiff } from "../src/diff.ts";
 import { DiffError, gitDiff, pipelineDiff, resolveRef } from "../src/diff-git.ts";
@@ -111,7 +111,7 @@ test("a step reopened on a ready or done pipeline sets it back to running", () =
   const archived = createPipeline({ repos: [{ path: repo }], title: "a", source: "text" }).id;
   for (const name of all) setStep(archived, name, "done");
   archiveNow(archived);
-  expect(setStep(archived, "review", "running").status).toBe("archived");
+  expect(setStep(archived, "review", "running").status).toBe("running");
 });
 
 test("a step run again loses the end of its previous run", () => {
@@ -189,12 +189,34 @@ test("resume after a stop: a step that starts clears stopRequested", async () =>
   expect(resumed.status).toBe("running");
 });
 
-test("an archived pipeline stays archived when a step changes", () => {
+test("an archived pipeline stays archived unless a step starts", () => {
   const id = rules();
   finishSteps(id);
   archiveNow(id);
-  expect(setStep(id, "review", "running").status).toBe("archived");
-  expect(setStep(id, "review", "failed").status).toBe("archived");
+  for (const status of ["failed", "skipped", "pending", "done"] as const) {
+    expect(setStep(id, "review", status).status).toBe("archived");
+  }
+  const resumed = setStep(id, "review", "running");
+  expect(resumed.status).toBe("running");
+  expect(resumed.archivedAt).toBeUndefined();
+  expect(setStep(id, "review", "done").status).toBe("done");
+});
+
+test("unarchivePipeline derives done or failed from the steps and refuses a pipeline that is not archived", async () => {
+  const id = rules();
+  finishSteps(id);
+  await expect(unarchivePipeline(id)).rejects.toThrow("only an archived pipeline");
+  archiveNow(id);
+  const state = await unarchivePipeline(id);
+  expect(state.archivedAt).toBeUndefined();
+  expect(state.status).toBe("done");
+
+  const failed = rules();
+  finishSteps(failed);
+  setStep(failed, "review", "failed");
+  archiveNow(failed);
+  expect((await unarchivePipeline(failed)).status).toBe("failed");
+  await expect(unarchivePipeline("nope")).rejects.toThrow();
 });
 
 test("a wait ends when another step starts", () => {
@@ -2035,6 +2057,21 @@ test("archive is refused unless the pipeline is done, failed or stopped", async 
     server.stop(true);
   }
   await expect(archivePipeline(id)).rejects.toThrow("only a done, failed or stopped");
+});
+
+test("unarchive route: 200 for an archived pipeline, 409 otherwise, 404 for an unknown id", async () => {
+  const id = donePipeline(SERVER);
+  const server = await serve(0);
+  const post = (pid: string) => fetch(`http://localhost:${server.port}/api/pipelines/${pid}/unarchive`, { method: "POST" });
+  try {
+    expect((await post(id)).status).toBe(409);
+    expect((await post("nope")).status).toBe(404);
+    archiveNow(id);
+    expect((await post(id)).status).toBe(200);
+    expect(readState(id).status).toBe("done");
+  } finally {
+    server.stop(true);
+  }
 });
 
 test("archiving a failed pipeline stops its preview", async () => {

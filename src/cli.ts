@@ -2,7 +2,7 @@
 import { existsSync, readFileSync, rmSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { parseArgs } from "node:util";
-import { archivePipeline, deletePipeline, findRecipe, git, isAlive, killGroup, loadRecipe, previewLines, startPreview, stopPipeline } from "./preview.ts";
+import { archivePipeline, deletePipeline, findRecipe, git, isAlive, killGroup, loadRecipe, previewLines, startPreview, stopPipeline, unarchivePipeline } from "./preview.ts";
 import { repoName } from "./repos.ts";
 import { detectSession, findT3Thread } from "./session.ts";
 import { DEFAULT_PORT, isDashboardUp, serve, spawnDashboard } from "./server.ts";
@@ -32,7 +32,8 @@ const USAGE = `pipeship — state, test environments and dashboard for the /pipe
   preview <id> [<worktree>] [--recipe file]   start the test environment: each service runs from the top worktree of its repo;
                                <worktree> overrides it for a one-repo pipeline; a --recipe that works is saved for the pipeline's repos
   stop <id>                    stop the pipeline and its test servers
-  archive <id>                 archive a done, failed or stopped pipeline (its test servers stop); only delete remains after that
+  archive <id>                 archive a done, failed or stopped pipeline (its test servers stop)
+  unarchive <id>               unarchive an archived pipeline; its test servers stay stopped
   delete <id> [--force]        delete its worktrees and files (branches and PRs stay); --force drops uncommitted changes
   dashboard [start|stop] [--port n]   start the dashboard in the background (default) or stop it
   serve [--port n]             run the dashboard in the foreground`;
@@ -158,6 +159,9 @@ async function main() {
     case "archive":
       await archivePipeline(need(args[0], "<id>"));
       return print("archived");
+    case "unarchive":
+      await unarchivePipeline(need(args[0], "<id>"));
+      return print("unarchived");
     case "delete":
       await deletePipeline(need(args[0], "<id>"), { force: values.force });
       return print("deleted");
