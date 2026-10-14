@@ -4,8 +4,6 @@ import { Button } from "./components/ui/button";
 import { shouldReload, type UpdateInfo } from "./update-info";
 import { responseError } from "./utils";
 
-const REFRESH_MS = 600_000;
-
 // Bottom of the sidebar. `live` is the SSE state: after an install, a new live=true means the server restarted.
 export function UpdateBanner({ live }: { live: boolean }) {
   const [info, setInfo] = useState<UpdateInfo>();
@@ -15,12 +13,14 @@ export function UpdateBanner({ live }: { live: boolean }) {
   const [error, setError] = useState<string>();
   const wasLive = useRef(live);
 
+  // One lookup on mount, then again when the tab regains focus: no timer per tab.
   useEffect(() => {
     const load = () =>
       fetch("/api/update").then((r) => (r.ok ? r.json() : undefined)).then((d) => d && setInfo(d), () => {});
+    const onVisible = () => document.visibilityState === "visible" && load();
     load();
-    const timer = setInterval(load, REFRESH_MS);
-    return () => clearInterval(timer);
+    document.addEventListener("visibilitychange", onVisible);
+    return () => document.removeEventListener("visibilitychange", onVisible);
   }, []);
 
   // Check the version on each SSE reconnect, and every 3 s as a fallback if the restart was too quick to see.
