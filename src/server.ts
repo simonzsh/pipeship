@@ -93,6 +93,7 @@ export async function serve(port = DEFAULT_PORT, opts: ServeOptions = {}) {
             const result = await installUpdate(opts.harness !== undefined ? opts.harness : currentHarness(), { blocker, ...opts.update });
             if (!result.restarting) return Response.json({ restarting: false, message: result.message });
             restarting = true;
+            if (result.warning) console.error(`update: ${result.warning}`);
             setTimeout(() => handoff(result.launcher), 300); // let the response go out first
             return Response.json({ restarting: true, from: currentVersion() });
           } catch (err) {

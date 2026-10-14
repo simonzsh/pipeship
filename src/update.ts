@@ -57,12 +57,14 @@ export async function getUpdateInfo(deps: Partial<UpdateDeps> = {}): Promise<Upd
 
 interface Installed { installPath: string; version: string }
 
+const HARNESSES = ["claude", "codex"] as const satisfies readonly Harness[];
+
 // Which plugin manager installed the running copy; undefined for a git checkout or any other path.
 export function detectHarness(root = dirname(dirname(new URL(import.meta.url).pathname)), env: Env = process.env): Harness | undefined {
   let real = root;
   try { real = realpathSync(root); } catch {}
   const homes = harnessHomes(env);
-  return (["claude", "codex"] as const).find((h) => real.startsWith(join(homes[h], "plugins") + "/"));
+  return HARNESSES.find((h) => real.startsWith(join(homes[h], "plugins") + "/"));
 }
 
 // The running copy does not move: resolve its harness once, not on every request.
@@ -114,43 +116,68 @@ export interface InstallDeps {
   blocker: () => string | undefined; // why a restart is unsafe right now
 }
 
-type InstallResult = { restarting: true; launcher: string } | { restarting: false; message: string };
+type InstallResult = { restarting: true; launcher: string; warning?: string } | { restarting: false; message: string };
 
 let installing = false;
 
-// Runs the harness update commands; restarts only when the installed plugin really moved to a new dir or version.
+async function updateHarness(h: Harness, run: Runner): Promise<void> {
+  for (const [cmd, args] of strategies[h].commands) {
+    const name = `${cmd} ${args.slice(0, 2).join(" ")}`;
+    const res = await run(cmd, args, { cwd: homedir(), timeoutMs: 120_000 }).catch((err) => {
+      throw new Error(`${name} failed: ${errorMessage(err)}`);
+    });
+    if (res.code !== 0) throw new Error(`${name} failed: ${(res.stderr || res.stdout).trim() || `exit ${res.code}`}`);
+  }
+}
+
+// One dashboard serves pipelines from both harnesses, so it updates every installed copy, not only its own.
+// It restarts from the running copy when that one moved, else from another copy that is newer than the running one.
 export async function installUpdate(harness: Harness | null, deps: Partial<InstallDeps> = {}): Promise<InstallResult> {
   const { run = defaultRunner, env = process.env, launcherExists = existsSync, blocker = () => undefined } = deps;
   const busy = blocker();
   if (busy) throw new UpdateError(busy, 409);
   if (!harness) return { restarting: false, message: "This copy is not installed through a plugin manager (Claude Code or Codex): update it with git" };
-  const strategy = strategies[harness];
-  const read = () => strategy.read(run, env);
   if (installing) throw new UpdateError("An update is already running", 409);
   installing = true;
   try {
-    const before = await read();
-    for (const [cmd, args] of strategy.commands) {
-      const name = `${cmd} ${args.slice(0, 2).join(" ")}`;
-      let res;
-      try {
-        res = await run(cmd, args, { cwd: homedir(), timeoutMs: 120_000 });
-      } catch (err) {
-        throw new UpdateError(`${name} failed: ${errorMessage(err)}`, 500);
-      }
-      if (res.code !== 0) throw new UpdateError(`${name} failed: ${(res.stderr || res.stdout).trim() || `exit ${res.code}`}`, 500);
+    const copies: { h: Harness; before?: Installed; after?: Installed; error?: string }[] = await Promise.all(
+      HARNESSES.map(async (h) => ({ h, before: await strategies[h].read(run, env) })),
+    );
+    // The running copy is always updated, even when its install cannot be read.
+    const targets = copies.filter((c) => c.h === harness || c.before);
+    // Harnesses are independent: update them in parallel, and one failure does not stop the other.
+    await Promise.all(
+      targets.map(async (c) => {
+        try {
+          await updateHarness(c.h, run);
+          c.after = await strategies[c.h].read(run, env);
+        } catch (err) {
+          c.error = errorMessage(err);
+        }
+      }),
+    );
+    const errors = targets.flatMap((c) => (c.error ? [c.error] : []));
+    const done = targets.filter((c) => !c.error);
+    if (!done.length) throw new UpdateError(errors.join("; "), 500);
+    const warning = errors.join("; ") || undefined;
+    const note = warning ? ` (${warning})` : "";
+    if (!done.some((c) => c.after)) return { restarting: false, message: `The plugin is not installed through ${harness} yet: nothing to update${note}` };
+    const changed = done.flatMap((c) =>
+      c.after && (c.after.installPath !== c.before?.installPath || c.after.version !== c.before?.version) ? [{ h: c.h, ...c.after }] : [],
+    );
+    const best =
+      changed.find((c) => c.h === harness) ??
+      changed.filter((c) => compareVersions(c.version, currentVersion()) > 0).sort((a, b) => compareVersions(b.version, a.version))[0];
+    if (!best) {
+      const what = changed.length ? `Updated ${changed.map((c) => c.h).join(" and ")}: the running dashboard already has the latest version` : "Already up to date: the plugin did not change";
+      return { restarting: false, message: what + note };
     }
-    const after = await read();
-    if (!after) return { restarting: false, message: `The plugin is not installed through ${harness} yet: nothing to update` };
-    if (after.installPath === before?.installPath && after.version === before?.version) {
-      return { restarting: false, message: "Already up to date: the plugin did not change" };
-    }
-    const launcher = join(after.installPath, "scripts", "pipeship");
-    if (!launcherExists(launcher)) return { restarting: false, message: `The new version has no launcher at ${launcher}` };
+    const launcher = join(best.installPath, "scripts", "pipeship");
+    if (!launcherExists(launcher)) return { restarting: false, message: `The new version has no launcher at ${launcher}${note}` };
     // A start or merge may have begun while the update ran.
     const late = blocker();
     if (late) throw new UpdateError(`Updated, but not restarted: ${late}`, 409);
-    return { restarting: true, launcher };
+    return { restarting: true, launcher, warning };
   } finally {
     installing = false;
   }
