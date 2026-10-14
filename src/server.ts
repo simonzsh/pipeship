@@ -2,6 +2,7 @@ import tailwind from "bun-plugin-tailwind";
 import { errorMessage, failStaleMerges, MergeError, startMerge } from "./merge.ts";
 import { DiffError, pipelineDiff } from "./diff-git.ts";
 import type { DiffErrorBody } from "./diff.ts";
+import { startPrSync } from "./pr-sync.ts";
 import { listDashboardStates, readState } from "./state.ts";
 import { deletePipeline, isPreviewStarting, PreviewError, requestPreviewStart, stopPipeline, stopPreview } from "./preview.ts";
 
@@ -27,7 +28,8 @@ async function buildDashboard(): Promise<Record<string, Response>> {
   return routes;
 }
 
-export async function serve(port = DEFAULT_PORT) {
+export async function serve(port = DEFAULT_PORT, opts: { prSync?: boolean } = {}) {
+  let sync: ReturnType<typeof startPrSync> | undefined;
   const assets = await buildDashboard();
   const server = Bun.serve({
     port,
@@ -115,6 +117,7 @@ export async function serve(port = DEFAULT_PORT) {
               last = data;
             };
             push();
+            sync?.kick(); // page load: refresh PR statuses without waiting for the next tick
             timer = setInterval(push, 1000);
             req.signal.addEventListener("abort", () => clearInterval(timer));
           },
@@ -128,6 +131,7 @@ export async function serve(port = DEFAULT_PORT) {
     fetch: () => new Response("not found", { status: 404 }),
   });
   failStaleMerges(); // after the port is open, so a slow state read cannot delay startup
+  sync = opts.prSync ? startPrSync() : undefined; // after failStaleMerges: a dead merge must not hide its pipeline
   return server;
 }
 

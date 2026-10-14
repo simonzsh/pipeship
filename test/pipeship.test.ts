@@ -3,7 +3,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync, existsSync, readFileSync
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
-  addRepo, createPipeline, listStates, pipelineDir, readState, setMode, setStatus, setStep, updateState, upsertChunk, waitForUser,
+  addRepo, createPipeline, listStates, pipelineDir, readState, setMode, setStatus, setStep, updateState, upsertChunk, waitForUser, type State,
 } from "../src/state.ts";
 import { chunksOf, diffRange, repoName, repoStacks, sharesRepo, topChunk } from "../src/repos.ts";
 import {
@@ -16,6 +16,7 @@ import { DEFAULT_PORT, serve } from "../src/server.ts";
 import {
   classifyPr, defaultRunner, DEFAULT_LIMITS, failStaleMerges, mergeStack, MergeError, resolveMergeRepo, startMerge, type MergeDeps, type PrView, type Runner,
 } from "../src/merge.ts";
+import { startPrSync, syncPrStatuses } from "../src/pr-sync.ts";
 import { spawn, spawnSync } from "node:child_process";
 import { Database } from "bun:sqlite";
 import { detectSession, findT3Thread, type ReadProc } from "../src/session.ts";
@@ -1702,7 +1703,7 @@ test("allMerged and finished", () => {
 test("chunkActivity labels the chunks an agent works on", () => {
   expect(chunkActivity("coding")).toBe("Coding…");
   expect(chunkActivity("cleaning")).toBe("Cleaning…");
-  for (const status of ["done", "merged", "failed", "merging"]) expect(chunkActivity(status)).toBeUndefined();
+  for (const status of ["done", "merged", "closed", "failed", "merging"]) expect(chunkActivity(status)).toBeUndefined();
 });
 
 test("languageOf maps extensions and file names", () => {
@@ -1879,3 +1880,178 @@ test("a stop during a start is not recorded as previewError", async () => {
   expect(readState(id).preview).toBeUndefined();
   expect(readState(id).status).toBe("ready");
 }, 30_000);
+
+// The PR sync scans every pipeline in PIPESHIP_HOME: each sync test gets an empty home of its own.
+function syncTest(name: string, fn: () => Promise<void>) {
+  test(name, async () => {
+    const saved = process.env.PIPESHIP_HOME;
+    process.env.PIPESHIP_HOME = mkdtempSync(join(root, "sync-home-"));
+    try {
+      await fn();
+    } finally {
+      process.env.PIPESHIP_HOME = saved;
+    }
+  });
+}
+
+// Fake gh for the PR sync: answers `pr view` from a url -> reply map and records the calls.
+function syncGh(replies: Record<string, { state?: string; mergedAt?: string | null } | "fail" | "throw" | "badjson" | "hang">) {
+  const calls: string[] = [];
+  const run: Runner = async (_cmd, args) => {
+    const url = args[2]!;
+    calls.push(url);
+    const r = replies[url] ?? { state: "OPEN" };
+    if (r === "throw") throw new Error("spawn gh ENOENT");
+    if (r === "hang") return new Promise(() => {});
+    if (r === "fail") return { code: 1, stdout: "", stderr: "not logged in\n" };
+    if (r === "badjson") return { code: 0, stdout: "nope", stderr: "" };
+    return { code: 0, stdout: JSON.stringify(r), stderr: "" };
+  };
+  return { calls, run };
+}
+const prUrl = (n: number) => `https://github.com/o/r/pull/${n}`;
+
+function syncPipeline(title: string, prs: (number | undefined)[]) {
+  const { id } = createPipeline({ repos: [{ path: repo, base: "main" }], title });
+  prs.forEach((n, i) => upsertChunk(id, { name: `c${i + 1}`, status: "done", ...(n ? { pr: prUrl(n) } : {}) }));
+  return id;
+}
+
+syncTest("pr sync: a PR merged outside pipeship sets the chunk to merged", async () => {
+  const id = syncPipeline("sync merged", [101]);
+  const logs: string[] = [];
+  const gh = syncGh({ [prUrl(101)]: { state: "MERGED", mergedAt: "2026-01-01T00:00:00Z" } });
+  const res = await syncPrStatuses({ run: gh.run, log: (l) => logs.push(l) });
+  expect(res.changed).toBe(1);
+  expect(chunkStatuses(id)).toEqual(["merged"]);
+  expect(allMerged(readState(id))).toBe(true);
+  expect(logs).toEqual([`pr sync: ${id}/c1 -> merged`]);
+});
+
+syncTest("pr sync: a PR closed without merge sets closed, a reopened PR goes back to done", async () => {
+  const id = syncPipeline("sync closed", [102]);
+  await syncPrStatuses({ run: syncGh({ [prUrl(102)]: { state: "CLOSED", mergedAt: null } }).run, log: () => {} });
+  expect(chunkStatuses(id)).toEqual(["closed"]);
+  await syncPrStatuses({ run: syncGh({ [prUrl(102)]: { state: "OPEN" } }).run, log: () => {} });
+  expect(chunkStatuses(id)).toEqual(["done"]);
+});
+
+syncTest("pr sync: an open PR leaves the state untouched, with no write", async () => {
+  const id = syncPipeline("sync open", [103]);
+  const before = readState(id).updatedAt;
+  await Bun.sleep(5);
+  const res = await syncPrStatuses({ run: syncGh({}).run, log: () => {} });
+  expect(res).toMatchObject({ checked: 1, changed: 0, failed: 0 });
+  expect(chunkStatuses(id)).toEqual(["done"]);
+  expect(readState(id).updatedAt).toBe(before);
+});
+
+syncTest("pr sync: gh errors keep the state, log one line, and do not stop the other PRs", async () => {
+  for (const bad of ["fail", "throw", "badjson", "hang"] as const) {
+    const id = syncPipeline(`sync ${bad}`, [110, 111]);
+    const logs: string[] = [];
+    const gh = syncGh({ [prUrl(110)]: bad, [prUrl(111)]: { state: "MERGED" } });
+    const res = await syncPrStatuses({ run: gh.run, log: (l) => logs.push(l), timeoutMs: 20 });
+    expect(res.failed).toBe(1);
+    expect(chunkStatuses(id)).toEqual(["done", "merged"]);
+    expect(logs.filter((l) => l.includes("not checked"))).toHaveLength(1);
+    updateState(id, (s) => delete s.chunks[0]!.pr); // out of the next loop
+  }
+});
+
+syncTest("pr sync: no gh call for merged chunks, chunks without PR, or a running merge", async () => {
+  const merged = syncPipeline("sync all merged", [120]);
+  updateState(merged, (s) => (s.chunks[0]!.status = "merged"));
+  syncPipeline("sync no pr", [undefined]);
+  const running = syncPipeline("sync running", [121]);
+  updateState(running, (s) => (s.merge = { status: "running", repo, mode: "combine" } as State["merge"]));
+  const gh = syncGh({ [prUrl(121)]: { state: "MERGED" } });
+  await syncPrStatuses({ run: gh.run, log: () => {} });
+  expect(gh.calls).toEqual([]);
+  expect(chunkStatuses(running)).toEqual(["done"]);
+});
+
+syncTest("pr sync: a merge that starts while gh runs leaves the state untouched", async () => {
+  const id = syncPipeline("sync merge race", [132]);
+  const before = readState(id).updatedAt;
+  await Bun.sleep(5);
+  const run: Runner = async () => {
+    updateState(id, (s) => (s.merge = { status: "running", repo, mode: "combine" } as State["merge"]));
+    return { code: 0, stdout: JSON.stringify({ state: "MERGED" }), stderr: "" };
+  };
+  await syncPrStatuses({ run, log: () => {} });
+  const after = readState(id);
+  expect(after.chunks.map((c) => c.status)).toEqual(["done"]);
+  expect(after.updatedAt).not.toBe(before); // only the test's own merge write
+  const stamp = after.updatedAt;
+  await Bun.sleep(5);
+  await syncPrStatuses({ run: syncGh({}).run, log: () => {} });
+  expect(readState(id).updatedAt).toBe(stamp);
+});
+
+syncTest("pr sync: a repeated error is logged once", async () => {
+  syncPipeline("sync same error", [150]);
+  const logs: string[] = [];
+  const lastError = {};
+  const run = syncGh({ [prUrl(150)]: "fail" }).run;
+  for (let i = 0; i < 3; i++) await syncPrStatuses({ run, log: (l) => logs.push(l), lastError });
+  expect(logs).toHaveLength(1);
+});
+
+syncTest("pr sync: a chunk changed while gh was running is not overwritten", async () => {
+  const id = syncPipeline("sync race", [130, 131]);
+  const run: Runner = async (_c, args) => {
+    // While gh answers, c1 gets a new PR and c2 is merged by the merge engine.
+    updateState(id, (s) => {
+      s.chunks[0]!.pr = prUrl(139);
+      s.chunks[1]!.status = "merged";
+    });
+    return { code: 0, stdout: JSON.stringify({ state: args[2] === prUrl(131) ? "CLOSED" : "MERGED" }), stderr: "" };
+  };
+  await syncPrStatuses({ run, log: () => {} });
+  expect(chunkStatuses(id)).toEqual(["done", "merged"]);
+  expect(readState(id).chunks[0]!.pr).toBe(prUrl(139));
+});
+
+syncTest("pr sync scheduler: one pass at start, no overlap, kicks are throttled", async () => {
+  const id = syncPipeline("sync sched", [140]);
+  let clock = 1_000_000;
+  const gh = syncGh({});
+  const sync = startPrSync({ run: gh.run, log: () => {}, intervalMs: 3_600_000, now: () => clock });
+  sync.kick(); // a pass is running
+  await sync.idle();
+  const count = () => gh.calls.filter((u) => u === prUrl(140)).length;
+  expect(count()).toBe(1);
+  clock += 5_000;
+  sync.kick();
+  await sync.idle();
+  expect(count()).toBe(1);
+  clock += 15_000;
+  sync.kick();
+  await sync.idle();
+  expect(count()).toBe(2);
+  sync.stop();
+});
+
+syncTest("pr sync + merge: a chunk merged by the sync does not break Merge into base", async () => {
+  const stack = makeStack(2);
+  const gh = fakeGh(stack, 2);
+  gh.prs[2]!.state = "MERGED";
+  await syncPrStatuses({ run: gh.deps.run!, log: () => {} });
+  expect(chunkStatuses(stack.id)).toEqual(["done", "merged"]);
+  await startMerge(stack.id, gh.deps, "base").done;
+  expect(chunkStatuses(stack.id)).toEqual(["merged", "merged"]);
+  expect(readState(stack.id).merge?.status).toBe("done");
+  expect(gh.calls).toEqual(["merge 1"]);
+});
+
+syncTest("pr sync + merge: a chunk closed by the sync makes Combine PRs fail clearly", async () => {
+  const stack = makeStack(2);
+  const gh = fakeGh(stack, 2);
+  gh.prs[2]!.state = "CLOSED";
+  await syncPrStatuses({ run: gh.deps.run!, log: () => {} });
+  expect(chunkStatuses(stack.id)).toEqual(["done", "closed"]);
+  await startMerge(stack.id, gh.deps, "combine").done;
+  expect(readState(stack.id).merge?.status).toBe("failed");
+  expect(readState(stack.id).merge?.error).toContain("PR #2 is closed");
+});
