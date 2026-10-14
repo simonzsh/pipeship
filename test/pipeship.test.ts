@@ -622,7 +622,7 @@ test("a fixed-port recipe refuses a second live pipeline of the same repo", asyn
   fakePreview(a.id, sleeper.pid);
   writeFileSync(join(repo, ".pipeship.json"), JSON.stringify({ services: [{ name: "db", kind: "infra", start: "sleep 60", fixedPort: 4999 }] }));
   try {
-    await expect(startPreview(b.id, repo)).rejects.toThrow("live test environment");
+    await expect(startPreview(b.id, repo)).rejects.toThrow("live preview");
   } finally {
     await stopPipeline(a.id);
     await stopPipeline(b.id);
@@ -641,7 +641,7 @@ test("a pipeline still starting blocks a fixed-port recipe", async () => {
   const b = createPipeline({ repos: [{ path: repo }], title: "b", name: "starting-b", source: "text" });
   fakePreview(a.id, undefined, { services: [{ name: "db", kind: "infra", port: 4999, url: "http://localhost:4999", log: "x" }] });
   writeFileSync(join(repo, ".pipeship.json"), JSON.stringify({ services: [{ name: "db", kind: "infra", start: "sleep 60", fixedPort: 4998 }] }));
-  await expect(startPreview(b.id, repo)).rejects.toThrow("live test environment");
+  await expect(startPreview(b.id, repo)).rejects.toThrow("live preview");
 });
 
 test("a start avoids the ports another pipeline has planned", async () => {
@@ -1656,7 +1656,7 @@ test("a fixed port also blocks a pipeline that shares one repo", async () => {
   const draft = join(root, "shared-draft.json");
   writeFileSync(draft, JSON.stringify({ services: [{ name: "db", kind: "infra", repo: "r1", start: "sleep 60", fixedPort: 4997 }] }));
   try {
-    await expect(startPreview(y.id, undefined, draft)).rejects.toThrow("of the repo r1 has a live test environment");
+    await expect(startPreview(y.id, undefined, draft)).rejects.toThrow("of the repo r1 has a live preview");
   } finally {
     await stopPipeline(x.id);
     if (isAlive(sleeper.pid)) process.kill(sleeper.pid);
@@ -2587,9 +2587,9 @@ test("getUpdateInfo does not throw when the network fails", async () => {
 test("installUpdate refuses with 409 while a start or merge runs, without running claude", async () => {
   const ran: string[] = [];
   const run: Runner = async (cmd, args) => (ran.push([cmd, ...args].join(" ")), { code: 0, stdout: "", stderr: "" });
-  const err = await installUpdate("claude", { run, blocker: () => "A test environment is starting" }).catch((e) => e);
+  const err = await installUpdate("claude", { run, blocker: () => "A preview is starting" }).catch((e) => e);
   expect(err).toBeInstanceOf(UpdateError);
-  expect([err.status, err.message]).toEqual([409, "A test environment is starting"]);
+  expect([err.status, err.message]).toEqual([409, "A preview is starting"]);
   expect(ran).toEqual([]);
 });
 
