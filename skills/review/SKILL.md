@@ -16,7 +16,7 @@ This skill runs in both. Where they differ:
 - **Arguments**: Claude Code fills `$ARGUMENTS`. Codex leaves it as is: take the target from the user's message.
 - **Subagents**: use your harness's subagent tool (Claude Code: `Agent`; Codex: spawn sub-agents). To run subagents in parallel, start them together. If you have none, run the two reviews yourself, one after the other.
 - **Models**: `opus` and `sonnet` below are Claude Code model names. In another harness, use your strongest model for `opus` and your default model for `sonnet`.
-- **Read only**: this skill only reads. It needs no write access, except for the temporary worktree of a PR (see **Target**).
+- **Read only**: this skill only reads. It needs no write access, except for the temporary worktree of a PR or branch (see **Target**).
 
 ## Paths
 
@@ -31,19 +31,24 @@ This skill runs in both. Where they differ:
 
 ## Step 1 — Target
 
-Find the worktree and the diff to review. The base is the default branch of the repo.
+Find the worktree and the diff to review. Work in the main worktree for the git commands below. `<base>` is the default branch of the repo (`git symbolic-ref --short refs/remotes/origin/HEAD`, without `origin/`), unless the user names another one. Always fetch it first (`git fetch origin <base>`) and use `origin/<base>`, never the local branch.
 
-- **PR** (a number or a URL): run `gh pr view <n|url> --json baseRefName,headRefName,url`. Then run `git fetch origin pull/<n>/head`. The diff is `git diff <base>...FETCH_HEAD`. If the head branch is not checked out, create a detached temporary worktree on `FETCH_HEAD` and review there. Remove it at the end (`git worktree remove`).
-- **Branch**: the diff is `git diff <base>...<branch>`. Use the worktree where the branch is checked out, or a detached temporary worktree.
-- **Nothing given**: the current worktree. The diff is `git diff <base>`, which includes the uncommitted changes.
+- **PR** (a number or a URL): run `gh pr view <n|url> --json baseRefName,headRefName,url`. Check that the repo in `url` matches `git remote get-url origin`. If the PR belongs to another repo, tell the user and stop. Use its `baseRefName` as `<base>`. Run `git fetch origin pull/<n>/head`, then `git rev-parse FETCH_HEAD` once and keep that SHA as `<sha>`. `FETCH_HEAD` is per worktree: never give the name `FETCH_HEAD` to a subagent.
+- **Branch**: `<sha>` is `git rev-parse <branch>` (or `origin/<branch>` if there is no local branch).
+- **PR or branch diff**: `git diff $(git merge-base origin/<base> <sha>)..<sha>`. Give subagents this command with the SHA in it. If the head branch is checked out in a worktree and its HEAD equals `<sha>`, review in that worktree. Otherwise review in a detached temporary worktree at `<sha>`.
+- **Nothing given**: the current worktree. The diff is `git diff $(git merge-base origin/<base> HEAD)`, which includes the uncommitted changes. List the untracked files with `git ls-files --others --exclude-standard`, and tell the subagents to read them too.
 
-If the diff is empty, say so and stop. Tell the user the target in one line (PR, branch or current diff, and the base).
+If the diff is empty, say so and stop. Do this check before you create any worktree. Create a temporary worktree only after it, under `$(mktemp -d)` (`git worktree add --detach <dir> <sha>`). Remove it (`git worktree remove --force <dir>`, then the temporary directory) on every exit: empty diff, error and end.
+
+Tell the user the target in one line (PR, branch or current diff, and the base).
 
 ## Step 2 — Review
 
 Start both subagents together, in the same message. Wait for both before you go on.
 
-1. **Global review** (model `opus`, read-only). Input: the worktree and the diff command, as absolute paths. Brief: `<run dir>/prompts/global-review.md`. The brief is read-only already.
+1. **Global review** (model `opus`, read-only). Input: the worktree and the diff command, as absolute paths. Brief: `<run dir>/prompts/global-review.md`. The brief is read-only already. Add to the brief, word for word:
+
+> Review mode: the diff is one change, not several chunks. Besides the problems in the brief, look for every correctness bug in the diff: logic errors, edge cases, regressions, missing error handling, and tests that do not test what they claim. Each finding needs a failure scenario.
 2. **Cleanup** (model `sonnet`). Input: the worktree and the diff command, as absolute paths. Brief: `<run dir>/prompts/cleanup.md`. Pass this rule to the subagent, word for word:
 
 > Review mode: report your findings only. Do not edit, stage or commit any file, and run no command that changes the worktree. This overrides the brief's instruction to commit. Do not run `simplify` (it applies its fixes); `code-review` without `--fix` is fine.
@@ -55,7 +60,7 @@ Tell each subagent to give every finding as `file:line`, with the scenario in wh
 1. Merge both reports and drop the duplicates.
 2. Re-read the code of each finding. Drop the false positives, and the findings with no concrete failure.
 3. Rank the real problems, most severe first. Keep style and simplification points apart, as cleanups.
-4. Remove the temporary worktree, if you made one.
+4. Remove the temporary worktree, if you made one (also on any earlier exit).
 
 Answer in this shape:
 

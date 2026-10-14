@@ -112,7 +112,7 @@ Use `review` when you want a review and no code change. It reviews a PR, a branc
 /pipeship:review
 ```
 
-With no argument, it reviews the current diff, uncommitted changes included. In Codex, call it with `$review`, for example `$review 42`.
+With no argument, it reviews the current diff against `origin/<default branch>`, uncommitted and untracked files included. It diffs a PR or a branch from its merge base with `origin/<base>`. In Codex, call it with `$review`, for example `$review 42`.
 
 It reuses the global review and cleanup briefs of `run` (`skills/run/prompts/`) and starts both subagents together: the global review on `opus`, the cleanup on `sonnet`. Both only report. It then merges the reports, re-reads the code of each finding and drops the false positives.
 
