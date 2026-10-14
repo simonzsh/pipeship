@@ -22,6 +22,8 @@ This skill runs in both. Where they differ:
 
 `pipeship` below means `"$(realpath <this skill's base directory>)/../../scripts/pipeship"` (`realpath` matters when the skill is a symlink). On first use it installs its dependencies, which takes a few seconds. It owns the state file `~/.pipeship/pipelines/<id>/state.json`, which the dashboard displays: the user follows the pipeline there.
 
+`<skill dir>` below means `$(realpath <this skill's base directory>)`. Next to this file: `recipe.md` (recipe format) and `prompts/<name>.md` (subagent briefs: `explore`, `plan`, `implement`, `global-review`, `cleanup`). Do not confuse `<skill dir>/recipe.md` (format doc) with `<dir>/recipe.json` (draft recipe).
+
 ```
 pipeship new [--repo <path>]... --title <t> [--source <s>] [--ref <r> --url <u>]... [--name <words>] [--mode quick] [--skip a,b]
 pipeship repo <id> <path>              # add a repo to the pipeline (once per repo); prints its base and whether it is dirty
@@ -41,6 +43,7 @@ Steps: `explore`, `questions`, `plan`, `implement`, `review`, `stack`, `preview`
 
 ## Rules
 
+- **Brief each subagent with its prompt file**: tell it to read `<skill dir>/prompts/<name>.md` first, then give it its inputs. Pass absolute paths (the brief, `<dir>`, its worktree, and the `pipeship` helper when the brief uses it): a subagent does not know the skill dir. When you run a step yourself (quick explore, no subagent tool), read the brief and follow it.
 - **Each step**: `pipeship step <id> <step> running` when it starts, `done` when it ends.
 - **Each chunk**: set it to its activity (`coding`, `cleaning`) when its subagent starts. When that subagent reports, set the chunk to `done` (`failed` if it failed) at once, while the other subagents still run. The user follows each chunk live in the dashboard.
 - **Before each step**, run `pipeship get <id>`. If `stopRequested` is true, stop and tell the user, unless the user just asked you to resume. If the step is `skipped`, move on.
@@ -69,16 +72,11 @@ Steps: `explore`, `questions`, `plan`, `implement`, `review`, `stack`, `preview`
 
 ## Step 1 — explore
 
-Subagent (read-only, model `sonnet`; Claude Code: `Explore` type). Input: `ticket.md` and the repos. Output: `<dir>/explore.md` with:
-- `## Repos`: other repos the ticket touches, when it names them or sibling git repos in the parent folder of each repo's git root match its code. Give the path and the reason. The subagent stays read-only: you run `pipeship repo <id> <path>` for each one and tell the user about dirty repos;
-- every file the ticket touches (modules, routes, models, UI, tests), with paths and one line on what each does today (per repo, when there are several);
-- repo conventions to follow (structure, naming, test style, branch names from recent `git branch -r`), per repo;
-- the exact **fast checks** from each repo config (typecheck, lint, format, repo rule scripts such as an import check);
-- the **targeted tests**: the runner command that takes files or a filter (`npx vitest run <files>`, `pytest <paths>`, `go test ./pkg/...`, `bun test <files>`), and how to find the tests of a file: naming convention, test folders, cross-cutting tests that read the infra, env, routes or import graph;
-- whether CI runs the full suite on PRs (read `.github/workflows` or the equivalent);
-- how to start the app: run `pipeship recipe <repo>...` with all the repos. If it prints `none` and the repo has anything that serves requests (a web app, an API, an MCP server, a worker with a health route), write a draft recipe to `<dir>/recipe.json` (see "Test environment recipe"). If the repo runs several apps (a monorepo, a front and an API), the recipe lists one service per app. A back-end change needs a recipe too (see step 7). List what the app needs to run (database, env files, seed data, other services) and how to get test data locally.
+Subagent (read-only, model `sonnet`; Claude Code: `Explore` type). Input: `ticket.md` and the repos. Output: `<dir>/explore.md`. Brief: `<skill dir>/prompts/explore.md`.
 
-In `quick` mode, do the exploration yourself in the main session: on a small ticket a subagent costs as much as the work. Keep `explore.md` short: only the files to change, the fast checks, the targeted tests and how to start the app.
+For each repo listed under `## Repos`, run `pipeship repo <id> <path>` and tell the user about dirty repos.
+
+In `quick` mode, read the brief and do the exploration yourself in the main session: on a small ticket a subagent costs as much as the work. Keep `explore.md` short: only the files to change, the fast checks, the targeted tests and how to start the app.
 
 ## Step 2 — questions (human pause)
 
@@ -92,10 +90,7 @@ In `quick` mode, ask only **blocking** questions. When the explore step added re
 
 ## Step 3 — plan
 
-Subagent (model `opus`; Claude Code: `Plan` type). Input: `ticket.md`, `explore.md`. Output: `<dir>/plan.md` with:
-1. **Contracts first**: the types, API routes and data formats shared between chunks. Fixed contracts are what make chunks independent. Write the contracts between repos once, here.
-2. **Chunks**: independent pieces of work, each with its repo, its files and its done criteria. Chunk names are unique across the pipeline. Split only into truly independent pieces: a small ticket is one chunk, and every split adds integration risk.
-3. **Stack order** by dependency: contracts, then back end, then front end. Each repo has its own stack order.
+Subagent (model `opus`; Claude Code: `Plan` type). Input: `ticket.md`, `explore.md`. Output: `<dir>/plan.md`. Brief: `<skill dir>/prompts/plan.md`.
 
 When this step is skipped (`quick` mode), there is one chunk named after the ticket, and the plan is the ticket. With several repos, there is one chunk per repo, named after the repo's folder, and one PR per repo.
 
@@ -109,7 +104,7 @@ For each chunk, in stack order:
    - If the branch already exists, add `-2`.
 2. `pipeship chunk <id> <chunk> --worktree <path> --branch <branch> --status coding`. With several repos, add `--repo <name>`.
 
-Then launch **one subagent per chunk (model `sonnet`), started together** so they run in parallel. Each subagent gets: its worktree path (it works only there), `ticket.md`, `explore.md`, `plan.md` (contracts + its chunk), the fast checks and the targeted tests. It must: implement its chunk against the contracts, make the checks pass, commit, and report what it did, with the tests that ran and a note that CI covers the rest. Install dependencies in the worktree if the checks need them.
+Then launch **one subagent per chunk (model `sonnet`), started together** so they run in parallel. Brief: `<skill dir>/prompts/implement.md`. Each subagent gets: its worktree path (it works only there), `ticket.md`, `explore.md`, `plan.md` (contracts + its chunk), the fast checks and the targeted tests.
 
 When all are done, **restack**: in stack order, rebase each chunk branch onto the previous one (`git -C <worktree> rebase <previous branch>`). The last chunk branch is the **top of the stack** and contains the whole feature. Run the checks on the top, for the diff `<base>..<top branch>`. With several repos, restack each repo on its own: each repo has its own top. If the restack or the checks fail, set the chunks to fix back to `--status coding`.
 
@@ -117,13 +112,13 @@ When all are done, **restack**: in stack order, rebase each chunk branch onto th
 
 Start the global review and the cleanups together, in the same message. Wait for all of them before you fix anything.
 
-1. **Global review** (one subagent, model `opus`, top worktree, diff `<base>..<top branch>`; with several repos, the top worktree and diff of every repo): duplicated helpers across chunks, contract mismatches, integration bugs. Parallel agents cannot see each other — only this review finds these. It is read-only: it reports its findings and changes no file. It reads the top worktree as it is when step 5 starts.
-2. **Cleanup per chunk** (one subagent per chunk, model `sonnet`, status `cleaning`): simplification, dead code, repo conventions, readability. Use the `simplify` and `code-review` skills if available. Each subagent works in its own chunk worktree, runs only the fast checks, and commits.
+1. **Global review** (one subagent, model `opus`, top worktree, diff `<base>..<top branch>`; with several repos, the top worktree and diff of every repo). Brief: `<skill dir>/prompts/global-review.md`.
+2. **Cleanup per chunk** (one subagent per chunk, model `sonnet`, status `cleaning`). Brief: `<skill dir>/prompts/cleanup.md`.
 3. **Fix** each finding of the global review **in the worktree of the chunk that owns the code**, then commit. A cleanup may have changed that code: check before you fix.
 4. **Restack once** for the whole step, in stack order, per repo.
 5. **Safety rule**: after the restack, re-run the checks once: the fast checks and the targeted tests for the diff. If a check fails, fix it or revert the pass. Run one test suite at a time.
 
-In `quick` mode, skip the global review. Run one cleanup pass (one subagent, model `sonnet`) on the whole diff, with the same skills: simplification, dead code, repo conventions. It covers every chunk, so all chunks are `cleaning` together. Then run the checks once, for the whole diff.
+In `quick` mode, skip the global review. Run one cleanup pass (one subagent, model `sonnet`, same brief) on the whole diff. Give it the worktree of every chunk and tell it that it runs in quick mode. It covers every chunk, so all chunks are `cleaning` together. Then run the checks once, for the whole diff.
 
 Write a short summary to `<dir>/review.md`. List the tests that ran and say that CI covers the rest.
 
@@ -145,8 +140,8 @@ If a repo has no remote, skip its PRs and tell the user.
 
 Run the changed code, front end or back end. An API, MCP or engine change needs a running server as much as a UI change: unit tests do not show what a real client gets. Mark this step `skipped` only when nothing the change touches can run (a pure library with no server, a CLI you cannot start, a docs-only change), and say why in the final summary. Once every step is done or skipped, the pipeline becomes `ready` on its own if a preview runs, else `done`.
 
-1. **Start.** First run `pipeship recipe <repo>...` again with the final repo list. If the list changed since step 1, update the `repo` names in the draft. Then run `pipeship preview <id>`. It uses each repo's top worktree. Add `--recipe <dir>/recipe.json` if there is a draft. It copies local files, installs, starts each service of the recipe on its own free port (back ends first, then fronts), waits until each answers, and marks the `preview` step done. A draft recipe that works is saved, so later pipelines in this repo skip this work. Give the user the URLs it prints (the first is the main front).
-   Services the app needs (a local database, a queue) belong in a `start` command of the recipe, so the dashboard's "Stop preview" button stops them with the app (see "Test environment recipe"). Run other one-off setup yourself; for test data, see **Data** below.
+1. **Start.** If there is a draft recipe or the preview fails, read `<skill dir>/recipe.md`. First run `pipeship recipe <repo>...` again with the final repo list. If the list changed since step 1, update the `repo` names in the draft. Then run `pipeship preview <id>`. It uses each repo's top worktree. Add `--recipe <dir>/recipe.json` if there is a draft. It copies local files, installs, starts each service of the recipe on its own free port (back ends first, then fronts), waits until each answers, and marks the `preview` step done. A draft recipe that works is saved, so later pipelines in this repo skip this work. Give the user the URLs it prints (the first is the main front).
+   Services the app needs (a local database, a queue) belong in a `start` command of the recipe, so the dashboard's "Stop preview" button stops them with the app (see `<skill dir>/recipe.md`). Run other one-off setup yourself; for test data, see **Data** below.
 2. **Verify.** Use the changed behaviour the way its client does, and write what you called and what came back to `<dir>/verify.md`: a UI change in a browser (the preview tools of your harness), an HTTP API with `curl`, an MCP or other protocol with a real client. Cover the main path and one failure path. If you cannot exercise it (no test data, a missing service), say so in the summary. Report as working only what you exercised.
 3. **Fix.** If verification fails, fix the code in the worktree of the chunk that owns it, commit, restack and re-run the checks for the diff of the fix. Push only if step 6 opened PRs.
 4. **Test guide.** After verify, write `<dir>/test.md` for the user, in the user's language. The dashboard shows it in the pipeline's Test tab, so the user can test without leaving the dashboard. `verify.md` stays your evidence; `test.md` is the user's guide. Keep it short:
@@ -164,66 +159,3 @@ If the preview fails to start, it prints the log tail: diagnose, fix the recipe 
 ## End
 
 Give the user a short summary: the test URL, the PRs in stack order (per repo), what the verification covered (or why it was skipped), the tests that ran (CI covers the rest), and anything to check by hand. Point to the test guide: the user finds it in the pipeline's Test tab. The test servers keep running on purpose; the user stops them with the dashboard's "Stop preview" button and starts them again with "Start preview".
-
-## Test environment recipe
-
-You write the recipe. Read `package.json`, the lock file, the README and the dev scripts to find the package manager, the dev command and how the app picks its port. A `.pipeship.json` at the repo root, if the team shares one, wins over the saved recipe.
-
-```json
-{
-  "install": "bun install",
-  "start": "bun run dev",
-  "portEnv": "PORT",
-  "copyFiles": [".env.local"],
-  "readyPath": "/"
-}
-```
-
-- `start` must honour the port in `portEnv` (e.g. `next dev -p $PORT` if the framework ignores `PORT`).
-- Services the app needs must run in the foreground inside `start`, e.g. `docker compose up db & bun run dev`. pipeship stops the whole process group, so they stop with the app. A detached service (`docker compose up -d`) would outlive the pipeline. With `services`, a dependency such as a database can be its own service (`"ready": "tcp"`, `fixedPort` if its port cannot be set).
-- `copyFiles`: untracked local files the app needs (`.env`, `.env.local`…), copied from the repo's own checkout into the worktree. List them with `git -C <repo> status --ignored --short`.
-- Every service is served as `http://localhost:<port>`. Leave the repo's config as it is: the recipe adapts to the repo.
-
-### Several services
-
-For a monorepo or a front with its own API, list one service per app. `install` and `copyFiles` stay at the top level. With `services`, each service has its own `start` and the top level has none.
-
-```json
-{
-  "install": "pnpm install",
-  "copyFiles": [".env"],
-  "services": [
-    { "name": "api", "kind": "back", "start": "pnpm --filter api dev", "portEnv": "API_PORT", "readyPath": "/health" },
-    { "name": "web", "kind": "front", "start": "pnpm --filter web exec next dev -p $PORT",
-      "env": { "API_URL": "http://localhost:${api.port}" } },
-    { "name": "db", "kind": "infra", "start": "docker compose up db", "ready": "tcp", "fixedPort": 5432 }
-  ]
-}
-```
-
-- One service per app: `name`, `kind` (`front`, `back` or another word), its own `start`, `portEnv`, `readyPath` and `env`.
-- Set the port through `portEnv` or a flag in `start` (`next dev -p $PORT`, `vite --port $PORT`).
-- Start each app with its own command that takes the port, rather than the repo's global dev command (`turbo dev`, a root `pnpm dev`), which starts apps on fixed ports.
-- A service gets another service's URL through `env`: `"API_URL": "http://localhost:${api.port}"`.
-- pipeship picks every port first: fronts from 3000, other kinds from 4000 (4400 is skipped).
-- Back ends and other kinds start first, then fronts. Each service must answer on its `readyPath` before the next one starts (`"ready": "tcp"` only waits for a connection to its port, for a database or queue).
-- If a port truly cannot be set, write `"fixedPort": <port>`. pipeship then refuses to start a second pipeline that shares a repo while one runs.
-
-### Several repos
-
-For a ticket that spans repos, list `services` and give each one its `repo` (the repo's folder name). Each service runs from the top worktree of its repo.
-
-```json
-{
-  "services": [
-    { "name": "api", "kind": "back", "repo": "shop-api", "install": "pnpm install", "copyFiles": [".env"],
-      "start": "pnpm dev", "portEnv": "PORT", "readyPath": "/health" },
-    { "name": "web", "kind": "front", "repo": "shop-web", "install": "bun install",
-      "start": "bun run dev --port $PORT", "env": { "API_URL": "http://localhost:${api.port}" } }
-  ]
-}
-```
-
-- `repo` is required on every service.
-- Put `install` and `copyFiles` on each service.
-- The recipe is saved for this set of repos.

@@ -167,4 +167,6 @@ bun run typecheck
 
 GitHub Actions runs both on every pull request and on each push to `main` (`.github/workflows/ci.yml`).
 
+The skill lives in `skills/ship/`: `SKILL.md` (rules and steps), `recipe.md` (recipe format, read at step 7) and `prompts/` (one brief per subagent type).
+
 To release, bump `version` in `package.json`, `.claude-plugin/plugin.json` and `.codex-plugin/plugin.json`, then push. Users only get an update when the version changes; a test checks that the three files agree.
