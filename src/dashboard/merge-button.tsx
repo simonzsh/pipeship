@@ -1,4 +1,5 @@
-import { GitMerge, Loader2 } from "lucide-react";
+import { GitMerge } from "lucide-react";
+import { Spinner } from "./components/ui/spinner";
 import { useEffect, useState } from "react";
 import type { Chunk, MergeRun } from "../state.ts";
 import {
@@ -43,7 +44,7 @@ export function MergeButton({ id, repo, chunks, base, merge, busy, finished }: {
   if (running || starting) {
     return (
       <Button size="xs" disabled className={`${TONE} disabled:opacity-80`} title={merge?.message}>
-        <Loader2 className="animate-spin" /> Merging…
+        <Spinner /> Merging…
       </Button>
     );
   }
