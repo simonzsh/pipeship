@@ -1,7 +1,6 @@
 import { Check } from "lucide-react";
 import { useEffect, useState } from "react";
 import { siClaude } from "simple-icons";
-import { Tooltip, TooltipContent, TooltipTrigger } from "./components/ui/tooltip";
 import type { Session, State, T3Thread } from "../state.ts";
 import { cn } from "./utils";
 
@@ -42,7 +41,6 @@ const CHATGPT = { title: "ChatGPT", path: "M9.205 8.658v-2.26c0-.19.072-.333.238
 // The provider logo; a click copies the resume command, so the card needs no session row.
 export function AgentLogo({ p }: { p: State }) {
   const [copied, setCopied] = useState(false);
-  const [hovered, setHovered] = useState(false);
   // Reset the icon after 1.5 s; clean up if the card unmounts first.
   useEffect(() => {
     if (!copied) return;
@@ -58,39 +56,31 @@ export function AgentLogo({ p }: { p: State }) {
   // Hand-edited state may hold anything: only offer a command for a real session id.
   const canResume = UUID.test(session.id);
   return (
-    // Radix closes the tooltip on click: keep it open while it says "Copied".
-    <Tooltip open={hovered || copied} onOpenChange={setHovered}>
-      <TooltipTrigger asChild>
-        <button
-          type="button"
-          aria-label={canResume ? `Copy the command to resume the ${name} session` : `${name} session`}
-          aria-disabled={!canResume}
-          className={cn(
-            SESSION_BUTTON,
-            canResume ? "cursor-pointer hover:bg-accent hover:text-foreground" : "cursor-default",
-          )}
-          onClick={async (e) => {
-            e.stopPropagation();
-            if (!canResume) return;
-            if (await copyText(cmd)) setCopied(true);
-            else window.prompt("Copy the resume command", cmd);
-          }}
-        >
-          {copied ? (
-            <Check className="size-3.5 text-emerald-600 dark:text-emerald-400" />
-          ) : (
-            // Claude in its brand orange; the ChatGPT logo is black or white, so it follows the text colour.
-            <svg viewBox="0 0 24 24" fill="currentColor" className="size-3.5 text-foreground" style={{ color: claude ? `#${siClaude.hex}` : undefined }}>
-              <path d={icon.path} />
-            </svg>
-          )}
-          {canResume && (copied ? "Copied" : "Copy session")}
-        </button>
-      </TooltipTrigger>
-      <TooltipContent onClick={(e) => e.stopPropagation()}>
-        {!canResume ? `${name} session` : copied ? "Copied" : "Copy resume command"}
-      </TooltipContent>
-    </Tooltip>
+    <button
+      type="button"
+      aria-label={canResume ? `Copy the command to resume the ${name} session` : `${name} session`}
+      aria-disabled={!canResume}
+      className={cn(
+        SESSION_BUTTON,
+        canResume ? "cursor-pointer hover:bg-accent hover:text-foreground" : "cursor-default",
+      )}
+      onClick={async (e) => {
+        e.stopPropagation();
+        if (!canResume) return;
+        if (await copyText(cmd)) setCopied(true);
+        else window.prompt("Copy the resume command", cmd);
+      }}
+    >
+      {copied ? (
+        <Check className="size-3.5 text-emerald-600 dark:text-emerald-400" />
+      ) : (
+        // Claude in its brand orange; the ChatGPT logo is black or white, so it follows the text colour.
+        <svg viewBox="0 0 24 24" fill="currentColor" className="size-3.5 text-foreground" style={{ color: claude ? `#${siClaude.hex}` : undefined }}>
+          <path d={icon.path} />
+        </svg>
+      )}
+      {canResume && (copied ? "Copied" : "Copy session")}
+    </button>
   );
 }
 
@@ -104,22 +94,17 @@ export function t3ThreadLink(t: T3Thread): string {
 // The T3 Code desktop app opens this link on the thread that runs the pipeline (T3 Code 0.0.46 or later).
 export function T3ThreadButton({ thread }: { thread: T3Thread }) {
   return (
-    <Tooltip>
-      <TooltipTrigger asChild>
-        <a
-          href={t3ThreadLink(thread)}
-          aria-label="Open the thread in T3 Code"
-          className={cn(SESSION_BUTTON, "hover:bg-accent hover:text-foreground")}
-          onClick={(e) => e.stopPropagation()}
-        >
-          {/* The mark is black in T3 Code: follow the text colour, like the ChatGPT logo. */}
-          <svg viewBox="7 29 111 74" fill="currentColor" className="h-3 w-auto text-foreground">
-            <path d={T3_MARK} />
-          </svg>
-          Open
-        </a>
-      </TooltipTrigger>
-      <TooltipContent>Open in T3 Code</TooltipContent>
-    </Tooltip>
+    <a
+      href={t3ThreadLink(thread)}
+      aria-label="Open the thread in T3 Code"
+      className={cn(SESSION_BUTTON, "hover:bg-accent hover:text-foreground")}
+      onClick={(e) => e.stopPropagation()}
+    >
+      {/* The mark is black in T3 Code: follow the text colour, like the ChatGPT logo. */}
+      <svg viewBox="7 29 111 74" fill="currentColor" className="h-3 w-auto text-foreground">
+        <path d={T3_MARK} />
+      </svg>
+      Open
+    </a>
   );
 }
