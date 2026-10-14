@@ -162,4 +162,6 @@ bun test
 bun run typecheck
 ```
 
+GitHub Actions runs both on every pull request and on each push to `main` (`.github/workflows/ci.yml`).
+
 To release, bump `version` in `package.json`, `.claude-plugin/plugin.json` and `.codex-plugin/plugin.json`, then push. Users only get an update when the version changes; a test checks that the three files agree.
