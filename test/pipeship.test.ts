@@ -2148,7 +2148,7 @@ test("allMerged and finished", () => {
 
 test("chunkActivity labels the chunks an agent works on", () => {
   expect(chunkActivity("coding")).toBe("Coding…");
-  expect(chunkActivity("cleaning")).toBe("Cleaning…");
+  expect(chunkActivity("reviewing")).toBe("Reviewing…");
   expect(chunkActivity("merging")).toBe("Merging…");
   for (const status of ["done", "merged", "closed", "failed"]) expect(chunkActivity(status)).toBeUndefined();
 });

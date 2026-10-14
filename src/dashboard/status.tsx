@@ -102,7 +102,7 @@ export function statusConfig(status: string): StatusConfig {
 // "closed" comes from the PR sync (PR closed without merge). "merging" comes from the dashboard while a merge runs on that chunk.
 const NO_ACTIVITY = ["done", "merged", "closed", "failed"];
 
-// The label next to the loader: "Coding…" at implement, "Cleaning…" at review, "Merging…" while the dashboard merges.
+// The label next to the loader: "Coding…" at implement, "Reviewing…" and "Fixing…" at review, "Merging…" while the dashboard merges.
 export function chunkActivity(status: string): string | undefined {
   if (NO_ACTIVITY.includes(status)) return undefined;
   return `${status.charAt(0).toUpperCase()}${status.slice(1)}…`;
