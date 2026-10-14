@@ -14,6 +14,10 @@ const REFS: Record<string, string[]> = {
   review: ["<run dir>/prompts/global-review.md", "<run dir>/prompts/cleanup.md"],
 };
 
+// Expands a `<skill dir>/` or `<run dir>/` placeholder to a real path.
+const resolveRef = (ref: string, dir: string) =>
+  ref.replace("<skill dir>", dir).replace("<run dir>", join(skillsRoot, "run"));
+
 test("the run skill exists and ship is gone", () => {
   expect(folders).toContain("run");
   expect(folders).not.toContain("ship");
@@ -36,18 +40,17 @@ describe.each(folders)("skill %s", (name) => {
   });
 
   test("every <skill dir>/ path exists", () => {
-    for (const m of skill.matchAll(/<skill dir>\/([\w./-]+\.md)/g)) expect(existsSync(join(dir, m[1]!))).toBe(true);
+    for (const m of skill.matchAll(/<skill dir>\/[\w./-]+\.md/g)) expect(existsSync(resolveRef(m[0], dir))).toBe(true);
   });
 
   test("every <run dir>/ path exists under skills/run", () => {
-    for (const m of skill.matchAll(/<run dir>\/([\w./-]+\.md)/g)) expect(existsSync(join(skillsRoot, "run", m[1]!))).toBe(true);
+    for (const m of skill.matchAll(/<run dir>\/[\w./-]+\.md/g)) expect(existsSync(resolveRef(m[0], dir))).toBe(true);
   });
 
   test("the briefs are referenced from SKILL.md", () => {
     for (const ref of REFS[name] ?? []) {
       expect(skill).toContain(ref);
-      const path = ref.startsWith("<run dir>/") ? join(skillsRoot, "run", ref.slice(10)) : join(dir, ref.slice(12));
-      expect(existsSync(path)).toBe(true);
+      expect(existsSync(resolveRef(ref, dir))).toBe(true);
     }
   });
 });
