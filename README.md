@@ -101,6 +101,27 @@ For a ticket that spans several repos, give each service its `repo` (the repo's 
 
 A service that cannot take its port from the environment can set `"fixedPort": <port>`. pipeship then refuses to start a second pipeline that shares a repo while one test environment runs.
 
+## Review
+
+Use `review` when you want a review and no code change. It reviews a PR, a branch or the current diff.
+
+```
+/pipeship:review 42
+/pipeship:review https://github.com/org/repo/pull/42
+/pipeship:review feat/x
+/pipeship:review
+```
+
+With no argument, it reviews the current diff against `origin/<default branch>`, uncommitted and untracked files included. It diffs a PR or a branch from its merge base with `origin/<base>`. In Codex, call it with `$review`, for example `$review 42`.
+
+It reuses the global review and cleanup briefs of `run` (`skills/run/prompts/`) and starts both subagents together: the global review on `opus`, the cleanup on `sonnet`. Both only report. It then merges the reports, re-reads the code of each finding and drops the false positives.
+
+It starts only when you ask for a review. It creates no pipeline, writes no code, pushes nothing and does not comment on the PR unless you ask. To fix the findings, use `run`.
+
+It answers with a ranked list of real problems. Each one has a `file:line` and a concrete failure scenario. Optional cleanups follow. If nothing real is found, it says so.
+
+For the dev link, link both skills side by side: `ln -s "$PWD/skills/review" ~/.claude/skills/review` next to the `run` link. `review` reads the briefs of `run` through `../run/prompts`. The `/run` and `/review` dev links may collide with built-in commands. The plugin names `/pipeship:run` and `/pipeship:review` are namespaced.
+
 ## Dashboard
 
 The dashboard on http://localhost:4400 has two columns.
