@@ -1,4 +1,5 @@
 import { archiveIfAllMerged } from "./preview.ts";
+import { mergeRunning } from "./repos.ts";
 import { defaultRunner, errorMessage, type Runner } from "./merge.ts";
 import { CLOSED, home, listStates, MERGED, readState, writeState, type Chunk, type State } from "./state.ts";
 
@@ -70,9 +71,11 @@ export async function syncPrStatuses(deps: Partial<SyncDeps> = {}): Promise<{ ch
     } catch {
       continue;
     }
-    if (s.merge?.status === "running") continue;
+    // Skip only the repos that merge: the others still sync.
+    const polled = polledChunks(s).filter((c) => !mergeRunning(s, c.repo!));
+    if (!polled.length) continue;
     const results: { name: string; pr: string; state: string; base?: string }[] = [];
-    for (const c of polledChunks(s)) {
+    for (const c of polled) {
       try {
         results.push({ name: c.name, pr: c.pr!, ...(await ghState(d.run, c, d.timeoutMs)) });
         total.checked++;
@@ -84,11 +87,10 @@ export async function syncPrStatuses(deps: Partial<SyncDeps> = {}): Promise<{ ch
     try {
       // Sync read-modify-write, no await between: a chunk or merge may have changed while gh ran.
       const x = readState(id);
-      if (x.merge?.status === "running") continue;
       const changes: string[] = [];
       for (const r of results) {
         const c = x.chunks.find((k) => k.name === r.name);
-        if (!c || c.pr !== r.pr || c.status === MERGED) continue;
+        if (!c || c.pr !== r.pr || c.status === MERGED || mergeRunning(x, c.repo!)) continue; // a merge may have started on this repo
         // A PR can be retargeted on GitHub (by hand, or when the branch below it is deleted).
         if (r.base && r.base !== c.prBase) {
           c.prBase = r.base;

@@ -99,7 +99,8 @@ export function classifyPr(v: PrView, { waitChecks = true } = {}): Verdict {
 
 export const errorMessage = (err: unknown) => (err instanceof Error ? err.message : String(err));
 
-// Pipeline ids with a merge job in this process.
+// Pipeline + repo with a merge job in this process.
+const activeKey = (id: string, repo: string) => `${id}\n${repo}`;
 const active = new Set<string>();
 export const isMergeRunning = () => active.size > 0;
 
@@ -140,35 +141,34 @@ export function startMerge(
   } catch (err) {
     throw new MergeError(errorMessage(err), 404);
   }
-  if (active.has(id) || (s.merge?.status === "running" && !isStale(s.merge, isAlive))) {
+  const repo = resolveMergeRepo(s, rawRepo);
+  const key = activeKey(id, repo.path);
+  const prev = s.merges?.[repo.path];
+  if (active.has(key) || (prev?.status === "running" && !isStale(prev, isAlive))) {
     throw new MergeError("a merge is already running", 409);
   }
-  const repo = resolveMergeRepo(s, rawRepo);
   const open = chunksOf(s, repo.path).filter((c) => c.pr && c.status !== MERGED).length;
   if (open === 0) throw new MergeError("no open PR to merge", 400);
   if (rawDelete !== undefined && rawDelete !== null && typeof rawDelete !== "boolean") throw new MergeError("deleteBranches must be a boolean", 400);
 
-  active.add(id);
+  active.add(key);
   updateState(id, (x) => {
-    x.merge = runningMerge(repo.path, new Date().toISOString());
+    (x.merges ??= {})[repo.path] = runningMerge(repo.path, new Date().toISOString());
   });
-  const done = mergeStack(id, deps, repo.path, rawDelete === true).finally(() => active.delete(id));
+  const done = mergeStack(id, deps, repo.path, rawDelete === true).finally(() => active.delete(key));
   return { state: readState(id), done };
 }
 
 // A merge whose dashboard died stays "running" forever: mark it failed so the user can resume.
 export function failStaleMerges(alive: (pid: number) => boolean = isAlive): void {
   for (const s of listStates()) {
-    if (!isStale(s.merge, alive)) continue;
+    if (!Object.values(s.merges ?? {}).some((m) => isStale(m, alive))) continue;
     updateState(s.id, (x) => {
       const now = new Date().toISOString();
-      x.merge = {
-        ...x.merge!,
-        status: "failed",
-        error: "interrupted: the dashboard stopped; click Merge to resume",
-        updatedAt: now,
-        endedAt: now,
-      };
+      for (const [repo, run] of Object.entries(x.merges ?? {})) {
+        if (!isStale(run, alive)) continue;
+        x.merges![repo] = { ...run, status: "failed", error: "interrupted: the dashboard stopped; click Merge to resume", updatedAt: now, endedAt: now };
+      }
     });
   }
 }
@@ -190,10 +190,11 @@ interface Ctx {
 
 function makeCtx(id: string, repo: string, d: MergeDeps): Ctx {
   const iso = () => new Date().toISOString();
-  // Short read-modify-write: the skill and the CLI write the same file while we wait.
+  // Short read-modify-write: the skill and the CLI write the same file while we wait. Runs of two repos
+  // share it too: safe in-process, as updateState has no await and each run touches only its own key.
   const write = (fields: Partial<MergeRun>) =>
     updateState(id, (s) => {
-      s.merge = { ...s.merge!, ...fields, updatedAt: iso() };
+      s.merges![repo] = { ...s.merges![repo]!, ...fields, updatedAt: iso() };
     });
   const progress = (c: Chunk, message: string) => write({ current: c.name, message });
   const finish = (message: string) => write({ status: "done", current: undefined, message, endedAt: iso() });
@@ -356,7 +357,7 @@ async function mergeIntoBase(x: Ctx, repo: Repo, chunks: Chunk[], remove: boolea
   x.finish(`merged #${n} into ${base}` + (left.length ? `; could not delete ${left.join(", ")}` : "") + (warning ? `; ${warning}` : ""));
 }
 
-// Never throws: every failure ends up in state.merge. `repo` is a path or a name.
+// Never throws: every failure ends up in state.merges. `repo` is a path or a name.
 export async function mergeStack(
   id: string,
   deps: Partial<MergeDeps> = {},
@@ -374,10 +375,11 @@ export async function mergeStack(
   try {
     const s = readState(id);
     repo = resolveMergeRepo(s, repoRef);
-    const startedAt = s.merge?.status === "running" ? s.merge.startedAt : new Date().toISOString();
+    const prev = s.merges?.[repo.path];
+    const startedAt = prev?.status === "running" ? prev.startedAt : new Date().toISOString();
     const found = repo;
     updateState(id, (x) => {
-      x.merge = runningMerge(found.path, startedAt);
+      (x.merges ??= {})[found.path] = runningMerge(found.path, startedAt);
     });
     const x = makeCtx(id, found.path, d);
     // Re-read after the combine: it records the merged PRs in the state file.
@@ -387,14 +389,19 @@ export async function mergeStack(
     if (prChunks().filter((c) => c.status !== MERGED).length > 1) ({ tip, warning } = await combine(x, prChunks()));
     else warning = await relistFolded(x, prChunks());
     await mergeIntoBase(x, found, prChunks(), removeBranches, tip, warning);
-    if (readState(id).merge?.status === "done") await archiveIfAllMerged(id);
+    if (readState(id).merges?.[found.path]?.status === "done") await archiveIfAllMerged(id);
   } catch (err) {
     try {
+      if (!repo) {
+        // Direct call only (the route resolves the repo first): no key to write under.
+        console.error(`merge ${id}: ${errorMessage(err)}`);
+        return;
+      }
+      const key = repo.path;
       updateState(id, (s) => {
         const now = new Date().toISOString();
-        // Never reuse a run of another repo: an unresolved ref gets its own failed run.
-        const run = repo && s.merge?.repo === repo.path ? s.merge : runningMerge(repo?.path ?? repoRef ?? "", now);
-        s.merge = { ...run, status: "failed", error: errorMessage(err), endedAt: now, updatedAt: now };
+        const run = s.merges?.[key] ?? runningMerge(key, now);
+        (s.merges ??= {})[key] = { ...run, status: "failed", error: errorMessage(err), endedAt: now, updatedAt: now };
       });
     } catch {
       // The state file is gone (pipeline deleted): nothing left to report to.

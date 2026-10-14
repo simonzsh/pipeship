@@ -16,9 +16,8 @@ const ICON = "text-violet-600 dark:text-violet-400";
 const CONFIRM = "bg-violet-600 text-white hover:bg-violet-700";
 
 // Shown on finished pipelines with open PRs, and while a merge runs.
-// `busy`: another repo's merge runs, and only one merge runs per pipeline: the button stays, disabled.
-export function MergeButton({ id, repo, chunks, base, merge, busy, finished }: {
-  id: string; repo: string; chunks: Chunk[]; base?: string; merge?: MergeRun; busy: boolean; finished: boolean;
+export function MergeButton({ id, repo, chunks, base, merge, finished }: {
+  id: string; repo: string; chunks: Chunk[]; base?: string; merge?: MergeRun; finished: boolean;
 }) {
   const [error, setError] = useState<string>();
   // Like GitHub's "delete branch" offer after a merge; checked by default.
@@ -37,7 +36,6 @@ export function MergeButton({ id, repo, chunks, base, merge, busy, finished }: {
       setClickedAt(null);
     }
   };
-  const waitTitle = busy ? "Another repo of this pipeline is merging" : undefined;
   if (running || starting) {
     return (
       <Button variant="outline" size="xs" disabled title={merge?.message}>
@@ -58,7 +56,7 @@ export function MergeButton({ id, repo, chunks, base, merge, busy, finished }: {
     <AlertDialog>
       {failure}
       <AlertDialogTrigger asChild>
-        <Button variant="outline" size="xs" disabled={busy} title={waitTitle}>
+        <Button variant="outline" size="xs">
           <GitMerge className={ICON} /> {into}
         </Button>
       </AlertDialogTrigger>
