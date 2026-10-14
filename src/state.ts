@@ -1,4 +1,4 @@
-import { existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, renameSync, symlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import { assertRepoName, findRepo, repoName } from "./repos.ts";
@@ -120,17 +120,7 @@ export type ChunkInput = { name: string } & Partial<Omit<Chunk, "name">>;
 const QUICK_SKIPS: StepName[] = ["plan"];
 
 export function home(): string {
-  if (process.env.SHIPFLOW_HOME) return process.env.SHIPFLOW_HOME;
-  const dir = join(homedir(), ".shipflow");
-  migrateHome(join(homedir(), ".pipeship"), dir);
-  return dir;
-}
-
-// The tool was named pipeship: move its home once. The symlink keeps the absolute paths of running pipelines valid.
-export function migrateHome(old: string, dir: string) {
-  if (existsSync(dir) || !existsSync(old) || lstatSync(old).isSymbolicLink()) return;
-  renameSync(old, dir);
-  symlinkSync(dir, old);
+  return process.env.SHIPFLOW_HOME ?? join(homedir(), ".shipflow");
 }
 
 export function pipelineDir(id: string): string {

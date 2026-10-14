@@ -221,8 +221,7 @@ export async function serve(port = DEFAULT_PORT, opts: ServeOptions = {}) {
 export async function isDashboardUp(port = DEFAULT_PORT): Promise<boolean> {
   try {
     const res = await fetch(`http://localhost:${port}/api/health`, { signal: AbortSignal.timeout(1000) });
-    // A dashboard started before the rename still answers "pipeship".
-    return ["shipflow", "pipeship"].includes((await res.json()).app);
+    return (await res.json()).app === "shipflow";
   } catch {
     return false;
   }

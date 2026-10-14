@@ -1,9 +1,9 @@
 import { afterAll, beforeEach, describe, expect, test } from "bun:test";
-import { lstatSync, mkdirSync, mkdtempSync, rmSync, writeFileSync, existsSync, readFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync, existsSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
-  addRepo, createPipeline, listStates, migrateHome, pipelineDir, pipelineStatus, readState, setMode, setStep, updateState, upsertChunk, waitForUser, type State,
+  addRepo, createPipeline, listStates, pipelineDir, pipelineStatus, readState, setMode, setStep, updateState, upsertChunk, waitForUser, type State,
 } from "../src/state.ts";
 import { chunksOf, diffRange, repoName, repoStacks, sharesRepo, topChunk } from "../src/repos.ts";
 import {
@@ -278,26 +278,6 @@ test("preview fails clearly when the server crashes", async () => {
   expect(readState(id).preview).toBeUndefined();
   expect(existsSync(join(pipelineDir(id), "preview-app.log"))).toBe(true);
 }, 30_000);
-
-test("the home of pipeship moves to the new name once and leaves a symlink", () => {
-  const dir = mkdtempSync(join(root, "migrate-"));
-  const old = join(dir, ".pipeship"), next = join(dir, ".shipflow");
-  mkdirSync(join(old, "pipelines"), { recursive: true });
-  writeFileSync(join(old, "pipelines", "state.json"), "{}");
-  migrateHome(old, next);
-  expect(readFileSync(join(next, "pipelines", "state.json"), "utf8")).toBe("{}");
-  expect(lstatSync(old).isSymbolicLink()).toBe(true);
-  migrateHome(old, next); // a second call changes nothing
-  expect(existsSync(join(old, "pipelines", "state.json"))).toBe(true);
-});
-
-test("a shared recipe still loads under its old name .pipeship.json", () => {
-  const dir = mkdtempSync(join(root, "old-recipe-"));
-  writeFileSync(join(dir, ".pipeship.json"), "{}");
-  expect(findRecipe([dir])).toBe(join(dir, ".pipeship.json"));
-  writeFileSync(join(dir, ".shipflow.json"), "{}");
-  expect(findRecipe([dir])).toBe(join(dir, ".shipflow.json"));
-});
 
 test("a draft recipe is saved for the repo only when the app starts", async () => {
   const draft = join(root, "draft.json");

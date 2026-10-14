@@ -2,7 +2,7 @@
 
 Pipeline de features autonome et environnements de test.
 
-> Nom : `shipflow` (« ship » + flux, livrer une feature). Ancien nom : `pipeship`, changé le 2026-10-14. Le nom `shipflow` est pris sur npm, mais l'outil n'y est pas publié.
+> Nom : `shipflow` (« ship » + flux, livrer une feature). Le nom `shipflow` est pris sur npm, mais l'outil n'y est pas publié.
 > Origine : discussion du 2026-10-12. Ce document est le point de départ des prochaines sessions.
 
 ## 1. Le problème

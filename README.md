@@ -26,17 +26,6 @@ The first run installs the dependencies, which takes a few seconds.
 
 To work on shipflow itself, clone the repo, run `bun install`, and link the skill instead: `ln -s "$PWD/skills/ship" ~/.claude/skills/ship`. Changes then apply at once.
 
-### Coming from pipeship
-
-shipflow was named pipeship. The **Update** button cannot follow the rename: remove the old plugin and install the new one.
-
-```sh
-claude plugin uninstall pipeship@pipeship && claude plugin marketplace remove pipeship
-codex plugin remove pipeship@pipeship && codex plugin marketplace remove pipeship
-```
-
-Then run the install commands above. On first use, shipflow moves `~/.pipeship` to `~/.shipflow` and leaves a symlink, so your pipelines stay. A shared `.pipeship.json` recipe still works.
-
 ## Usage
 
 Give shipflow a ticket: a reference (`ABC-123`), a URL (Linear, Notion, GitHub, Jira…) or plain text. It reads the ticket with the tools your session has, such as an MCP server or `gh`.

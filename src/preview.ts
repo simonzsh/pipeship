@@ -69,8 +69,7 @@ export function savedRecipePath(repos: string[]): string {
 export function findRecipe(repos: string[], worktree?: string): string | undefined {
   const saved = savedRecipePath(repos);
   if (repos.length !== 1) return existsSync(saved) ? saved : undefined;
-  // .pipeship.json is the file name from before the rename.
-  const shared = [worktree, repos[0]].filter((dir) => dir !== undefined).flatMap((dir) => [join(dir, ".shipflow.json"), join(dir, ".pipeship.json")]);
+  const shared = [worktree, repos[0]].filter((dir) => dir !== undefined).map((dir) => join(dir, ".shipflow.json"));
   return [...shared, saved].find(existsSync);
 }
 
