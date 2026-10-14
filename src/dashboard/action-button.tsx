@@ -17,12 +17,12 @@ interface ActionDef {
   button: string;
   title: string;
   description: string;
-  serversNote?: string; // appended when the pipeline has test servers
+  serversNote?: string; // appended when the pipeline has a preview
   confirm: string;
   variant?: VariantProps<typeof buttonVariants>["variant"]; // confirm button style, destructive by default
 }
 
-// Once the agents are done, the only things left to stop are the test servers.
+// Once the agents are done, the only things left to stop is the preview.
 const ACTIONS: Record<"stopPipeline" | "stopServer" | "archive" | "unarchive" | "delete", ActionDef> = {
   stopPipeline: {
     endpoint: "stop",
@@ -31,7 +31,7 @@ const ACTIONS: Record<"stopPipeline" | "stopServer" | "archive" | "unarchive" | 
     button: "Request stop",
     title: "Request a stop for this pipeline?",
     description: "The agents stop after their current step, not at once.",
-    serversNote: "The test servers stop now.",
+    serversNote: "The preview stops now.",
     confirm: "Request stop",
   },
   stopServer: {
@@ -71,14 +71,14 @@ const ACTIONS: Record<"stopPipeline" | "stopServer" | "archive" | "unarchive" | 
     button: "Delete",
     title: "Delete this pipeline?",
     description:
-      "The test servers stop, and the worktrees and pipeline files are deleted. Branches and PRs stay. Uncommitted changes block the deletion.",
+      "Deletes the worktrees, the pipeline files and the local branches of merged PRs. The preview stops. Uncommitted changes block it.",
     confirm: "Delete",
   },
 };
 
 type ActionName = keyof typeof ACTIONS;
 
-// Test servers usually start at the last step: only mention them when some exist.
+// The preview usually starts at the last step: only mention it when there is one.
 function ActionButton({ id, action, hasServers, disabledTitle }: { id: string; action: ActionName; hasServers?: boolean; disabledTitle?: string }) {
   const { endpoint, icon: Icon, iconClass, button, title, description, serversNote, confirm, variant } = ACTIONS[action];
   const [error, setError] = useState<string>();

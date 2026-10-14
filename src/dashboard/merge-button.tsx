@@ -6,6 +6,7 @@ import {
   AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger,
 } from "./components/ui/alert-dialog";
 import { Button } from "./components/ui/button";
+import { Checkbox } from "./components/ui/checkbox";
 import { postAction, prNumber } from "./utils";
 
 type Mode = "combine" | "base";
@@ -19,6 +20,8 @@ export function MergeButton({ id, repo, chunks, base, merge, busy, finished }: {
   id: string; repo: string; chunks: Chunk[]; base?: string; merge?: MergeRun; busy: boolean; finished: boolean;
 }) {
   const [error, setError] = useState<string>();
+  // Like GitHub's "delete branch" offer after a merge; checked by default.
+  const [deleteBranches, setDeleteBranches] = useState(true);
   // The action just clicked, until the stream reports the run (or the POST fails).
   const [starting, setStarting] = useState<Mode>();
   const todo = chunks.filter((c) => c.pr && c.status !== "merged");
@@ -30,7 +33,7 @@ export function MergeButton({ id, repo, chunks, base, merge, busy, finished }: {
   const run = async () => {
     setError(undefined);
     setStarting(mode);
-    const err = await postAction(id, "merge", { mode, repo });
+    const err = await postAction(id, "merge", { mode, repo, ...(mode === "base" && { deleteBranches }) });
     if (err) {
       setError(err);
       setStarting(undefined);
@@ -73,8 +76,12 @@ export function MergeButton({ id, repo, chunks, base, merge, busy, finished }: {
       <AlertDialogContent>
         <AlertDialogHeader>
           <AlertDialogTitle>Merge #{prNumber(pr.pr!)} into {base ?? "its base branch"}?</AlertDialogTitle>
-          <AlertDialogDescription>Squash-merges the PR once its checks pass. Branches are kept.</AlertDialogDescription>
+          <AlertDialogDescription>Squash-merges the PR once its checks pass.</AlertDialogDescription>
         </AlertDialogHeader>
+        <label className="flex items-center gap-2 text-sm">
+          <Checkbox checked={deleteBranches} onCheckedChange={(v) => setDeleteBranches(v === true)} />
+          Delete the remote branches after the merge
+        </label>
         <AlertDialogFooter>
           <AlertDialogCancel>Cancel</AlertDialogCancel>
           <AlertDialogAction onClick={run} className={TONE}>Merge</AlertDialogAction>

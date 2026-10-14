@@ -29,12 +29,12 @@ const USAGE = `pipeship — state, test environments and dashboard for the /pipe
   chunk <id> <name> [--repo r] [--worktree p] [--branch b] [--status s] [--pr url]
                                --repo (name or path) is required for a new chunk when the pipeline has several repos
   recipe <repo>...             print the recipe used to start the app for these repos, or "none"
-  preview <id> [<worktree>] [--recipe file]   start the test environment: each service runs from the top worktree of its repo;
+  preview <id> [<worktree>] [--recipe file]   start the preview: each service runs from the top worktree of its repo;
                                <worktree> overrides it for a one-repo pipeline; a --recipe that works is saved for the pipeline's repos
-  stop <id>                    stop the pipeline and its test servers
-  archive <id>                 archive a done, failed or stopped pipeline (its test servers stop)
-  unarchive <id>               unarchive an archived pipeline; its test servers stay stopped
-  delete <id> [--force]        delete its worktrees and files (branches and PRs stay); --force drops uncommitted changes
+  stop <id>                    stop the pipeline and its preview
+  archive <id>                 archive a done, failed or stopped pipeline (its preview stops)
+  unarchive <id>               unarchive an archived pipeline; its preview stays stopped
+  delete <id> [--force]        delete its worktrees and files (local branches of merged PRs go; other branches and PRs stay); --force drops uncommitted changes
   dashboard [start|stop] [--port n]   start the dashboard in the background (default) or stop it
   serve [--port n]             run the dashboard in the foreground`;
 

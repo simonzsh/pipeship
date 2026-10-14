@@ -4,7 +4,7 @@ import { connect, createServer } from "node:net";
 import { createHash } from "node:crypto";
 import { dirname, join } from "node:path";
 import { findRepo, repoName, sharesRepo, topChunk } from "./repos.ts";
-import { allMerged, home, listStates, pipelineDir, readState, updateState, type PreviewService, type Repo, type State } from "./state.ts";
+import { allMerged, home, MERGED, listStates, pipelineDir, readState, updateState, type PreviewService, type Repo, type State } from "./state.ts";
 
 export interface ServiceRecipe {
   name: string;
@@ -394,7 +394,7 @@ export async function startPreview(id: string, worktree?: string, draft?: string
     if (other) {
       const shared = repoName(other.repos.find((r) => paths.includes(r.path))!.path);
       throw new Error(
-        `service "${fixed.name}" uses the fixed port ${fixed.fixedPort}, and pipeline ${other.id} of the repo ${shared} has a live test environment: stop it first (pipeship stop ${other.id})`,
+        `service "${fixed.name}" uses the fixed port ${fixed.fixedPort}, and pipeline ${other.id} of the repo ${shared} has a live preview: stop it first (pipeship stop ${other.id})`,
       );
     }
   }
@@ -505,7 +505,7 @@ export async function stopPreview(id: string): Promise<void> {
   await killAll(readState(id).preview);
   // A start in progress may have spawned a service while we were killing.
   await killAll(readState(id).preview);
-  if (errors.length) throw new Error(`could not stop the test servers: ${errors.join("; ")}`);
+  if (errors.length) throw new Error(`could not stop the preview: ${errors.join("; ")}`);
   updateState(id, (s) => {
     s.preview = undefined;
   });
@@ -617,7 +617,9 @@ function removeWorktree(repos: Repo[], wt: string): void {
   repos.some((repo) => git(repo.path, "worktree", "remove", "--force", wt).status === 0);
 }
 
-// Deletes the worktrees and the pipeline's files. Branches and PRs stay: they live in the repo.
+// Deletes the worktrees and the pipeline's files, then the local branches of merged chunks.
+// Unmerged branches and the PRs stay: they live in the repo. -D is safe here: a squash merge
+// leaves the branch "unmerged" for git, but GitHub already holds its work.
 export async function deletePipeline(id: string, opts: { force?: boolean } = {}): Promise<void> {
   const state = readState(id);
   if (state.status === "running" || state.status === "waiting_for_user") {
@@ -635,6 +637,10 @@ export async function deletePipeline(id: string, opts: { force?: boolean } = {})
   for (const wt of worktrees) removeWorktree(state.repos, wt);
   rmSync(pipelineDir(id), { recursive: true, force: true });
   for (const repo of state.repos) git(repo.path, "worktree", "prune");
+  for (const c of state.chunks) {
+    const base = state.repos.find((r) => r.path === c.repo)?.base;
+    if (c.status === MERGED && c.branch && c.branch !== base) git(c.repo, "branch", "-D", c.branch);
+  }
 }
 
 export function git(cwd: string, ...args: string[]) {

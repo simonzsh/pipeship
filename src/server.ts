@@ -88,7 +88,7 @@ export async function serve(port = DEFAULT_PORT, opts: ServeOptions = {}) {
           if (restarting) return Response.json({ restarting: true, from: currentVersion() });
           try {
             const blocker = () =>
-              anyPreviewStarting() ? "A test environment is starting: wait for it, then update" :
+              anyPreviewStarting() ? "A preview is starting: wait for it, then update" :
               isMergeRunning() ? "A merge is running: wait for it, then update" : undefined;
             const result = await installUpdate(opts.harness !== undefined ? opts.harness : currentHarness(), { blocker, ...opts.update });
             if (!result.restarting) return Response.json({ restarting: false, message: result.message });
@@ -170,8 +170,8 @@ export async function serve(port = DEFAULT_PORT, opts: ServeOptions = {}) {
       "/api/pipelines/:id/merge": {
         POST: async (req) => {
           try {
-            const body = (await req.json().catch(() => null)) as { mode?: unknown; repo?: unknown } | null;
-            return Response.json(startMerge(req.params.id, {}, body?.mode, body?.repo).state, { status: 202 });
+            const body = (await req.json().catch(() => null)) as { mode?: unknown; repo?: unknown; deleteBranches?: unknown } | null;
+            return Response.json(startMerge(req.params.id, {}, body?.mode, body?.repo, body?.deleteBranches).state, { status: 202 });
           } catch (err) {
             const status = err instanceof MergeError ? err.status : 500;
             return Response.json({ error: errorMessage(err) }, { status });
