@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { AlertCircle, ChevronDown, ChevronRight, ChevronsDownUp, ChevronsUpDown, Loader2, RefreshCw } from "lucide-react";
 import type { DashboardState } from "../state.ts";
 import { repoName } from "../repos.ts";
@@ -134,7 +134,28 @@ function FilePath({ path }: { path: string }) {
   );
 }
 
-function FileDiff({ file, open, onToggle }: { file: DiffFile; open: boolean; onToggle: () => void }) {
+// Line height of the diff table (leading-5): the placeholder keeps the page height before render.
+const LINE_PX = 20;
+
+// Renders its children only once near the viewport, then keeps them: a big diff paints in slices.
+function WhenVisible({ lines, children }: { lines: number; children: ReactNode }) {
+  const ref = useRef<HTMLDivElement>(null);
+  const [seen, setSeen] = useState(false);
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const io = new IntersectionObserver((entries) => {
+      if (!entries.some((e) => e.isIntersecting)) return;
+      setSeen(true);
+      io.disconnect();
+    }, { rootMargin: "1500px 0px" });
+    io.observe(el);
+    return () => io.disconnect();
+  }, []);
+  return seen ? children : <div ref={ref} style={{ height: lines * LINE_PX }} />;
+}
+
+const FileDiff = memo(function FileDiff({ file, open, onToggle }: { file: DiffFile; open: boolean; onToggle: (path: string, open: boolean) => void }) {
   const lang = useMemo(() => languageOf(file.path), [file.path]);
   const renamed = file.oldPath && file.newPath && file.oldPath !== file.newPath;
   return (
@@ -143,7 +164,7 @@ function FileDiff({ file, open, onToggle }: { file: DiffFile; open: boolean; onT
           Full-bleed file cards: square corners, so nothing shows through once the header sticks. */}
       <button
         type="button"
-        onClick={onToggle}
+        onClick={() => onToggle(file.path, open)}
         aria-expanded={open}
         className={`sticky top-0 z-10 flex w-full items-center gap-2 bg-card px-6 py-2 text-left text-sm hover:bg-[color-mix(in_oklab,var(--card),var(--foreground)_4%)] ${open ? "border-b" : ""}`}
       >
@@ -168,29 +189,49 @@ function FileDiff({ file, open, onToggle }: { file: DiffFile; open: boolean; onT
             {file.oldMode && file.newMode ? `Mode changed ${file.oldMode} → ${file.newMode}` : "No content changes"}
           </p>
         ) : (
-          <div className="overflow-x-auto">
-            <table className="w-max min-w-full border-collapse font-mono text-xs leading-5">
-              <tbody>
-                {file.hunks.map((h, i) => (
-                  <HunkRows key={i} hunk={h} lang={lang} />
-                ))}
-              </tbody>
-            </table>
-          </div>
+          <WhenVisible lines={file.hunks.reduce((n, h) => n + h.lines.length + 1, 0)}>
+            <div className="overflow-x-auto">
+              <table className="w-max min-w-full border-collapse font-mono text-xs leading-5">
+                <tbody>
+                  {file.hunks.map((h, i) => (
+                    <HunkRows key={i} hunk={h} lang={lang} />
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </WhenVisible>
         ))}
     </section>
   );
-}
+});
 
 // `all` is the last "expand/collapse all" click; it overrides every per-file choice made before it.
 type All = { open: boolean } | null;
 
-function RepoDiff({ data, all }: { data: DiffResponse; all: All }) {
+// Like GitHub, a big file starts closed, and files stop opening once the diff passes a line budget.
+const LARGE_FILE = 400;
+const OPEN_BUDGET = 3000;
+
+function openByDefault(files: DiffFile[]): Set<string> {
+  const open = new Set<string>();
+  let budget = OPEN_BUDGET;
+  for (const f of files) {
+    const n = f.additions + f.deletions;
+    if (n > LARGE_FILE || n > budget) continue;
+    open.add(f.path);
+    budget -= n;
+  }
+  return open;
+}
+
+// memo: each pipeline change on the SSE stream re-renders CodeTab; the diff must not re-render with it.
+const RepoDiff = memo(function RepoDiff({ data, all }: { data: DiffResponse; all: All }) {
   const [overrides, setOverrides] = useState<Record<string, boolean>>({});
   useEffect(() => {
     if (all) setOverrides(Object.fromEntries(data.files.map((f) => [f.path, all.open])));
   }, [all, data]);
-  const isOpen = (path: string) => overrides[path] ?? true;
+  const defaults = useMemo(() => openByDefault(data.files), [data]);
+  const toggle = useCallback((path: string, open: boolean) => setOverrides((o) => ({ ...o, [path]: !open })), []);
 
   if (data.files.length === 0) {
     const msg = data.truncated ? "Diff too large to show." : "No changes in this range.";
@@ -205,13 +246,13 @@ function RepoDiff({ data, all }: { data: DiffResponse; all: All }) {
         <FileDiff
           key={f.path}
           file={f}
-          open={isOpen(f.path)}
-          onToggle={() => setOverrides((o) => ({ ...o, [f.path]: !isOpen(f.path) }))}
+          open={overrides[f.path] ?? defaults.has(f.path)}
+          onToggle={toggle}
         />
       ))}
     </div>
   );
-}
+});
 
 export function CodeTab({ p, target, onTarget }: CodeTabProps) {
   const [manual, setManual] = useState(0);
