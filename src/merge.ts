@@ -7,7 +7,7 @@ export interface RunResult {
   stdout: string;
   stderr: string;
 }
-export type Runner = (cmd: string, args: string[], opts: { cwd: string }) => Promise<RunResult>;
+export type Runner = (cmd: string, args: string[], opts: { cwd: string; timeoutMs?: number }) => Promise<RunResult>;
 export interface MergeLimits {
   mergeableMs: number;
   checksMs: number;
@@ -23,9 +23,10 @@ export interface MergeDeps {
 export const DEFAULT_LIMITS: MergeLimits = { mergeableMs: 120_000, checksMs: 900_000, pollMs: 10_000 };
 
 // Async on purpose: a sync spawn would freeze the dashboard's SSE stream during a slow gh call.
-export const defaultRunner: Runner = async (cmd, args, { cwd }) => {
+export const defaultRunner: Runner = async (cmd, args, { cwd, timeoutMs }) => {
   const proc = Bun.spawn([cmd, ...args], {
     cwd,
+    timeout: timeoutMs,
     stdout: "pipe",
     stderr: "pipe",
     env: { ...process.env, GH_PROMPT_DISABLED: "1", GIT_TERMINAL_PROMPT: "0" },

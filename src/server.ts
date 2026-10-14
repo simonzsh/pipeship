@@ -130,8 +130,8 @@ export async function serve(port = DEFAULT_PORT, opts: { prSync?: boolean } = {}
     },
     fetch: () => new Response("not found", { status: 404 }),
   });
-  sync = opts.prSync ? startPrSync() : undefined;
   failStaleMerges(); // after the port is open, so a slow state read cannot delay startup
+  sync = opts.prSync ? startPrSync() : undefined; // after failStaleMerges: a dead merge must not hide its pipeline
   return server;
 }
 

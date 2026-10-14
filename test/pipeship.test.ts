@@ -1967,8 +1967,35 @@ syncTest("pr sync: no gh call for merged chunks, chunks without PR, or a running
   updateState(running, (s) => (s.merge = { status: "running", repo, mode: "combine" } as State["merge"]));
   const gh = syncGh({ [prUrl(121)]: { state: "MERGED" } });
   await syncPrStatuses({ run: gh.run, log: () => {} });
-  expect(gh.calls.filter((u) => [prUrl(120), prUrl(121)].includes(u))).toEqual([]);
+  expect(gh.calls).toEqual([]);
   expect(chunkStatuses(running)).toEqual(["done"]);
+});
+
+syncTest("pr sync: a merge that starts while gh runs leaves the state untouched", async () => {
+  const id = syncPipeline("sync merge race", [132]);
+  const before = readState(id).updatedAt;
+  await Bun.sleep(5);
+  const run: Runner = async () => {
+    updateState(id, (s) => (s.merge = { status: "running", repo, mode: "combine" } as State["merge"]));
+    return { code: 0, stdout: JSON.stringify({ state: "MERGED" }), stderr: "" };
+  };
+  await syncPrStatuses({ run, log: () => {} });
+  const after = readState(id);
+  expect(after.chunks.map((c) => c.status)).toEqual(["done"]);
+  expect(after.updatedAt).not.toBe(before); // only the test's own merge write
+  const stamp = after.updatedAt;
+  await Bun.sleep(5);
+  await syncPrStatuses({ run: syncGh({}).run, log: () => {} });
+  expect(readState(id).updatedAt).toBe(stamp);
+});
+
+syncTest("pr sync: a repeated error is logged once", async () => {
+  syncPipeline("sync same error", [150]);
+  const logs: string[] = [];
+  const lastError = {};
+  const run = syncGh({ [prUrl(150)]: "fail" }).run;
+  for (let i = 0; i < 3; i++) await syncPrStatuses({ run, log: (l) => logs.push(l), lastError });
+  expect(logs).toHaveLength(1);
 });
 
 syncTest("pr sync: a chunk changed while gh was running is not overwritten", async () => {

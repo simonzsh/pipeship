@@ -102,7 +102,13 @@ export function ChunkStatusIcon({ status, title }: { status: string; title?: str
 function chunkIcon(status: string, label: string) {
   if (status === "done") return <CheckCircle2 className="size-4 text-emerald-600 dark:text-emerald-400" aria-label={label} />;
   if (status === "merged") return <GitMerge className="size-4 text-violet-600 dark:text-violet-400" aria-label={label} />;
-  if (status === "closed") return <GitPullRequestClosed className="size-4 text-red-600/70 dark:text-red-400/70" aria-label={label} />;
+  if (status === "closed") {
+    return (
+      <span title="PR closed without merge" className="inline-flex">
+        <GitPullRequestClosed className="size-4 text-red-600/70 dark:text-red-400/70" aria-label={label} />
+      </span>
+    );
+  }
   if (status === "failed") return <XCircle className="size-4 text-red-600 dark:text-red-400" aria-label={label} />;
   if (status === "merging") return <Loader2 className="size-4 animate-spin text-violet-600 dark:text-violet-400" aria-label={label} />;
   return <Loader2 className="size-4 animate-spin text-blue-600 dark:text-blue-400" aria-label={label} />;
