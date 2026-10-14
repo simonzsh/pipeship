@@ -1,10 +1,10 @@
 ---
 name: ship
-description: Feature pipeline from a ticket to stacked PRs and a running test environment. Use whenever the user gives a ticket to handle (reference like ABC-123, Linear/Notion/GitHub/Jira URL, or text), even without naming pipeship.
+description: Feature pipeline from a ticket to stacked PRs and a running test environment. Use whenever the user gives a ticket to handle (reference like ABC-123, Linear/Notion/GitHub/Jira URL, or text), even without naming shipflow.
 argument-hint: "[quick|full] [--skip step,step] <ticket ref, URL or text>"
 ---
 
-# pipeship
+# shipflow
 
 Run the pipeline below on the user's ticket: `$ARGUMENTS`
 
@@ -16,62 +16,62 @@ This skill runs in both. Where they differ:
 - **Arguments**: Claude Code fills `$ARGUMENTS`. Codex leaves it as is: take the ticket and options from the user's message.
 - **Subagents**: use your harness's subagent tool (Claude Code: `Agent`; Codex: spawn sub-agents). To run subagents in parallel, start them together. If you have none, run the step yourself.
 - **Models**: `opus` and `sonnet` below are Claude Code model names. In another harness, use your strongest model for `opus` steps and your default model for `sonnet` steps.
-- **Codex sandbox**: pipeship writes outside the repo (`~/.pipeship`), starts background servers and pushes branches. If the sandbox blocks a command, ask the user to approve it or to relax the sandbox.
+- **Codex sandbox**: shipflow writes outside the repo (`~/.shipflow`), starts background servers and pushes branches. If the sandbox blocks a command, ask the user to approve it or to relax the sandbox.
 
 ## Helper
 
-`pipeship` below means `"$(realpath <this skill's base directory>)/../../scripts/pipeship"` (`realpath` matters when the skill is a symlink). On first use it installs its dependencies, which takes a few seconds. It owns the state file `~/.pipeship/pipelines/<id>/state.json`, which the dashboard displays: the user follows the pipeline there.
+`shipflow` below means `"$(realpath <this skill's base directory>)/../../scripts/shipflow"` (`realpath` matters when the skill is a symlink). On first use it installs its dependencies, which takes a few seconds. It owns the state file `~/.shipflow/pipelines/<id>/state.json`, which the dashboard displays: the user follows the pipeline there.
 
 ```
-pipeship new [--repo <path>]... --title <t> [--source <s>] [--ref <r> --url <u>]... [--name <words>] [--mode quick] [--skip a,b]
-pipeship repo <id> <path>              # add a repo to the pipeline (once per repo); prints its base and whether it is dirty
-pipeship get <id>                      # read state: check stopRequested and skipped steps
-pipeship step <id> <step> running|done|skipped|failed
-pipeship mode <id> quick|full         # switch the mode after creation; quick skips the pending plan step
-pipeship wait <id> <step> [--reason <question>]   # pause for the user on this step: the step runs, the card shows the question
-pipeship archive <id>                            # done, failed or stopped only; the user archives, not the agent
-pipeship unarchive <id>                          # archived only; the user unarchives (dashboard or this command)
-pipeship chunk <id> <name> [--repo r] [--worktree p] [--branch b] [--status s] [--pr url]   # --repo (name or path) needed for a new chunk with several repos
-pipeship recipe <repo>...              # the saved recipe to start the app for these repos, or "none"
-pipeship preview <id> [<worktree>] [--recipe file]   # starts the app, prints the URL(s); each service runs from the top worktree of its repo
-pipeship dashboard                     # starts the dashboard if needed, prints its URL
+shipflow new [--repo <path>]... --title <t> [--source <s>] [--ref <r> --url <u>]... [--name <words>] [--mode quick] [--skip a,b]
+shipflow repo <id> <path>              # add a repo to the pipeline (once per repo); prints its base and whether it is dirty
+shipflow get <id>                      # read state: check stopRequested and skipped steps
+shipflow step <id> <step> running|done|skipped|failed
+shipflow mode <id> quick|full         # switch the mode after creation; quick skips the pending plan step
+shipflow wait <id> <step> [--reason <question>]   # pause for the user on this step: the step runs, the card shows the question
+shipflow archive <id>                            # done, failed or stopped only; the user archives, not the agent
+shipflow unarchive <id>                          # archived only; the user unarchives (dashboard or this command)
+shipflow chunk <id> <name> [--repo r] [--worktree p] [--branch b] [--status s] [--pr url]   # --repo (name or path) needed for a new chunk with several repos
+shipflow recipe <repo>...              # the saved recipe to start the app for these repos, or "none"
+shipflow preview <id> [<worktree>] [--recipe file]   # starts the app, prints the URL(s); each service runs from the top worktree of its repo
+shipflow dashboard                     # starts the dashboard if needed, prints its URL
 ```
 
 Steps: `explore`, `questions`, `plan`, `implement`, `review`, `stack`, `preview`.
 
 ## Rules
 
-- **Each step**: `pipeship step <id> <step> running` when it starts, `done` when it ends.
+- **Each step**: `shipflow step <id> <step> running` when it starts, `done` when it ends.
 - **Each chunk**: set it to its activity (`coding`, `cleaning`) when its subagent starts. When that subagent reports, set the chunk to `done` (`failed` if it failed) at once, while the other subagents still run. The user follows each chunk live in the dashboard.
-- **Before each step**, run `pipeship get <id>`. If `stopRequested` is true, stop and tell the user, unless the user just asked you to resume. If the step is `skipped`, move on.
-- **The user can change the steps at any time** ("skip the review", "ask me your questions anyway"). Update the state with `pipeship step <id> <step> skipped|pending` and continue.
+- **Before each step**, run `shipflow get <id>`. If `stopRequested` is true, stop and tell the user, unless the user just asked you to resume. If the step is `skipped`, move on.
+- **The user can change the steps at any time** ("skip the review", "ask me your questions anyway"). Update the state with `shipflow step <id> <step> skipped|pending` and continue.
 - **Keep the steps that later steps need**: the test environment needs a worktree; PRs need commits.
-- On failure: `pipeship step <id> <step> failed`, explain what failed, and ask the user what to do.
-- **Every pause for the user names its step**: `pipeship wait <id> <step> --reason "<the question, in one short line>"`, then stop. This covers the questions of step 2, an approval that the repo or workspace rules require (CLAUDE.md, AGENTS.md…) before a push or a PR, and any decision you cannot make. The step shows amber on the dashboard and the card shows the question. When the user answers, the next `step` call ends the wait.
+- On failure: `shipflow step <id> <step> failed`, explain what failed, and ask the user what to do.
+- **Every pause for the user names its step**: `shipflow wait <id> <step> --reason "<the question, in one short line>"`, then stop. This covers the questions of step 2, an approval that the repo or workspace rules require (CLAUDE.md, AGENTS.md…) before a push or a PR, and any decision you cannot make. The step shows amber on the dashboard and the card shows the question. When the user answers, the next `step` call ends the wait.
 - **A step that waits does not block an independent later step.** Example: when `stack` needs approval, run `preview` on the top worktree first, then run `wait` and ask once for everything that waits. Run `wait` last: any step that starts ends the wait.
 - While this pipeline runs, it replaces process skills such as brainstorming, writing-plans, using-git-worktrees, subagent-driven-development and finishing-a-development-branch. The only skills it uses are `simplify` and `code-review`, in step 5.
-- If the dashboard shows *Agent stopped*, the user can resume with the command copied from the agent logo in the pipeline header, then continue from the first step that is not done or skipped (`pipeship get <id>`). Marking that step `running` clears `stopRequested`.
+- If the dashboard shows *Agent stopped*, the user can resume with the command copied from the agent logo in the pipeline header, then continue from the first step that is not done or skipped (`shipflow get <id>`). Marking that step `running` clears `stopRequested`.
 - To resume an archived pipeline, mark the step you reopen `running`: that unarchives it. Never archive or unarchive it yourself.
-- Stop every server you start outside `pipeship preview` before you finish: note its PID and run `kill <PID>`.
+- Stop every server you start outside `shipflow preview` before you finish: note its PID and run `kill <PID>`.
 
 ## Step 0 — Start
 
 1. Parse the arguments (if `$ARGUMENTS` is empty or was not replaced, use the user's request): an optional mode (`quick` or `full`, default `full`), an optional `--skip a,b`, and the ticket (reference, URL or text).
 2. **Read the ticket** with whatever tool this session has for its source: an MCP server (Linear, Notion, Jira…), `gh issue view`, or fetching the URL. Plain text is the ticket itself. A bare reference like `ABC-123` does not name its source: infer it from the tools you have, and ask if unsure. If no tool can read the source, ask the user to paste the ticket.
 3. The repos are the git root of the current directory, plus any repo the user names. If the current directory is not in a git repo, run `new` without `--repo`: the explore step adds the repos. The base branch of each repo is its current branch.
-4. `pipeship new ...` with one `--repo <path>` per repo, the ticket title, the source (`linear`, `notion`, `github`, `jira`, `url`…; omit `--source` for a plain-text ticket), and one `--ref`/`--url` pair per ticket when the pipeline covers several. `new --repo` and `repo` reduce a path to its git root and refuse a path outside git. Note the `id` and `dir` it prints. It lists each repo with its `base` and `dirty`: tell the user about dirty repos, because their uncommitted changes will not be in the worktrees. Run `pipeship new` from this orchestrator session: it records the session that runs it (harness, id, cwd).
+4. `shipflow new ...` with one `--repo <path>` per repo, the ticket title, the source (`linear`, `notion`, `github`, `jira`, `url`…; omit `--source` for a plain-text ticket), and one `--ref`/`--url` pair per ticket when the pipeline covers several. `new --repo` and `repo` reduce a path to its git root and refuse a path outside git. Note the `id` and `dir` it prints. It lists each repo with its `base` and `dirty`: tell the user about dirty repos, because their uncommitted changes will not be in the worktrees. Run `shipflow new` from this orchestrator session: it records the session that runs it (harness, id, cwd).
    - For a plain-text ticket, pick a 2 or 3 word name that sums it up (`session-link`, `quick-mode`) and pass it with `--name`. Ticket refs win over the name.
 5. Write the full ticket text to `<dir>/ticket.md`. Later steps read only this file.
-6. Run `pipeship dashboard` and give the user the URL.
+6. Run `shipflow dashboard` and give the user the URL.
 
 ## Step 1 — explore
 
 Subagent (read-only, model `sonnet`; Claude Code: `Explore` type). Input: `ticket.md` and the repos. Output: `<dir>/explore.md` with:
-- `## Repos`: other repos the ticket touches, when it names them or sibling git repos in the parent folder of each repo's git root match its code. Give the path and the reason. The subagent stays read-only: you run `pipeship repo <id> <path>` for each one and tell the user about dirty repos;
+- `## Repos`: other repos the ticket touches, when it names them or sibling git repos in the parent folder of each repo's git root match its code. Give the path and the reason. The subagent stays read-only: you run `shipflow repo <id> <path>` for each one and tell the user about dirty repos;
 - every file the ticket touches (modules, routes, models, UI, tests), with paths and one line on what each does today (per repo, when there are several);
 - repo conventions to follow (structure, naming, test style, branch names from recent `git branch -r`), per repo;
 - the exact **check commands** (lint, typecheck, tests) from each repo config;
-- how to start the app: run `pipeship recipe <repo>...` with all the repos. If it prints `none` and the repo has anything that serves requests (a web app, an API, an MCP server, a worker with a health route), write a draft recipe to `<dir>/recipe.json` (see "Test environment recipe"). If the repo runs several apps (a monorepo, a front and an API), the recipe lists one service per app. A back-end change needs a recipe too (see step 7). List what the app needs to run (database, env files, seed data, other services) and how to get test data locally.
+- how to start the app: run `shipflow recipe <repo>...` with all the repos. If it prints `none` and the repo has anything that serves requests (a web app, an API, an MCP server, a worker with a health route), write a draft recipe to `<dir>/recipe.json` (see "Test environment recipe"). If the repo runs several apps (a monorepo, a front and an API), the recipe lists one service per app. A back-end change needs a recipe too (see step 7). List what the app needs to run (database, env files, seed data, other services) and how to get test data locally.
 
 In `quick` mode, do the exploration yourself in the main session: on a small ticket a subagent costs as much as the work. Keep `explore.md` short: only the files to change, the check commands and how to start the app.
 
@@ -79,9 +79,9 @@ In `quick` mode, do the exploration yourself in the main session: on a small tic
 
 1. Compare `ticket.md` with `explore.md`. List what is missing or ambiguous. With several repos, ask the user to confirm the repo list. The plan and the chunks start only once the list is fixed.
 2. Ask **all questions in one batch**, numbered. Format: "Today the code does X. Question: … Recommended: …". The user answers in one word or corrects.
-3. In `full` mode, if the ticket is small (one coherent change), also propose switching to `quick`. When the user accepts, run `pipeship mode <id> quick` so the dashboard shows the badge.
-4. `pipeship wait <id> questions --reason "<n> questions to answer"`, then **stop and wait** for the answers.
-5. When the user answers: append the answers to `ticket.md` under `## Answers`, then `pipeship step <id> questions done`.
+3. In `full` mode, if the ticket is small (one coherent change), also propose switching to `quick`. When the user accepts, run `shipflow mode <id> quick` so the dashboard shows the badge.
+4. `shipflow wait <id> questions --reason "<n> questions to answer"`, then **stop and wait** for the answers.
+5. When the user answers: append the answers to `ticket.md` under `## Answers`, then `shipflow step <id> questions done`.
 
 In `quick` mode, ask only **blocking** questions. When the explore step added repos, the repo list is a blocking question. If there are none, mark the step done and continue without a pause.
 
@@ -102,7 +102,7 @@ For each chunk, in stack order:
    - `<ticket>` is the first ticket ref in lowercase (`abc-123`), or the 2 or 3 word `--name` for a plain-text ticket. Keep chunk names short too (`api`, `ui`, `backfill`): e.g. `abc-123/api`.
    - If the repo has a branch naming convention (see `explore.md`), follow it instead, e.g. `feat/abc-123-api`.
    - If the branch already exists, add `-2`.
-2. `pipeship chunk <id> <chunk> --worktree <path> --branch <branch> --status coding`. With several repos, add `--repo <name>`.
+2. `shipflow chunk <id> <chunk> --worktree <path> --branch <branch> --status coding`. With several repos, add `--repo <name>`.
 
 Then launch **one subagent per chunk (model `sonnet`), started together** so they run in parallel. Each subagent gets: its worktree path (it works only there), `ticket.md`, `explore.md`, `plan.md` (contracts + its chunk), the check commands. It must: implement its chunk against the contracts, make the checks pass, commit, and report what it did. Install dependencies in the worktree if the checks need them.
 
@@ -121,11 +121,11 @@ Write a short summary to `<dir>/review.md`.
 
 ## Step 6 — stack
 
-Before you push, check the rules of the repo and of the workspace (CLAUDE.md, AGENTS.md…). If they require the user's approval for a push or for a PR the team can see, run step 7 first, then `pipeship wait <id> stack --reason "Push <n> branches and open <n> PRs?"`, ask, and stop. Push only after an explicit yes. On a no, `pipeship step <id> stack skipped`.
+Before you push, check the rules of the repo and of the workspace (CLAUDE.md, AGENTS.md…). If they require the user's approval for a push or for a PR the team can see, run step 7 first, then `shipflow wait <id> stack --reason "Push <n> branches and open <n> PRs?"`, ask, and stop. Push only after an explicit yes. On a no, `shipflow step <id> stack skipped`.
 
 1. Push every chunk branch.
 2. In stack order, open one PR per chunk: `gh pr create --head <branch> --base <previous branch>` (the first PR of each repo targets that repo's base). Title from the ticket and chunk; body: what this chunk does, a link to the ticket, and the stack position ("2/3").
-3. `pipeship chunk <id> <chunk> --pr <url>`. The chunk stays `done`: the dashboard shows the PR link. The dashboard later sets `merged` or `closed` from GitHub.
+3. `shipflow chunk <id> <chunk> --pr <url>`. The chunk stays `done`: the dashboard shows the PR link. The dashboard later sets `merged` or `closed` from GitHub.
 
 With several repos, once every PR exists, add a "Related PRs" list with the other repos' PRs to each PR body (`gh pr edit <url> --body-file <file>`).
 
@@ -135,7 +135,7 @@ If a repo has no remote, skip its PRs and tell the user.
 
 Run the changed code, front end or back end. An API, MCP or engine change needs a running server as much as a UI change: unit tests do not show what a real client gets. Mark this step `skipped` only when nothing the change touches can run (a pure library with no server, a CLI you cannot start, a docs-only change), and say why in the final summary. Once every step is done or skipped, the pipeline becomes `ready` on its own if a preview runs, else `done`.
 
-1. **Start.** First run `pipeship recipe <repo>...` again with the final repo list. If the list changed since step 1, update the `repo` names in the draft. Then run `pipeship preview <id>`. It uses each repo's top worktree. Add `--recipe <dir>/recipe.json` if there is a draft. It copies local files, installs, starts each service of the recipe on its own free port (back ends first, then fronts), waits until each answers, and marks the `preview` step done. A draft recipe that works is saved, so later pipelines in this repo skip this work. Give the user the URLs it prints (the first is the main front).
+1. **Start.** First run `shipflow recipe <repo>...` again with the final repo list. If the list changed since step 1, update the `repo` names in the draft. Then run `shipflow preview <id>`. It uses each repo's top worktree. Add `--recipe <dir>/recipe.json` if there is a draft. It copies local files, installs, starts each service of the recipe on its own free port (back ends first, then fronts), waits until each answers, and marks the `preview` step done. A draft recipe that works is saved, so later pipelines in this repo skip this work. Give the user the URLs it prints (the first is the main front).
    Services the app needs (a local database, a queue) belong in a `start` command of the recipe, so the dashboard's "Stop preview" button stops them with the app (see "Test environment recipe"). Run other one-off setup yourself; for test data, see **Data** below.
 2. **Verify.** Use the changed behaviour the way its client does, and write what you called and what came back to `<dir>/verify.md`: a UI change in a browser (the preview tools of your harness), an HTTP API with `curl`, an MCP or other protocol with a real client. Cover the main path and one failure path. If you cannot exercise it (no test data, a missing service), say so in the summary. Report as working only what you exercised.
 3. **Fix.** If verification fails, fix the code in the worktree of the chunk that owns it, commit, restack and re-run the checks. Push only if step 6 opened PRs.
@@ -149,7 +149,7 @@ Rules for verify and the test guide:
 - **Data.** Use the data already there. Create data only in a local database, and list it in the guide. If the database is not local, create nothing and say so in the guide.
 - **Local effects only.** When the feature sends an SMS, an email or a payment, or calls a real third-party service, leave that part to the user: mark it "to test by hand" in the guide and explain how.
 
-If the preview fails to start, it prints the log tail: diagnose, fix the recipe or the code, and retry up to twice before asking the user. To fix the recipe: if `pipeship recipe <repo>` points to a `.pipeship.json` in the repo, fix that file in the top worktree (it will be part of the PRs) and tell the user; otherwise write a fixed draft and pass it with `--recipe`. With several repos there is no `.pipeship.json`: fix the saved recipe with a new draft passed with `--recipe`.
+If the preview fails to start, it prints the log tail: diagnose, fix the recipe or the code, and retry up to twice before asking the user. To fix the recipe: if `shipflow recipe <repo>` points to a `.shipflow.json` in the repo, fix that file in the top worktree (it will be part of the PRs) and tell the user; otherwise write a fixed draft and pass it with `--recipe`. With several repos there is no `.shipflow.json`: fix the saved recipe with a new draft passed with `--recipe`.
 
 ## End
 
@@ -157,7 +157,7 @@ Give the user a short summary: the test URL, the PRs in stack order (per repo), 
 
 ## Test environment recipe
 
-You write the recipe. Read `package.json`, the lock file, the README and the dev scripts to find the package manager, the dev command and how the app picks its port. A `.pipeship.json` at the repo root, if the team shares one, wins over the saved recipe.
+You write the recipe. Read `package.json`, the lock file, the README and the dev scripts to find the package manager, the dev command and how the app picks its port. A `.shipflow.json` at the repo root, if the team shares one, wins over the saved recipe.
 
 ```json
 {
@@ -170,7 +170,7 @@ You write the recipe. Read `package.json`, the lock file, the README and the dev
 ```
 
 - `start` must honour the port in `portEnv` (e.g. `next dev -p $PORT` if the framework ignores `PORT`).
-- Services the app needs must run in the foreground inside `start`, e.g. `docker compose up db & bun run dev`. pipeship stops the whole process group, so they stop with the app. A detached service (`docker compose up -d`) would outlive the pipeline. With `services`, a dependency such as a database can be its own service (`"ready": "tcp"`, `fixedPort` if its port cannot be set).
+- Services the app needs must run in the foreground inside `start`, e.g. `docker compose up db & bun run dev`. shipflow stops the whole process group, so they stop with the app. A detached service (`docker compose up -d`) would outlive the pipeline. With `services`, a dependency such as a database can be its own service (`"ready": "tcp"`, `fixedPort` if its port cannot be set).
 - `copyFiles`: untracked local files the app needs (`.env`, `.env.local`…), copied from the repo's own checkout into the worktree. List them with `git -C <repo> status --ignored --short`.
 - Every service is served as `http://localhost:<port>`. Leave the repo's config as it is: the recipe adapts to the repo.
 
@@ -195,9 +195,9 @@ For a monorepo or a front with its own API, list one service per app. `install` 
 - Set the port through `portEnv` or a flag in `start` (`next dev -p $PORT`, `vite --port $PORT`).
 - Start each app with its own command that takes the port, rather than the repo's global dev command (`turbo dev`, a root `pnpm dev`), which starts apps on fixed ports.
 - A service gets another service's URL through `env`: `"API_URL": "http://localhost:${api.port}"`.
-- pipeship picks every port first: fronts from 3000, other kinds from 4000 (4400 is skipped).
+- shipflow picks every port first: fronts from 3000, other kinds from 4000 (4400 is skipped).
 - Back ends and other kinds start first, then fronts. Each service must answer on its `readyPath` before the next one starts (`"ready": "tcp"` only waits for a connection to its port, for a database or queue).
-- If a port truly cannot be set, write `"fixedPort": <port>`. pipeship then refuses to start a second pipeline that shares a repo while one runs.
+- If a port truly cannot be set, write `"fixedPort": <port>`. shipflow then refuses to start a second pipeline that shares a repo while one runs.
 
 ### Several repos
 

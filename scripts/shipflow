@@ -4,7 +4,7 @@
 set -e
 root="$(cd "$(dirname "$(realpath "$0")")/.." && pwd)"
 if [ ! -d "$root/node_modules" ]; then
-  echo "pipeship: installing dependencies (first run)..." >&2
+  echo "shipflow: installing dependencies (first run)..." >&2
   (cd "$root" && bun install --frozen-lockfile --production >&2)
 fi
 exec bun "$root/src/cli.ts" "$@"

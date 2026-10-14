@@ -1,5 +1,5 @@
 interface:
-  display_name: "pipeship: ship"
+  display_name: "shipflow: ship"
   short_description: "From a ticket to stacked PRs and a running test app"
   default_prompt: "Use $ship to handle ABC-123"
 policy:

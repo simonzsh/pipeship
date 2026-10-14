@@ -1,8 +1,8 @@
-# pipeship — plan
+# shipflow — plan
 
 Pipeline de features autonome et environnements de test.
 
-> Nom : `pipeship` (pipeline + « ship », livrer une feature). Libre sur npm le 2026-10-12.
+> Nom : `shipflow` (« ship » + flux, livrer une feature). Ancien nom : `pipeship`, changé le 2026-10-14. Le nom `shipflow` est pris sur npm, mais l'outil n'y est pas publié.
 > Origine : discussion du 2026-10-12. Ce document est le point de départ des prochaines sessions.
 
 ## 1. Le problème
@@ -26,11 +26,11 @@ Pipeline de features autonome et environnements de test.
 
 ### Lancement
 - Je lance le pipeline de deux façons :
-  - avec la commande `/pipeship <ticket> [mode] [options]` ;
-  - en demandant à Claude d'utiliser pipeship par son nom, par exemple « livre ABC-123 avec pipeship ».
-- Claude ne lance pas le pipeline pour une demande de feature ordinaire. La description du skill le limite aux demandes qui nomment pipeship.
+  - avec la commande `/shipflow <ticket> [mode] [options]` ;
+  - en demandant à Claude d'utiliser shipflow par son nom, par exemple « livre ABC-123 avec shipflow ».
+- Claude ne lance pas le pipeline pour une demande de feature ordinaire. La description du skill le limite aux demandes qui nomment shipflow.
 - Raison : une petite demande ne doit pas lancer des sous-agents par erreur.
-- La description inclut les variantes de dictée (« pipe ship », « pipe chip »).
+- La description inclut les variantes de dictée (« ship flow », « chip flow »).
 - Limite : Claude décide d'après la description. Ce filtre est très fiable, mais pas absolu comme `disable-model-invocation: true`. Si Claude lance le pipeline par erreur, on revient à la commande seule.
 
 ### Source du ticket
@@ -38,7 +38,7 @@ Pipeline de features autonome et environnements de test.
 - Le skill ne contient pas de code par source. Claude lit le ticket avec l'outil disponible dans la session : MCP, `gh`, lecture d'URL.
 - Si aucun outil ne peut lire la source, Claude me demande de coller le texte du ticket.
 - Le skill écrit ensuite le ticket dans un format unique : `ticket.md` dans le dossier du pipeline. Les étapes suivantes lisent seulement ce fichier.
-- Exemples : `/pipeship ABC-123`, `/pipeship https://notion.so/…`, `/pipeship "ajouter un filtre par date"`.
+- Exemples : `/shipflow ABC-123`, `/shipflow https://notion.so/…`, `/shipflow "ajouter un filtre par date"`.
 
 ### Modes et étapes réglables
 - **`full`** (par défaut) : les 7 étapes.
@@ -100,7 +100,7 @@ Chaque étape tourne dans un sous-agent, avec un contexte propre. Chaque étape 
 Principe : simple, mais efficace et fonctionnel.
 
 ### Dans la V1
-- Le skill du pipeline avec les 7 étapes, lancé par `/pipeship:ship`.
+- Le skill du pipeline avec les 7 étapes, lancé par `/shipflow:ship`.
 - Les modes `full` et `quick`, et l'option `--skip`.
 - Toute source de ticket que Claude peut lire, plus le texte collé.
 - Un fichier d'état par pipeline, écrit par le skill à chaque étape.
@@ -130,7 +130,7 @@ Principe : simple, mais efficace et fonctionnel.
 skill du pipeline (dans Claude Code)
    │  écrit à chaque étape
    ▼
-~/.pipeship/pipelines/<id>/state.json   ← source de vérité unique
+~/.shipflow/pipelines/<id>/state.json   ← source de vérité unique
    ▲  lit (et écrit « stop »)
    │
 serveur local (un seul processus)
@@ -168,9 +168,9 @@ Choix et raisons :
 
 Décidé le 2026-10-13 : Claude écrit la recette, le programme l'exécute.
 - Au premier pipeline dans un repo, l'étape de cartographie lit le projet et écrit un brouillon de recette.
-- `pipeship preview --recipe` teste le brouillon. Si l'application démarre, il garde la recette dans `~/.pipeship/recipes/`.
+- `shipflow preview --recipe` teste le brouillon. Si l'application démarre, il garde la recette dans `~/.shipflow/recipes/`.
 - Les pipelines suivants réutilisent la recette gardée. Je n'écris jamais de recette.
-- Un `.pipeship.json` dans le repo reste possible, pour partager une recette avec l'équipe. Il passe avant la recette gardée.
+- Un `.shipflow.json` dans le repo reste possible, pour partager une recette avec l'équipe. Il passe avant la recette gardée.
 - Raison : un LLM trouve bien comment démarrer un projet. La gestion des processus (port, PID, arrêt) doit rester dans un programme fiable.
 
 Format de la recette :
@@ -215,16 +215,16 @@ Chaque jalon est utilisable seul.
 
 ## 8. Questions ouvertes
 
-1. **Forme du pipeline.** Tranché le 2026-10-12 : un skill lancé par `/pipeship:ship`, qui orchestre des sous-agents dans la session Claude. La pause de l'étape 2 se fait dans la conversation. Reste à voir si l'outil Workflow sert pour l'étape 4.
+1. **Forme du pipeline.** Tranché le 2026-10-12 : un skill lancé par `/shipflow:ship`, qui orchestre des sous-agents dans la session Claude. La pause de l'étape 2 se fait dans la conversation. Reste à voir si l'outil Workflow sert pour l'étape 4.
 2. **Source du ticket.** Tranché le 2026-10-12 : toute source. Voir « Source du ticket » (section 3).
-3. **Lancement du serveur du dashboard.** Tranché le 2026-10-12 : le skill lance `pipeship dashboard` au début de chaque pipeline. La commande ne fait rien si le dashboard tourne déjà.
+3. **Lancement du serveur du dashboard.** Tranché le 2026-10-12 : le skill lance `shipflow dashboard` au début de chaque pipeline. La commande ne fait rien si le dashboard tourne déjà.
 4. **Distribution publique.** Plugin Claude Code (skill + serveur) ? Package npm pour le serveur ?
-5. **Nettoyage.** Tranché le 2026-10-13 : un bouton « Delete » dans le dashboard (et `pipeship delete <id>`). Il supprime les worktrees et le dossier du pipeline, et garde les branches et les PR. Il refuse si un worktree contient des modifications non commitées. Pas d'archivage.
+5. **Nettoyage.** Tranché le 2026-10-13 : un bouton « Delete » dans le dashboard (et `shipflow delete <id>`). Il supprime les worktrees et le dossier du pipeline, et garde les branches et les PR. Il refuse si un worktree contient des modifications non commitées. Pas d'archivage.
 
 ## 9. Prochaine session
 
 V1 écrite le 2026-10-12 : skill, état, environnement de test, dashboard et bouton « Arrêter ».
 
 1. Choisir un vrai repo. Le pipeline écrit lui-même sa recette.
-2. Lancer `/pipeship quick` sur un petit ticket. Noter ce qui casse.
+2. Lancer `/shipflow quick` sur un petit ticket. Noter ce qui casse.
 3. Lancer un pipeline `full` à plusieurs morceaux.

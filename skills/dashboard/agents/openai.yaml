@@ -1,6 +1,6 @@
 interface:
-  display_name: "pipeship: dashboard"
-  short_description: "Start or stop the pipeship dashboard"
-  default_prompt: "Use $dashboard to open the pipeship dashboard"
+  display_name: "shipflow: dashboard"
+  short_description: "Start or stop the shipflow dashboard"
+  default_prompt: "Use $dashboard to open the shipflow dashboard"
 policy:
   allow_implicit_invocation: false

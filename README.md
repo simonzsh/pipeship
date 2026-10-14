@@ -1,4 +1,4 @@
-# pipeship
+# shipflow
 
 Feature pipeline for Claude Code and Codex. Give it a ticket or an issue from any source; it maps the code, asks its questions in one batch, plans, implements chunks in parallel worktrees, cleans up the code, opens stacked PRs, and starts the app so you can test it at a URL. It works with [T3 Code](https://github.com/pingdotgg/t3code): each pipeline links back to its T3 Code thread.
 
@@ -9,38 +9,49 @@ Requires [Bun](https://bun.sh), git and `gh`.
 In Claude Code, from your shell, then start a new session:
 
 ```sh
-claude plugin marketplace add simonzsh/pipeship
-claude plugin install pipeship@pipeship
+claude plugin marketplace add simonzsh/shipflow
+claude plugin install shipflow@shipflow
 ```
 
-Or in one step inside a session: `/plugin install pipeship --marketplace simonzsh/pipeship`. Updates arrive with `claude plugin update pipeship@pipeship`, or automatically once you turn on auto-update for the marketplace in `/plugin`.
+Or in one step inside a session: `/plugin install shipflow --marketplace simonzsh/shipflow`. Updates arrive with `claude plugin update shipflow@shipflow`, or automatically once you turn on auto-update for the marketplace in `/plugin`.
 
 In Codex, from your shell, then start a new session:
 
 ```sh
-codex plugin marketplace add simonzsh/pipeship
-codex plugin add pipeship@pipeship
+codex plugin marketplace add simonzsh/shipflow
+codex plugin add shipflow@shipflow
 ```
 
 The first run installs the dependencies, which takes a few seconds.
 
-To work on pipeship itself, clone the repo, run `bun install`, and link the skill instead: `ln -s "$PWD/skills/ship" ~/.claude/skills/ship`. Changes then apply at once.
+To work on shipflow itself, clone the repo, run `bun install`, and link the skill instead: `ln -s "$PWD/skills/ship" ~/.claude/skills/ship`. Changes then apply at once.
+
+### Coming from pipeship
+
+shipflow was named pipeship. The **Update** button cannot follow the rename: remove the old plugin and install the new one.
+
+```sh
+claude plugin uninstall pipeship@pipeship && claude plugin marketplace remove pipeship
+codex plugin remove pipeship@pipeship && codex plugin marketplace remove pipeship
+```
+
+Then run the install commands above. On first use, shipflow moves `~/.pipeship` to `~/.shipflow` and leaves a symlink, so your pipelines stay. A shared `.pipeship.json` recipe still works.
 
 ## Usage
 
-Give pipeship a ticket: a reference (`ABC-123`), a URL (Linear, Notion, GitHub, Jira…) or plain text. It reads the ticket with the tools your session has, such as an MCP server or `gh`.
+Give shipflow a ticket: a reference (`ABC-123`), a URL (Linear, Notion, GitHub, Jira…) or plain text. It reads the ticket with the tools your session has, such as an MCP server or `gh`.
 
 ### In Claude Code
 
-Type `/pipeship:ship` followed by the ticket (`/ship` if you use the dev link):
+Type `/shipflow:ship` followed by the ticket (`/ship` if you use the dev link):
 
 ```
-/pipeship:ship ABC-123
-/pipeship:ship quick https://github.com/org/repo/issues/42
-/pipeship:ship --skip questions,stack "Add a date filter to the orders page"
+/shipflow:ship ABC-123
+/shipflow:ship quick https://github.com/org/repo/issues/42
+/shipflow:ship --skip questions,stack "Add a date filter to the orders page"
 ```
 
-You can also ask in plain words: "ship ABC-123 with pipeship".
+You can also ask in plain words: "ship ABC-123 with shipflow".
 
 ### In Codex
 
@@ -51,26 +62,26 @@ $ship ABC-123
 $ship quick https://github.com/org/repo/issues/42
 ```
 
-You can also ask in plain words: "ship ABC-123 with pipeship". pipeship writes to `~/.pipeship`, starts background servers and pushes branches, so Codex's default sandbox asks for approval: approve these commands, or run Codex with a sandbox that allows them.
+You can also ask in plain words: "ship ABC-123 with shipflow". shipflow writes to `~/.shipflow`, starts background servers and pushes branches, so Codex's default sandbox asks for approval: approve these commands, or run Codex with a sandbox that allows them.
 
 ### Options
 
 - **Modes**: `full` (default, all 7 steps) and `quick` (one chunk, blocking questions only, explore in the main session, one `sonnet` cleanup pass instead of the full review, no `opus`).
 - **`--skip`** removes steps, e.g. `--skip questions,stack`. You can also say "skip the review" during the run.
 - **Several repos**: a ticket can span several repos. Pass `--repo` once per repo, or let the explore step find them. Each repo gets its own stack of PRs.
-- pipeship starts on its own whenever you give the agent a ticket to handle (a reference, a URL or a text). You do not need to name it. It does not run on questions or reviews.
+- shipflow starts on its own whenever you give the agent a ticket to handle (a reference, a URL or a text). You do not need to name it. It does not run on questions or reviews.
 
 ## Test environment
 
 At the end of a pipeline, the app runs from the feature's worktree. Each front service takes the first free port from 3000. Back ends and other kinds take the first free port from 4000 (4400, the dashboard, is skipped). Every service is served at `http://localhost:<port>`.
 
-You do not configure anything: on the first pipeline in a repo, Claude reads the project and writes a recipe (install and start commands, port variable, local files to copy). Once the app starts, the recipe is saved in `~/.pipeship/recipes/` and reused. To share a recipe with your team, commit it as `.pipeship.json` at the repo root:
+You do not configure anything: on the first pipeline in a repo, Claude reads the project and writes a recipe (install and start commands, port variable, local files to copy). Once the app starts, the recipe is saved in `~/.shipflow/recipes/` and reused. To share a recipe with your team, commit it as `.shipflow.json` at the repo root:
 
 ```json
 { "install": "bun install", "start": "bun run dev", "portEnv": "PORT", "copyFiles": [".env.local"], "readyPath": "/" }
 ```
 
-This recipe is one front service. For a monorepo, list `services` instead. pipeship picks every port first, so a service can read another one's port in `env`. Back ends start first, then fronts; each service must answer on its `readyPath` before the next one starts.
+This recipe is one front service. For a monorepo, list `services` instead. shipflow picks every port first, so a service can read another one's port in `env`. Back ends start first, then fronts; each service must answer on its `readyPath` before the next one starts.
 
 ```json
 {
@@ -83,7 +94,7 @@ This recipe is one front service. For a monorepo, list `services` instead. pipes
 }
 ```
 
-For a ticket that spans several repos, give each service its `repo` (the repo's folder name). It runs from the top worktree of that repo. Put `install` and `copyFiles` on the services. The recipe is saved for this set of repos. A pipeline with several repos never reads `.pipeship.json`.
+For a ticket that spans several repos, give each service its `repo` (the repo's folder name). It runs from the top worktree of that repo. Put `install` and `copyFiles` on the services. The recipe is saved for this set of repos. A pipeline with several repos never reads `.shipflow.json`.
 
 ```json
 {
@@ -96,7 +107,7 @@ For a ticket that spans several repos, give each service its `repo` (the repo's 
 }
 ```
 
-A service that cannot take its port from the environment can set `"fixedPort": <port>`. pipeship then refuses to start a second pipeline that shares a repo while one test environment runs.
+A service that cannot take its port from the environment can set `"fixedPort": <port>`. shipflow then refuses to start a second pipeline that shares a repo while one test environment runs.
 
 ## Dashboard
 
@@ -107,11 +118,11 @@ The dashboard on http://localhost:4400 has two columns.
 
 Under 900 px the page shows one column, with a back button on the detail. Light and dark themes follow your system, with a toggle.
 
-Each pipeline's header shows the logo of the agent that runs the pipeline (Claude Code or Codex). Click it to copy the command that reopens the session in its folder. Pipeship stores the harness, the session id, the folder and the T3 Code thread, never a pid or a token.
+Each pipeline's header shows the logo of the agent that runs the pipeline (Claude Code or Codex). Click it to copy the command that reopens the session in its folder. Shipflow stores the harness, the session id, the folder and the T3 Code thread, never a pid or a token.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/dashboard-dark.png">
-  <img alt="The pipeship dashboard: the pipelines grouped by status on the left; on the right a pipeline over two repos with its steps, one PR stack per repo and the Test tab" src="docs/dashboard-light.png" width="720">
+  <img alt="The shipflow dashboard: the pipelines grouped by status on the left; on the right a pipeline over two repos with its steps, one PR stack per repo and the Test tab" src="docs/dashboard-light.png" width="720">
 </picture>
 
 ### Actions
@@ -120,7 +131,7 @@ The header can request a pipeline stop (the agents stop after their current step
 
 The PR stack is always visible, with one row per repo, its path and its merge button. A finished pipeline's PRs merge in two steps, one button at a time. The green "Combine PRs" button merges each PR into the branch below, from the top, so one PR is left. The violet "Merge into <base>" button then squash-merges that PR into the base branch, after a confirmation. Both wait for the checks and stop at the first PR that cannot merge, with the reason in the pipeline's detail. Only one merge runs at a time.
 
-The dashboard also syncs PR statuses with GitHub. At startup, on page load and every 60 seconds, it runs `gh pr view` for each chunk that has a PR and is not merged. It skips pipelines with no such PR, and pipelines while a merge runs. A PR merged elsewhere sets the chunk to `merged`. A PR closed without merge sets it to `closed`, and a reopened PR sets it back to `done`. Without `gh`, or on an error, the state stays as it is and the error goes to `~/.pipeship/dashboard.log`. The merge buttons stay for a closed PR: Combine PRs and Merge then fail with "PR #n is closed". The page-load check runs at most once every 15 seconds. In the pipeline list, a violet merge icon shows that all PRs of a pipeline are merged.
+The dashboard also syncs PR statuses with GitHub. At startup, on page load and every 60 seconds, it runs `gh pr view` for each chunk that has a PR and is not merged. It skips pipelines with no such PR, and pipelines while a merge runs. A PR merged elsewhere sets the chunk to `merged`. A PR closed without merge sets it to `closed`, and a reopened PR sets it back to `done`. Without `gh`, or on an error, the state stays as it is and the error goes to `~/.shipflow/dashboard.log`. The merge buttons stay for a closed PR: Combine PRs and Merge then fail with "PR #n is closed". The page-load check runs at most once every 15 seconds. In the pipeline list, a violet merge icon shows that all PRs of a pipeline are merged.
 
 ### Test tab
 
@@ -143,19 +154,19 @@ Diffs come from the local branches (or `origin/<branch>` when the local one is g
 
 ### T3 Code
 
-pipeship recognizes when a session runs in [T3 Code](https://github.com/pingdotgg/t3code). The header then shows a **T3** button next to the agent logo. Click it to open that pipeline's session in the T3 Code desktop app (`t3code://threads/<environmentId>/<threadId>`, T3 Code 0.0.46 or later). Each pipeline opens its own thread, so you can jump from the dashboard to the right conversation.
+shipflow recognizes when a session runs in [T3 Code](https://github.com/pingdotgg/t3code). The header then shows a **T3** button next to the agent logo. Click it to open that pipeline's session in the T3 Code desktop app (`t3code://threads/<environmentId>/<threadId>`, T3 Code 0.0.46 or later). Each pipeline opens its own thread, so you can jump from the dashboard to the right conversation.
 
-`pipeship new` finds the thread in T3 Code's local database (`$T3CODE_HOME`, default `~/.t3`), read-only; `pipeship step` looks again until it is found. Without T3 Code, the header has no T3 button and nothing else changes.
+`shipflow new` finds the thread in T3 Code's local database (`$T3CODE_HOME`, default `~/.t3`), read-only; `shipflow step` looks again until it is found. Without T3 Code, the header has no T3 button and nothing else changes.
 
 ### Run it
 
-The pipeline starts the dashboard for you. To start or stop it yourself, use `/pipeship:dashboard` and `/pipeship:dashboard stop` in Claude Code, or `$dashboard` and `$dashboard stop` in Codex (from a terminal: `scripts/pipeship dashboard [stop]`). Stopping it leaves the pipelines and their test servers running.
+The pipeline starts the dashboard for you. To start or stop it yourself, use `/shipflow:dashboard` and `/shipflow:dashboard stop` in Claude Code, or `$dashboard` and `$dashboard stop` in Codex (from a terminal: `scripts/shipflow dashboard [stop]`). Stopping it leaves the pipelines and their test servers running.
 
-When a newer version is on GitHub (`main`, checked at most once every 10 minutes), the bottom of the left column shows **Update available** with an **Update** button. It works for Claude Code and Codex installs (a git checkout shows a hint instead of the button). It runs `claude plugin update pipeship@pipeship`, or `codex plugin marketplace upgrade pipeship` then `codex plugin add pipeship@pipeship`, restarts the dashboard on the same port and reloads the page. It refuses while a test environment is starting or a merge runs. Pipelines and their test servers keep running.
+When a newer version is on GitHub (`main`, checked at most once every 10 minutes), the bottom of the left column shows **Update available** with an **Update** button. It works for Claude Code and Codex installs (a git checkout shows a hint instead of the button). It runs `claude plugin update shipflow@shipflow`, or `codex plugin marketplace upgrade shipflow` then `codex plugin add shipflow@shipflow`, restarts the dashboard on the same port and reloads the page. It refuses while a test environment is starting or a merge runs. Pipelines and their test servers keep running.
 
 The page is React, Tailwind and [shadcn/ui](https://ui.shadcn.com) components (`src/dashboard/`). Bun builds it in memory when the dashboard starts: no Vite, no build step.
 
-State lives in `~/.pipeship/pipelines/<id>/` (`state.json`, `ticket.md`, `explore.md`, `plan.md`, `test.md`, worktrees, `preview.log`).
+State lives in `~/.shipflow/pipelines/<id>/` (`state.json`, `ticket.md`, `explore.md`, `plan.md`, `test.md`, worktrees, `preview.log`).
 
 ## Develop
 

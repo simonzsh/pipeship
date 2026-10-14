@@ -5,8 +5,8 @@ import { defaultRunner, errorMessage, type Runner } from "./merge.ts";
 import { harnessHomes, type Env } from "./session.ts";
 import type { Harness } from "./state.ts";
 
-const LATEST_URL = "https://raw.githubusercontent.com/simonzsh/pipeship/main/.claude-plugin/plugin.json";
-const PLUGIN_KEY = "pipeship@pipeship";
+const LATEST_URL = "https://raw.githubusercontent.com/simonzsh/shipflow/main/.claude-plugin/plugin.json";
+const PLUGIN_KEY = "shipflow@shipflow";
 const CACHE_MS = 600_000;
 
 // What /api/update returns; harness is null for a copy no plugin manager installed.
@@ -102,7 +102,7 @@ interface Strategy {
 const strategies: Record<Harness, Strategy> = {
   claude: { commands: [["claude", ["plugin", "update", PLUGIN_KEY]]], read: readClaudeInstalled },
   codex: {
-    commands: [["codex", ["plugin", "marketplace", "upgrade", "pipeship"]], ["codex", ["plugin", "add", PLUGIN_KEY]]],
+    commands: [["codex", ["plugin", "marketplace", "upgrade", "shipflow"]], ["codex", ["plugin", "add", PLUGIN_KEY]]],
     read: readCodexInstalled,
   },
 };
@@ -145,7 +145,7 @@ export async function installUpdate(harness: Harness | null, deps: Partial<Insta
     if (after.installPath === before?.installPath && after.version === before?.version) {
       return { restarting: false, message: "Already up to date: the plugin did not change" };
     }
-    const launcher = join(after.installPath, "scripts", "pipeship");
+    const launcher = join(after.installPath, "scripts", "shipflow");
     if (!launcherExists(launcher)) return { restarting: false, message: `The new version has no launcher at ${launcher}` };
     // A start or merge may have begun while the update ran.
     const late = blocker();

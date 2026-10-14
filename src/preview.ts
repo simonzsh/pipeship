@@ -64,12 +64,13 @@ export function savedRecipePath(repos: string[]): string {
   return join(home(), "recipes", `${sorted.map(repoName).join("+")}-${hash}.json`);
 }
 
-// A recipe shared in the repo wins over the one pipeship saved after a successful start.
+// A recipe shared in the repo wins over the one shipflow saved after a successful start.
 // Several repos have no shared place: only the saved recipe counts.
 export function findRecipe(repos: string[], worktree?: string): string | undefined {
   const saved = savedRecipePath(repos);
   if (repos.length !== 1) return existsSync(saved) ? saved : undefined;
-  const shared = [worktree, repos[0]].filter((dir) => dir !== undefined).map((dir) => join(dir, ".pipeship.json"));
+  // .pipeship.json is the file name from before the rename.
+  const shared = [worktree, repos[0]].filter((dir) => dir !== undefined).flatMap((dir) => [join(dir, ".shipflow.json"), join(dir, ".pipeship.json")]);
   return [...shared, saved].find(existsSync);
 }
 
@@ -363,7 +364,7 @@ export async function startPreview(id: string, worktree?: string, draft?: string
   state = readState(id);
 
   const { repos } = state;
-  if (repos.length === 0) throw new Error(`pipeline ${id} has no repo: add one with pipeship repo ${id} <path>`);
+  if (repos.length === 0) throw new Error(`pipeline ${id} has no repo: add one with shipflow repo ${id} <path>`);
   if (worktree && repos.length > 1) {
     throw new Error(`pipeline ${id} has several repos: drop ${worktree}, each repo's worktree comes from its chunks`);
   }
@@ -380,7 +381,7 @@ export async function startPreview(id: string, worktree?: string, draft?: string
     const repo = svc.repo ? findRepo(state, svc.repo)! : repos[0]!;
     const tree = trees.get(repo.path);
     if (!tree) {
-      throw new Error(`service "${svc.name}": no worktree for repo ${repoName(repo.path)}: record one with pipeship chunk ${id} <chunk> --repo ${repoName(repo.path)} --worktree <path>`);
+      throw new Error(`service "${svc.name}": no worktree for repo ${repoName(repo.path)}: record one with shipflow chunk ${id} <chunk> --repo ${repoName(repo.path)} --worktree <path>`);
     }
     return [svc.name, { repo: repo.path, worktree: tree }];
   }));
@@ -394,7 +395,7 @@ export async function startPreview(id: string, worktree?: string, draft?: string
     if (other) {
       const shared = repoName(other.repos.find((r) => paths.includes(r.path))!.path);
       throw new Error(
-        `service "${fixed.name}" uses the fixed port ${fixed.fixedPort}, and pipeline ${other.id} of the repo ${shared} has a live test environment: stop it first (pipeship stop ${other.id})`,
+        `service "${fixed.name}" uses the fixed port ${fixed.fixedPort}, and pipeline ${other.id} of the repo ${shared} has a live test environment: stop it first (shipflow stop ${other.id})`,
       );
     }
   }

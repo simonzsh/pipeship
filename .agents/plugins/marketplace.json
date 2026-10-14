@@ -1,9 +1,9 @@
 {
-  "name": "pipeship",
-  "interface": { "displayName": "pipeship" },
+  "name": "shipflow",
+  "interface": { "displayName": "shipflow" },
   "plugins": [
     {
-      "name": "pipeship",
+      "name": "shipflow",
       "source": { "source": "local", "path": "./" },
       "policy": { "installation": "AVAILABLE", "authentication": "ON_INSTALL" },
       "category": "Developer Tools"

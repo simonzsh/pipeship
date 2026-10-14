@@ -19,7 +19,7 @@ function EmptyState() {
       <div className="flex flex-col gap-2">
         <p className="font-semibold">No pipeline yet</p>
         <p className="text-sm text-muted-foreground">
-          Run <code className="rounded bg-muted px-1.5 py-0.5">/pipeship:ship &lt;ticket&gt;</code> in Claude Code or{" "}
+          Run <code className="rounded bg-muted px-1.5 py-0.5">/shipflow:ship &lt;ticket&gt;</code> in Claude Code or{" "}
           <code className="rounded bg-muted px-1.5 py-0.5">$ship &lt;ticket&gt;</code> in Codex.
         </p>
       </div>
@@ -97,7 +97,7 @@ function App() {
     <div className="flex h-dvh flex-col">
       <header className="flex items-center gap-3 border-b px-4 py-3 sm:px-6">
         <div className="flex flex-col">
-          <h1 className="text-xl font-semibold tracking-tight">pipeship</h1>
+          <h1 className="text-xl font-semibold tracking-tight">shipflow</h1>
           <p className="text-sm text-muted-foreground">
             {summary}
           </p>

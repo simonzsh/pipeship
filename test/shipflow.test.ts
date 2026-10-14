@@ -1,9 +1,9 @@
 import { afterAll, beforeEach, describe, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync, existsSync, readFileSync } from "node:fs";
+import { lstatSync, mkdirSync, mkdtempSync, rmSync, writeFileSync, existsSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
-  addRepo, createPipeline, listStates, pipelineDir, pipelineStatus, readState, setMode, setStep, updateState, upsertChunk, waitForUser, type State,
+  addRepo, createPipeline, listStates, migrateHome, pipelineDir, pipelineStatus, readState, setMode, setStep, updateState, upsertChunk, waitForUser, type State,
 } from "../src/state.ts";
 import { chunksOf, diffRange, repoName, repoStacks, sharesRepo, topChunk } from "../src/repos.ts";
 import {
@@ -31,8 +31,8 @@ import { compareVersions, currentVersion, getUpdateInfo, detectHarness, installU
 import type { Harness } from "../src/state.ts";
 import { shouldReload } from "../src/dashboard/update-info.ts";
 
-const root = mkdtempSync(join(tmpdir(), "pipeship-test-"));
-process.env.PIPESHIP_HOME = join(root, "home");
+const root = mkdtempSync(join(tmpdir(), "shipflow-test-"));
+process.env.SHIPFLOW_HOME = join(root, "home");
 process.env.T3CODE_HOME = join(root, "t3"); // never read the real T3 Code database
 afterAll(() => rmSync(root, { recursive: true, force: true }));
 
@@ -232,7 +232,7 @@ test("preview starts the app, copies local files, and stop kills it", async () =
   writeFileSync(join(repo, ".env.local"), "SECRET=1");
   const worktree = mkdtempSync(join(root, "wt-"));
   writeFileSync(
-    join(repo, ".pipeship.json"),
+    join(repo, ".shipflow.json"),
     JSON.stringify({
       start: `bun -e "Bun.serve({ port: Number(process.env.APP_PORT), fetch: () => new Response('hello') })"`,
       portEnv: "APP_PORT",
@@ -272,12 +272,32 @@ test("preview starts the app, copies local files, and stop kills it", async () =
 }, 30_000);
 
 test("preview fails clearly when the server crashes", async () => {
-  writeFileSync(join(repo, ".pipeship.json"), JSON.stringify({ start: "echo boom; exit 1" }));
+  writeFileSync(join(repo, ".shipflow.json"), JSON.stringify({ start: "echo boom; exit 1" }));
   const { id } = createPipeline({ repos: [{ path: repo }], title: "t", source: "text" });
   await expect(startPreview(id, repo)).rejects.toThrow("boom");
   expect(readState(id).preview).toBeUndefined();
   expect(existsSync(join(pipelineDir(id), "preview-app.log"))).toBe(true);
 }, 30_000);
+
+test("the home of pipeship moves to the new name once and leaves a symlink", () => {
+  const dir = mkdtempSync(join(root, "migrate-"));
+  const old = join(dir, ".pipeship"), next = join(dir, ".shipflow");
+  mkdirSync(join(old, "pipelines"), { recursive: true });
+  writeFileSync(join(old, "pipelines", "state.json"), "{}");
+  migrateHome(old, next);
+  expect(readFileSync(join(next, "pipelines", "state.json"), "utf8")).toBe("{}");
+  expect(lstatSync(old).isSymbolicLink()).toBe(true);
+  migrateHome(old, next); // a second call changes nothing
+  expect(existsSync(join(old, "pipelines", "state.json"))).toBe(true);
+});
+
+test("a shared recipe still loads under its old name .pipeship.json", () => {
+  const dir = mkdtempSync(join(root, "old-recipe-"));
+  writeFileSync(join(dir, ".pipeship.json"), "{}");
+  expect(findRecipe([dir])).toBe(join(dir, ".pipeship.json"));
+  writeFileSync(join(dir, ".shipflow.json"), "{}");
+  expect(findRecipe([dir])).toBe(join(dir, ".shipflow.json"));
+});
 
 test("a draft recipe is saved for the repo only when the app starts", async () => {
   const draft = join(root, "draft.json");
@@ -307,7 +327,7 @@ test("a pipeline keeps one link per ticket, and old state files are upgraded", (
   expect(id).toEndWith("abc-3-abc-4");
   expect(readState(id).ticket.links.map((l) => l.ref)).toEqual(["ABC-3", "ABC-4"]);
 
-  const path = join(process.env.PIPESHIP_HOME!, "pipelines", id, "state.json");
+  const path = join(process.env.SHIPFLOW_HOME!, "pipelines", id, "state.json");
   const old = JSON.parse(readFileSync(path, "utf8"));
   old.ticket = { source: "linear", title: "t", ref: "ABC-3,ABC-4", url: "https://example.com/ABC-3" };
   writeFileSync(path, JSON.stringify(old));
@@ -320,7 +340,7 @@ test("delete removes the worktrees and files, keeps the branch, and protects unc
   git(repo, "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "--allow-empty", "-m", "init");
   const { id } = createPipeline({ repos: [{ path: repo }], title: "t", source: "text" });
   const wt = join(pipelineDir(id), "worktrees", "main");
-  git(repo, "worktree", "add", "-q", "-b", "pipeship/test/main", wt);
+  git(repo, "worktree", "add", "-q", "-b", "shipflow/test/main", wt);
 
   await expect(deletePipeline(id)).rejects.toThrow("stop the pipeline");
   finishSteps(id);
@@ -331,7 +351,7 @@ test("delete removes the worktrees and files, keeps the branch, and protects unc
   await deletePipeline(id, { force: true });
   expect(existsSync(pipelineDir(id))).toBe(false);
   expect(git(repo, "worktree", "list").stdout).not.toContain(wt);
-  expect(git(repo, "branch", "--list", "pipeship/test/main").stdout).toContain("pipeship/test/main");
+  expect(git(repo, "branch", "--list", "shipflow/test/main").stdout).toContain("shipflow/test/main");
 });
 
 test("package.json and both plugin manifests declare the same version", () => {
@@ -548,7 +568,7 @@ test("a multi-service recipe starts back ends first, wires ports, and stop kills
   const api = `Bun.serve({ port: Number(process.env.API_PORT), fetch: () => new Response('api') })`;
   const web = `await fetch(process.env.API_URL); Bun.serve({ port: Number(process.env.WEB_PORT), fetch: () => new Response(process.env.API_URL) })`;
   writeFileSync(
-    join(repo, ".pipeship.json"),
+    join(repo, ".shipflow.json"),
     JSON.stringify({
       services: [
         { name: "web", kind: "front", start: `bun -e "${web}"`, portEnv: "WEB_PORT", env: { API_URL: "http://localhost:${api.port}" } },
@@ -580,7 +600,7 @@ test("a multi-service recipe starts back ends first, wires ports, and stop kills
 test("a failed service stops the services already started", async () => {
   const api = `Bun.serve({ port: Number(process.env.PORT), fetch: () => new Response('api') })`;
   writeFileSync(
-    join(repo, ".pipeship.json"),
+    join(repo, ".shipflow.json"),
     JSON.stringify({
       services: [
         { name: "api", kind: "back", start: `bun -e "${api}"` },
@@ -620,7 +640,7 @@ test("a fixed-port recipe refuses a second live pipeline of the same repo", asyn
   const a = createPipeline({ repos: [{ path: repo }], title: "a", name: "fixed-a", source: "text" });
   const b = createPipeline({ repos: [{ path: repo }], title: "b", name: "fixed-b", source: "text" });
   fakePreview(a.id, sleeper.pid);
-  writeFileSync(join(repo, ".pipeship.json"), JSON.stringify({ services: [{ name: "db", kind: "infra", start: "sleep 60", fixedPort: 4999 }] }));
+  writeFileSync(join(repo, ".shipflow.json"), JSON.stringify({ services: [{ name: "db", kind: "infra", start: "sleep 60", fixedPort: 4999 }] }));
   try {
     await expect(startPreview(b.id, repo)).rejects.toThrow("live test environment");
   } finally {
@@ -640,7 +660,7 @@ test("a pipeline still starting blocks a fixed-port recipe", async () => {
   const a = createPipeline({ repos: [{ path: repo }], title: "a", name: "starting-a", source: "text" });
   const b = createPipeline({ repos: [{ path: repo }], title: "b", name: "starting-b", source: "text" });
   fakePreview(a.id, undefined, { services: [{ name: "db", kind: "infra", port: 4999, url: "http://localhost:4999", log: "x" }] });
-  writeFileSync(join(repo, ".pipeship.json"), JSON.stringify({ services: [{ name: "db", kind: "infra", start: "sleep 60", fixedPort: 4998 }] }));
+  writeFileSync(join(repo, ".shipflow.json"), JSON.stringify({ services: [{ name: "db", kind: "infra", start: "sleep 60", fixedPort: 4998 }] }));
   await expect(startPreview(b.id, repo)).rejects.toThrow("live test environment");
 });
 
@@ -649,7 +669,7 @@ test("a start avoids the ports another pipeline has planned", async () => {
   const b = createPipeline({ repos: [{ path: repo }], title: "b", name: "reserve-b", source: "text" });
   fakePreview(a.id, undefined, { port: 3000, services: [{ name: "app", kind: "front", port: 3000, url: "http://localhost:3000", log: "x" }] });
   writeFileSync(
-    join(repo, ".pipeship.json"),
+    join(repo, ".shipflow.json"),
     JSON.stringify({ start: `bun -e "Bun.serve({ port: Number(process.env.PORT), fetch: () => new Response('ok') })"` }),
   );
   try {
@@ -663,7 +683,7 @@ test("a start avoids the ports another pipeline has planned", async () => {
 test("a tcp service is ready once its port accepts connections", async () => {
   const db = `Bun.listen({ hostname: 'localhost', port: Number(process.env.DB_PORT), socket: { data() {} } }); setInterval(() => {}, 1e6)`;
   writeFileSync(
-    join(repo, ".pipeship.json"),
+    join(repo, ".shipflow.json"),
     JSON.stringify({ services: [{ name: "db", kind: "infra", start: `bun -e "${db}"`, portEnv: "DB_PORT", ready: "tcp", readyPath: "/ignored" }] }),
   );
   const { id } = createPipeline({ repos: [{ path: repo }], title: "t", source: "text" });
@@ -680,7 +700,7 @@ test("a tcp service is ready once its port accepts connections", async () => {
 test("stop during a slow start leaves no service running", async () => {
   const api = `await Bun.sleep(2000); Bun.serve({ port: Number(process.env.PORT), fetch: () => new Response('api') })`;
   writeFileSync(
-    join(repo, ".pipeship.json"),
+    join(repo, ".shipflow.json"),
     JSON.stringify({
       services: [
         { name: "api", kind: "back", start: `bun -e "${api}"` },
@@ -1474,7 +1494,7 @@ test("recipe validation for several repos", () => {
 test("a recipe saved for several repos does not depend on their order", () => {
   expect(savedRecipePath(["/x/a", "/x/b"])).toBe(savedRecipePath(["/x/b", "/x/a"]));
   expect(savedRecipePath(["/x/a", "/x/b"])).not.toBe(savedRecipePath(["/x/a", "/x/c"]));
-  expect(savedRecipePath(["/x/a"])).toBe(join(process.env.PIPESHIP_HOME!, "recipes", "x-a.json"));
+  expect(savedRecipePath(["/x/a"])).toBe(join(process.env.SHIPFLOW_HOME!, "recipes", "x-a.json"));
 });
 
 test("a preview over two repos starts each service from its own worktree", async () => {
@@ -1939,7 +1959,7 @@ test("displaySteps gives a finished step the time it took", () => {
 // A done pipeline with a chunk worktree, so the preview routes can start it (no worktree argument).
 function donePipeline(recipe: object) {
   const wt = mkdtempSync(join(root, "wt-"));
-  writeFileSync(join(wt, ".pipeship.json"), JSON.stringify(recipe));
+  writeFileSync(join(wt, ".shipflow.json"), JSON.stringify(recipe));
   const { id } = createPipeline({ repos: [{ path: repo }], title: "t", source: "text" });
   upsertChunk(id, { name: "c", branch: "c", worktree: wt });
   finishSteps(id);
@@ -2009,7 +2029,7 @@ test("a failed start records previewError and the next start clears it", async (
   expect(readState(id).previewError).toMatch(/boom/);
   expect(readState(id).status).toBe("done");
 
-  writeFileSync(join(readState(id).chunks[0]!.worktree!, ".pipeship.json"), JSON.stringify(SERVER));
+  writeFileSync(join(readState(id).chunks[0]!.worktree!, ".shipflow.json"), JSON.stringify(SERVER));
   const run = requestPreviewStart(id);
   expect(run.state.previewError).toBeUndefined();
   await run.done;
@@ -2114,7 +2134,7 @@ test("a stop request keeps a failed or archived pipeline's status", async () => 
 
 test("old state files are migrated by upgrade", () => {
   const write = (id: string, patch: object) => {
-    const path = join(process.env.PIPESHIP_HOME!, "pipelines", id, "state.json");
+    const path = join(process.env.SHIPFLOW_HOME!, "pipelines", id, "state.json");
     writeFileSync(path, JSON.stringify({ ...JSON.parse(readFileSync(path, "utf8")), ...patch }));
   };
   const make = () => createPipeline({ repos: [{ path: repo }], title: "t", source: "text" }).id;
@@ -2134,15 +2154,15 @@ test("old state files are migrated by upgrade", () => {
   expect(readState(failedGhost).status).toBe("running");
 });
 
-// The PR sync scans every pipeline in PIPESHIP_HOME: each sync test gets an empty home of its own.
+// The PR sync scans every pipeline in SHIPFLOW_HOME: each sync test gets an empty home of its own.
 function syncTest(name: string, fn: () => Promise<void>) {
   test(name, async () => {
-    const saved = process.env.PIPESHIP_HOME;
-    process.env.PIPESHIP_HOME = mkdtempSync(join(root, "sync-home-"));
+    const saved = process.env.SHIPFLOW_HOME;
+    process.env.SHIPFLOW_HOME = mkdtempSync(join(root, "sync-home-"));
     try {
       await fn();
     } finally {
-      process.env.PIPESHIP_HOME = saved;
+      process.env.SHIPFLOW_HOME = saved;
     }
   });
 }
@@ -2170,7 +2190,7 @@ function syncPipeline(title: string, prs: (number | undefined)[]) {
   return id;
 }
 
-syncTest("pr sync: a PR merged outside pipeship sets the chunk to merged", async () => {
+syncTest("pr sync: a PR merged outside shipflow sets the chunk to merged", async () => {
   const id = syncPipeline("sync merged", [101]);
   const logs: string[] = [];
   const gh = syncGh({ [prUrl(101)]: { state: "MERGED", mergedAt: "2026-01-01T00:00:00Z" } });
@@ -2401,15 +2421,15 @@ test("installUpdate refuses with 409 while a start or merge runs, without runnin
 
 test("detectHarness reads the real path and honors the config dir overrides", () => {
   const env = { CLAUDE_CONFIG_DIR: "/home/u/.claude", CODEX_HOME: "/home/u/.codex" };
-  expect(detectHarness("/home/u/.claude/plugins/cache/pipeship/pipeship/0.11.0", env)).toBe("claude");
-  expect(detectHarness("/home/u/.codex/plugins/cache/pipeship/pipeship/0.11.0", env)).toBe("codex");
-  expect(detectHarness("/home/u/src/pipeship", env)).toBeUndefined();
+  expect(detectHarness("/home/u/.claude/plugins/cache/shipflow/shipflow/0.11.0", env)).toBe("claude");
+  expect(detectHarness("/home/u/.codex/plugins/cache/shipflow/shipflow/0.11.0", env)).toBe("codex");
+  expect(detectHarness("/home/u/src/shipflow", env)).toBeUndefined();
   expect(detectHarness("/opt/cc/plugins/cache/p", { CLAUDE_CONFIG_DIR: "/opt/cc" })).toBe("claude");
   expect(detectHarness("/opt/cx/plugins/cache/p", { CODEX_HOME: "/opt/cx" })).toBe("codex");
 });
 
 const codexList = (version?: string) =>
-  JSON.stringify({ installed: version ? [{ pluginId: "pipeship@pipeship", name: "pipeship", marketplaceName: "pipeship", version }] : [] });
+  JSON.stringify({ installed: version ? [{ pluginId: "shipflow@shipflow", name: "shipflow", marketplaceName: "shipflow", version }] : [] });
 
 // Fake harness CLI. The installed version steps through `versions` once the last update command ran ([] = not installed).
 // Claude's installs are read from a file under env, Codex's from `codex plugin list`.
@@ -2422,10 +2442,10 @@ function fakeHarness(harness: Harness, versions: string[], code = 0) {
     const v = versions[i];
     if (!v) return;
     mkdirSync(join(home, "plugins"), { recursive: true });
-    writeFileSync(join(home, "plugins", "installed_plugins.json"), JSON.stringify({ plugins: { "pipeship@pipeship": [{ installPath: `/cache/${v}`, version: v }] } }));
+    writeFileSync(join(home, "plugins", "installed_plugins.json"), JSON.stringify({ plugins: { "shipflow@shipflow": [{ installPath: `/cache/${v}`, version: v }] } }));
   };
   writeClaude();
-  const last = harness === "claude" ? "claude plugin update pipeship@pipeship" : "codex plugin add pipeship@pipeship";
+  const last = harness === "claude" ? "claude plugin update shipflow@shipflow" : "codex plugin add shipflow@shipflow";
   const run: Runner = async (cmd, args) => {
     const line = [cmd, ...args].join(" ");
     ran.push(line);
@@ -2437,11 +2457,11 @@ function fakeHarness(harness: Harness, versions: string[], code = 0) {
 }
 
 const launcherOf = (harness: Harness, v: string) =>
-  harness === "claude" ? `/cache/${v}/scripts/pipeship` : expect.stringMatching(new RegExp(`plugins/cache/pipeship/pipeship/${v.replace(/\./g, "\\.")}/scripts/pipeship$`));
+  harness === "claude" ? `/cache/${v}/scripts/shipflow` : expect.stringMatching(new RegExp(`plugins/cache/shipflow/shipflow/${v.replace(/\./g, "\\.")}/scripts/shipflow$`));
 
 test("codex: reads the install path from the cache layout", async () => {
   const got = await readCodexInstalled(async () => ({ code: 0, stdout: codexList("0.11.0"), stderr: "" }), { CODEX_HOME: "/h" });
-  expect(got).toEqual({ installPath: "/h/plugins/cache/pipeship/pipeship/0.11.0", version: "0.11.0" });
+  expect(got).toEqual({ installPath: "/h/plugins/cache/shipflow/shipflow/0.11.0", version: "0.11.0" });
 });
 
 test("codex: runs marketplace upgrade then add", async () => {
@@ -2449,8 +2469,8 @@ test("codex: runs marketplace upgrade then add", async () => {
   await installUpdate("codex", { run: f.run, env: f.env, launcherExists: () => true });
   expect(f.ran).toEqual([
     "codex plugin list --json",
-    "codex plugin marketplace upgrade pipeship",
-    "codex plugin add pipeship@pipeship",
+    "codex plugin marketplace upgrade shipflow",
+    "codex plugin add shipflow@shipflow",
     "codex plugin list --json",
   ]);
 });

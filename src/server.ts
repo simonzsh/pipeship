@@ -48,7 +48,7 @@ async function listen(options: Parameters<typeof Bun.serve>[0] & { port: number 
   }
 }
 
-// Detached so the dashboard outlives its parent; runs from ~/.pipeship, not the caller's project.
+// Detached so the dashboard outlives its parent; runs from ~/.shipflow, not the caller's project.
 export function spawnDashboard(command: string, args: string[]) {
   mkdirSync(home(), { recursive: true });
   const out = openSync(join(home(), "dashboard.log"), "a");
@@ -81,7 +81,7 @@ export async function serve(port = DEFAULT_PORT, opts: ServeOptions = {}) {
     idleTimeout: 0, // keep SSE connections open
     routes: {
       ...assets,
-      "/api/health": () => Response.json({ app: "pipeship", version: currentVersion() }),
+      "/api/health": () => Response.json({ app: "shipflow", version: currentVersion() }),
       "/api/update": async () => Response.json(await getUpdateInfo({ harness: opts.harness }), { headers: { "Cache-Control": "no-store" } }),
       "/api/update/install": {
         POST: async () => {
@@ -221,7 +221,8 @@ export async function serve(port = DEFAULT_PORT, opts: ServeOptions = {}) {
 export async function isDashboardUp(port = DEFAULT_PORT): Promise<boolean> {
   try {
     const res = await fetch(`http://localhost:${port}/api/health`, { signal: AbortSignal.timeout(1000) });
-    return (await res.json()).app === "pipeship";
+    // A dashboard started before the rename still answers "pipeship".
+    return ["shipflow", "pipeship"].includes((await res.json()).app);
   } catch {
     return false;
   }

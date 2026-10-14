@@ -12,7 +12,7 @@ import {
   type ChunkInput, type Mode, type StepName, type StepStatus,
 } from "./state.ts";
 
-const USAGE = `pipeship — state, test environments and dashboard for the /pipeship skill
+const USAGE = `shipflow — state, test environments and dashboard for the /shipflow skill
 
   new [--repo <path>]... --title <text> [--source <name>] [--ref <id> [--url <url>]]... [--name <words>] [--mode full|quick] [--skip a,b]
                                records the calling agent session (harness, id, cwd) when one is found, and each repo with its base branch
@@ -120,7 +120,7 @@ async function main() {
       return print(listStates().map((s) => `${s.id}\t${s.status}\t${s.step}\t${s.ticket.title}`).join("\n") || "no pipelines");
     case "step": {
       const { session } = setStep(need(args[0], "<id>"), need(args[1], "<step>") as StepName, need(args[2], "<status>") as StepStatus);
-      // T3 Code may record the session after `pipeship new`: look again at each step until found.
+      // T3 Code may record the session after `shipflow new`: look again at each step until found.
       const t3Thread = session && !session.t3Thread && findT3Thread(session);
       if (t3Thread) updateState(args[0], (s) => void (s.session!.t3Thread = t3Thread));
       return print("ok");
@@ -169,7 +169,7 @@ async function main() {
       return print(args[0] === "stop" ? await stopDashboard() : await startDashboard());
     case "serve":
       await serve(port, { prSync: true, retryMs: 8000 });
-      return console.log(`pipeship dashboard on http://localhost:${port}`);
+      return console.log(`shipflow dashboard on http://localhost:${port}`);
     default:
       print(USAGE);
       if (command && !values.help) process.exit(1);

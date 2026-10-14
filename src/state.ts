@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, renameSync, symlinkSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import { assertRepoName, findRepo, repoName } from "./repos.ts";
@@ -57,7 +57,7 @@ export interface TicketLink {
 
 export type Harness = "claude" | "codex";
 
-// The agent session that runs the pipeline, recorded by `pipeship new`. No pid: it changes for the same Claude session.
+// The agent session that runs the pipeline, recorded by `shipflow new`. No pid: it changes for the same Claude session.
 export interface Session {
   harness: Harness;
   id: string;
@@ -78,7 +78,7 @@ export interface State {
   repos: Repo[];
   mode: Mode;
   status: Status; // derived by pipelineStatus on every write; never set by hand
-  waiting?: { step: StepName; reason?: string }; // set by `pipeship wait`: the step that needs the user and why
+  waiting?: { step: StepName; reason?: string }; // set by `shipflow wait`: the step that needs the user and why
   archivedAt?: string;
   step: StepName;
   steps: { name: StepName; status: StepStatus; startedAt?: string; endedAt?: string }[];
@@ -120,7 +120,17 @@ export type ChunkInput = { name: string } & Partial<Omit<Chunk, "name">>;
 const QUICK_SKIPS: StepName[] = ["plan"];
 
 export function home(): string {
-  return process.env.PIPESHIP_HOME ?? join(homedir(), ".pipeship");
+  if (process.env.SHIPFLOW_HOME) return process.env.SHIPFLOW_HOME;
+  const dir = join(homedir(), ".shipflow");
+  migrateHome(join(homedir(), ".pipeship"), dir);
+  return dir;
+}
+
+// The tool was named pipeship: move its home once. The symlink keeps the absolute paths of running pipelines valid.
+export function migrateHome(old: string, dir: string) {
+  if (existsSync(dir) || !existsSync(old) || lstatSync(old).isSymbolicLink()) return;
+  renameSync(old, dir);
+  symlinkSync(dir, old);
 }
 
 export function pipelineDir(id: string): string {
@@ -327,7 +337,7 @@ export function addRepo(id: string, repo: Repo): { state: State; added: boolean 
 function newChunkRepo(s: State, chunk: ChunkInput): string {
   if (chunk.repo) return lookupRepo(s, chunk.repo).path;
   if (s.repos.length === 1) return s.repos[0]!.path;
-  if (s.repos.length === 0) throw new Error(`pipeline ${s.id} has no repo: add one with pipeship repo ${s.id} <path>`);
+  if (s.repos.length === 0) throw new Error(`pipeline ${s.id} has no repo: add one with shipflow repo ${s.id} <path>`);
   throw new Error(`chunk "${chunk.name}": --repo is required (repos: ${s.repos.map((r) => repoName(r.path)).join(", ")})`);
 }
 
