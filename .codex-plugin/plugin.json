@@ -14,6 +14,6 @@
     "category": "Developer Tools",
     "developerName": "simonzsh",
     "capabilities": ["Read", "Write"],
-    "defaultPrompt": ["Use $ship to ship ABC-123"]
+    "defaultPrompt": ["Use $run to handle ABC-123"]
   }
 }

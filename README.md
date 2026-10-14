@@ -1,6 +1,6 @@
 # pipeship
 
-Feature pipeline for Claude Code and Codex. Give it a ticket or an issue from any source; it maps the code, asks its questions in one batch, plans, implements chunks in parallel worktrees, cleans up the code, opens stacked PRs, and starts the app so you can test it at a URL. It works with [T3 Code](https://github.com/pingdotgg/t3code): each pipeline links back to its T3 Code thread.
+Feature pipeline for Claude Code and Codex. Give it a ticket, an issue or a work request from any source; it maps the code, asks its questions in one batch, plans, implements chunks in parallel worktrees, cleans up the code, opens stacked PRs, and starts the app so you can test it at a URL. It works with [T3 Code](https://github.com/pingdotgg/t3code): each pipeline links back to its T3 Code thread.
 
 ## Install
 
@@ -24,36 +24,36 @@ codex plugin add pipeship@pipeship
 
 The first run installs the dependencies, which takes a few seconds.
 
-To work on pipeship itself, clone the repo, run `bun install`, and link the skill instead: `ln -s "$PWD/skills/ship" ~/.claude/skills/ship`. Changes then apply at once.
+To work on pipeship itself, clone the repo, run `bun install`, and link the skill instead: `ln -s "$PWD/skills/run" ~/.claude/skills/run`. Changes then apply at once.
 
 ## Usage
 
-Give pipeship a ticket: a reference (`ABC-123`), a URL (Linear, Notion, GitHub, Jira…) or plain text. It reads the ticket with the tools your session has, such as an MCP server or `gh`.
+Give pipeship a ticket or a work request: a reference (`ABC-123`), a URL (Linear, Notion, GitHub, Jira…) or plain text. It reads the ticket with the tools your session has, such as an MCP server or `gh`. Without a ticket, your request is the ticket.
 
 ### In Claude Code
 
-Type `/pipeship:ship` followed by the ticket (`/ship` if you use the dev link):
+Type `/pipeship:run` followed by the ticket or the request (`/run` if you use the dev link):
 
 ```
-/pipeship:ship ABC-123
-/pipeship:ship quick https://github.com/org/repo/issues/42
-/pipeship:ship --skip questions,stack "Add a date filter to the orders page"
+/pipeship:run ABC-123
+/pipeship:run quick https://github.com/org/repo/issues/42
+/pipeship:run --skip questions,stack "Add a date filter to the orders page"
 ```
 
-You can also ask in plain words: "ship ABC-123 with pipeship".
+You can also ask in plain words: "handle ABC-123 with pipeship".
 
-A SessionStart hook keeps long sessions on track. After startup, resume, clear or compact, it re-injects a short reminder: the pipelines of this session that are not finished, their step and folder, the key rules, and the path of the skill to re-read. It stays silent when no pipeline of the session is unfinished. The hook comes with the plugin install: the dev symlink of `skills/ship` gets no hook.
+A SessionStart hook keeps long sessions on track. After startup, resume, clear or compact, it re-injects a short reminder: the pipelines of this session that are not finished, their step and folder, the key rules, and the path of the skill to re-read. It stays silent when no pipeline of the session is unfinished. The hook comes with the plugin install: the dev symlink of `skills/run` gets no hook.
 
 ### In Codex
 
 In Codex, `$` calls a skill by name (type `$` to pick one from a list):
 
 ```
-$ship ABC-123
-$ship quick https://github.com/org/repo/issues/42
+$run ABC-123
+$run quick https://github.com/org/repo/issues/42
 ```
 
-You can also ask in plain words: "ship ABC-123 with pipeship". pipeship writes to `~/.pipeship`, starts background servers and pushes branches, so Codex's default sandbox asks for approval: approve these commands, or run Codex with a sandbox that allows them.
+You can also ask in plain words: "handle ABC-123 with pipeship". pipeship writes to `~/.pipeship`, starts background servers and pushes branches, so Codex's default sandbox asks for approval: approve these commands, or run Codex with a sandbox that allows them.
 
 ### Options
 
@@ -61,7 +61,7 @@ You can also ask in plain words: "ship ABC-123 with pipeship". pipeship writes t
 - **`--skip`** removes steps, e.g. `--skip questions,stack`. You can also say "skip the review" during the run.
 - **Several repos**: a ticket can span several repos. Pass `--repo` once per repo, or let the explore step find them. Each repo gets its own stack of PRs.
 - **Checks**: subagents run the fast checks (typecheck, lint, format) and only the tests related to the diff, never the full suite. CI runs the full suite on each PR. pipeship runs the full suite locally, once on the top of the stack, only when CI does not run it on PRs or when you ask for it. Never two test suites at once on the machine.
-- pipeship starts on its own whenever you give the agent a ticket to handle (a reference, a URL or a text). You do not need to name it. It does not run on questions or reviews.
+- pipeship starts on its own on a work request: make, fix, build or change something, with or without a ticket (a reference, a URL, a text, or a task decided after a discussion). You do not need to name it. It never starts on a question, an explanation, a plain discussion, a review or a status request.
 
 ## Test environment
 
@@ -169,6 +169,6 @@ bun run typecheck
 
 GitHub Actions runs both on every pull request and on each push to `main` (`.github/workflows/ci.yml`).
 
-The skill lives in `skills/ship/`: `SKILL.md` (rules and steps), `recipe.md` (recipe format, read at step 7) and `prompts/` (one brief per subagent type).
+The skill lives in `skills/run/`: `SKILL.md` (rules and steps), `recipe.md` (recipe format, read at step 7) and `prompts/` (one brief per subagent type).
 
 To release, bump `version` in `package.json`, `.claude-plugin/plugin.json` and `.codex-plugin/plugin.json`, then push. Users only get an update when the version changes; a test checks that the three files agree.

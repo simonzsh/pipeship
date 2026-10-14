@@ -12,7 +12,7 @@ import {
   type ChunkInput, type Mode, type StepName, type StepStatus,
 } from "./state.ts";
 
-const USAGE = `pipeship — state, test environments and dashboard for the /pipeship skill
+const USAGE = `pipeship — state, test environments and dashboard for the /pipeship:run skill
 
   new [--repo <path>]... --title <text> [--source <name>] [--ref <id> [--url <url>]]... [--name <words>] [--mode full|quick] [--skip a,b]
                                records the calling agent session (harness, id, cwd) when one is found, and each repo with its base branch

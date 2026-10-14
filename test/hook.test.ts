@@ -1,6 +1,6 @@
 import { afterAll, describe, expect, test } from "bun:test";
 import { spawnSync } from "node:child_process";
-import { accessSync, constants, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { accessSync, constants, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { parseHookInput, pendingPipelines, reminderText, sessionStartOutput, UNFINISHED } from "../src/hook.ts";
@@ -9,7 +9,7 @@ import type { State, Status } from "../src/state.ts";
 const root = mkdtempSync(join(tmpdir(), "pipeship-hook-"));
 afterAll(() => rmSync(root, { recursive: true, force: true }));
 
-const paths = { skill: "/plugin/skills/ship/SKILL.md", helper: "/plugin/scripts/pipeship" };
+const paths = { skill: "/plugin/skills/run/SKILL.md", helper: "/plugin/scripts/pipeship" };
 
 function fixture(id: string, status: Status, session: State["session"] | null = { harness: "claude", id: "s1", cwd: "/work" }): State {
   return {
@@ -95,6 +95,14 @@ describe("reminder", () => {
     const json = JSON.parse(out);
     expect(json.hookSpecificOutput.hookEventName).toBe("SessionStart");
     expect(json.hookSpecificOutput.additionalContext).toContain('a "Ticket a"');
+  });
+
+  test("the default skill path points to an existing SKILL.md", () => {
+    const out = sessionStartOutput({ session_id: "s1" }, { states: [fixture("a", "running")], env: {} });
+    const text = JSON.parse(out).hookSpecificOutput.additionalContext;
+    const path = text.match(/re-read the skill: (\S+SKILL\.md)/)?.[1];
+    expect(path).toBeDefined();
+    expect(existsSync(path)).toBe(true);
   });
 
   test("parseHookInput returns {} for bad or empty input", () => {

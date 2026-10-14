@@ -20,8 +20,8 @@ function EmptyState() {
       <div className="flex flex-col gap-2">
         <p className="font-semibold">No pipeline yet</p>
         <p className="text-sm text-muted-foreground">
-          Run <code className="rounded bg-muted px-1.5 py-0.5">/pipeship:ship &lt;ticket&gt;</code> in Claude Code or{" "}
-          <code className="rounded bg-muted px-1.5 py-0.5">$ship &lt;ticket&gt;</code> in Codex.
+          Run <code className="rounded bg-muted px-1.5 py-0.5">/pipeship:run &lt;ticket&gt;</code> in Claude Code or{" "}
+          <code className="rounded bg-muted px-1.5 py-0.5">$run &lt;ticket&gt;</code> in Codex.
         </p>
       </div>
     </div>
