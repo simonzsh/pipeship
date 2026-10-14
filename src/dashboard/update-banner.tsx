@@ -61,10 +61,8 @@ export function UpdateBanner({ live }: { live: boolean }) {
   };
 
   if (!info) return null;
-  const version = <p className="border-t px-3 py-2 text-xs text-muted-foreground">Current version: {info.current}</p>;
-  if (!info.available) return version;
+  if (!info.available) return <p className="border-t px-3 py-2 text-xs text-muted-foreground">Current version: {info.current}</p>;
   return (
-    <>
     <div className="flex flex-col gap-2 border-t px-3 py-3">
       <div className="flex items-center gap-2">
         <ArrowUpCircle className="size-4 shrink-0 text-muted-foreground" />
@@ -82,7 +80,5 @@ export function UpdateBanner({ live }: { live: boolean }) {
       {!info.harness && <p className="text-xs text-muted-foreground">Not installed through a plugin manager: update it with git.</p>}
       {error && <p className="text-xs text-destructive">{error}</p>}
     </div>
-    {version}
-    </>
   );
 }
