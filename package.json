@@ -1,6 +1,6 @@
 {
   "name": "pipeship",
-  "version": "0.11.2",
+  "version": "0.11.3",
   "description": "Feature pipeline for Claude Code: from ticket to stacked PRs and a running test environment.",
   "type": "module",
   "bin": {
