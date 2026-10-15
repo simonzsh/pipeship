@@ -45,6 +45,7 @@ beforeEach(() => {
 // The status is derived: tests set the facts it comes from.
 const ALL_STEPS = ["explore", "questions", "plan", "implement", "review", "stack", "preview"] as const;
 const finishBeforePreview = (id: string) => ALL_STEPS.slice(0, -1).forEach((name) => setStep(id, name, "done"));
+const doneBefore = (id: string, step: (typeof ALL_STEPS)[number]) => ALL_STEPS.slice(0, ALL_STEPS.indexOf(step)).forEach((name) => setStep(id, name, "done"));
 const finishSteps = (id: string) => ALL_STEPS.forEach((name) => setStep(id, name, "done"));
 const requestStop = (id: string) => updateState(id, (s) => void (s.stopRequested = true));
 const archiveNow = (id: string) => updateState(id, (s) => void (s.archivedAt = new Date().toISOString()));
@@ -67,6 +68,7 @@ test("ids are unique for the same ticket", () => {
 
 test("steps and chunks update the state", () => {
   const { id } = createPipeline({ repos: [{ path: repo }], title: "t", source: "text" });
+  setStep(id, "explore", "done");
   setStep(id, "questions", "running");
   upsertChunk(id, { name: "api", branch: "feat/api" });
   upsertChunk(id, { name: "api", pr: "https://example.com/pr/1" });
@@ -78,7 +80,7 @@ test("steps and chunks update the state", () => {
 
 test("the pipeline is done once every step is done or skipped, and ready when a preview runs", () => {
   const { id } = createPipeline({ repos: [{ path: repo }], title: "t", source: "text", skip: ["preview"] });
-  for (const name of ["explore", "questions", "plan", "implement", "review"] as const) setStep(id, name, "done");
+  doneBefore(id, "stack");
   expect(readState(id).status).toBe("running");
   setStep(id, "stack", "done");
   expect(readState(id).status).toBe("done");
@@ -118,12 +120,14 @@ test("a step run again loses the end of its previous run", () => {
   const { id } = createPipeline({ repos: [{ path: repo }], title: "t", source: "text" });
   expect(setStep(id, "explore", "done").steps[0]!.endedAt).toBeDefined();
   expect(setStep(id, "explore", "running").steps[0]!.endedAt).toBeUndefined();
+  setStep(id, "explore", "done");
   setStep(id, "questions", "failed");
   expect(waitForUser(id, "questions").steps[1]!.endedAt).toBeUndefined();
 });
 
 test("a failed step run again and done lets the pipeline go back to running, then done", () => {
   const { id } = createPipeline({ repos: [{ path: repo }], title: "t", source: "text", mode: "quick" });
+  doneBefore(id, "review");
   setStep(id, "review", "failed");
   expect(readState(id).status).toBe("failed");
   expect(setStep(id, "review", "running").status).toBe("running");
@@ -135,9 +139,10 @@ const rules = () => createPipeline({ repos: [{ path: repo }], title: "rules", so
 
 test("pipelineStatus: archivedAt wins over every other fact", () => {
   const id = rules();
+  setStep(id, "explore", "done");
+  waitForUser(id, "questions");
   setStep(id, "explore", "failed");
   requestStop(id);
-  waitForUser(id, "questions");
   archiveNow(id);
   expect(readState(id).status).toBe("archived");
   expect(pipelineStatus({ archivedAt: "x", steps: [], stopRequested: true, waiting: { step: "plan" } })).toBe("archived");
@@ -145,6 +150,7 @@ test("pipelineStatus: archivedAt wins over every other fact", () => {
 
 test("pipelineStatus: a failed step makes the pipeline failed, even when stopped or waiting", () => {
   const id = rules();
+  setStep(id, "explore", "done");
   waitForUser(id, "questions");
   setStep(id, "explore", "failed");
   requestStop(id);
@@ -153,6 +159,7 @@ test("pipelineStatus: a failed step makes the pipeline failed, even when stopped
 
 test("pipelineStatus: stopRequested makes the pipeline stopped, even when waiting", () => {
   const id = rules();
+  setStep(id, "explore", "done");
   waitForUser(id, "questions");
   requestStop(id);
   expect(readState(id).status).toBe("stopped");
@@ -160,6 +167,7 @@ test("pipelineStatus: stopRequested makes the pipeline stopped, even when waitin
 
 test("pipelineStatus: a waiting step makes the pipeline waiting_for_user", () => {
   const id = rules();
+  setStep(id, "explore", "done");
   expect(waitForUser(id, "questions", "Which one?").status).toBe("waiting_for_user");
   expect(readState(id).waiting).toEqual({ step: "questions", reason: "Which one?" });
 });
@@ -221,11 +229,88 @@ test("unarchivePipeline derives done or failed from the steps and refuses a pipe
 
 test("a wait ends when another step starts", () => {
   const id = rules();
+  setStep(id, "explore", "done");
   waitForUser(id, "questions", "Which one?");
-  const state = setStep(id, "plan", "running");
+  const state = setStep(id, "explore", "running");
   expect(state.waiting).toBeUndefined();
   expect(state.status).toBe("running");
-  expect(state.step).toBe("plan");
+  expect(state.step).toBe("explore");
+});
+
+const stepStatuses = (id: string) => readState(id).steps.map((x) => x.status);
+
+test("a step is refused while an earlier step is not done or skipped, and nothing changes", () => {
+  const { id } = createPipeline({ repos: [{ path: repo }], title: "g", source: "text" });
+  const before = readState(id);
+  for (const status of ["running", "done", "failed"] as const) {
+    expect(() => setStep(id, "plan", status)).toThrow(`cannot mark plan ${status}: explore is pending (earlier steps must be done or skipped)`);
+  }
+  expect(readState(id)).toEqual(before);
+  setStep(id, "explore", "done");
+  expect(() => setStep(id, "implement", "running")).toThrow("cannot mark implement running: questions is pending");
+});
+
+test("a failed or running earlier step blocks the next ones", () => {
+  const { id } = createPipeline({ repos: [{ path: repo }], title: "g", source: "text" });
+  setStep(id, "explore", "failed");
+  expect(() => setStep(id, "questions", "running")).toThrow("explore is failed");
+  setStep(id, "explore", "running");
+  expect(() => setStep(id, "questions", "done")).toThrow("explore is running");
+});
+
+test("skipped satisfies the gate, also in quick mode", () => {
+  const { id } = createPipeline({ repos: [{ path: repo }], title: "g", source: "text", mode: "quick" });
+  setStep(id, "explore", "done");
+  setStep(id, "questions", "done");
+  expect(setStep(id, "implement", "running").step).toBe("implement");
+  const custom = createPipeline({ repos: [{ path: repo }], title: "g", source: "text", skip: ["explore", "questions"] });
+  expect(setStep(custom.id, "plan", "running").step).toBe("plan");
+});
+
+test("pending and skipped are allowed out of order", () => {
+  const { id } = createPipeline({ repos: [{ path: repo }], title: "g", source: "text" });
+  setStep(id, "review", "skipped");
+  setStep(id, "stack", "pending");
+  expect(stepStatuses(id)[4]).toBe("skipped");
+  expect(() => setStep(id, "preview", "running")).toThrow("explore is pending");
+});
+
+test("reopening an earlier step is allowed, then later steps wait until it is done", () => {
+  const { id } = createPipeline({ repos: [{ path: repo }], title: "g", source: "text" });
+  finishSteps(id);
+  expect(setStep(id, "explore", "running").status).toBe("running");
+  expect(() => setStep(id, "implement", "running")).toThrow("cannot mark implement running: explore is running");
+  setStep(id, "explore", "done");
+  expect(setStep(id, "implement", "running").step).toBe("implement");
+});
+
+test("a feedback step on a done pipeline unarchives it and clears stopRequested", () => {
+  const { id } = createPipeline({ repos: [{ path: repo }], title: "g", source: "text" });
+  finishSteps(id);
+  archiveNow(id);
+  requestStop(id);
+  const state = setStep(id, "implement", "running");
+  expect(state.archivedAt).toBeUndefined();
+  expect(state.stopRequested).toBe(false);
+  expect(state.status).toBe("running");
+});
+
+test("a stopped pipeline resumes when its running step starts again", () => {
+  const { id } = createPipeline({ repos: [{ path: repo }], title: "g", source: "text" });
+  setStep(id, "explore", "done");
+  setStep(id, "questions", "running");
+  requestStop(id);
+  expect(setStep(id, "questions", "running").stopRequested).toBe(false);
+});
+
+test("waitForUser follows the same gate and works once the earlier steps are done", () => {
+  const { id } = createPipeline({ repos: [{ path: repo }], title: "g", source: "text" });
+  const before = readState(id);
+  expect(() => waitForUser(id, "questions", "Which one?")).toThrow("cannot wait on questions: explore is pending (earlier steps must be done or skipped)");
+  expect(readState(id)).toEqual(before);
+  setStep(id, "explore", "done");
+  expect(waitForUser(id, "questions", "Which one?").status).toBe("waiting_for_user");
+  expect(() => waitForUser(id, "explore")).toThrow("nothing to wait on");
 });
 
 test("preview starts the app, copies local files, and stop kills it", async () => {
@@ -277,6 +362,57 @@ test("preview fails clearly when the server crashes", async () => {
   await expect(startPreview(id, repo)).rejects.toThrow("boom");
   expect(readState(id).preview).toBeUndefined();
   expect(existsSync(join(pipelineDir(id), "preview-app.log"))).toBe(true);
+}, 30_000);
+
+test("a failing install rejects with its log and never starts the services", async () => {
+  const marker = join(root, "started-marker");
+  writeFileSync(join(repo, ".pipeship.json"), JSON.stringify({ install: "echo oops; exit 3", start: `touch ${marker}; sleep 60` }));
+  const { id } = createPipeline({ repos: [{ path: repo }], title: "t", source: "text" });
+  const err = await startPreview(id, repo).then(() => undefined, (e: Error) => e);
+  expect(err?.message).toContain("install failed (");
+  expect(err?.message).toContain("oops");
+  expect(readState(id).preview).toBeUndefined();
+  expect(existsSync(marker)).toBe(false);
+}, 30_000);
+
+test("the same install command runs once per worktree", async () => {
+  const wt = mkdtempSync(join(root, "wt-"));
+  const install = "echo x >> count";
+  writeFileSync(
+    join(repo, ".pipeship.json"),
+    JSON.stringify({
+      install,
+      services: [
+        { name: "a", kind: "back", start: "exit 1", install },
+        { name: "b", kind: "back", start: "exit 1", install },
+      ],
+    }),
+  );
+  const { id } = createPipeline({ repos: [{ path: repo }], title: "t", source: "text" });
+  await startPreview(id, wt).catch(() => undefined);
+  expect(readFileSync(join(wt, "count"), "utf8").trim().split("\n")).toHaveLength(1);
+}, 30_000);
+
+test("a slow install does not block the event loop", async () => {
+  writeFileSync(
+    join(repo, ".pipeship.json"),
+    JSON.stringify({
+      install: "sleep 1",
+      start: `bun -e "Bun.serve({ port: Number(process.env.APP_PORT), fetch: () => new Response('ok') })"`,
+      portEnv: "APP_PORT",
+    }),
+  );
+  const { id } = createPipeline({ repos: [{ path: repo }], title: "t", source: "text" });
+  finishBeforePreview(id);
+  let ticks = 0;
+  const timer = setInterval(() => ticks++, 50);
+  try {
+    await startPreview(id, repo);
+    expect(ticks).toBeGreaterThanOrEqual(5);
+  } finally {
+    clearInterval(timer);
+    await stopPipeline(id).catch(() => undefined);
+  }
 }, 30_000);
 
 test("a draft recipe is saved for the repo only when the app starts", async () => {
@@ -473,6 +609,18 @@ test("step records the T3 Code thread once T3 Code knows the session", () => {
   step("done");
   expect(readState(state.id).session?.t3Thread).toEqual({ environmentId: T3_ENV, threadId: T3_THREAD });
   rmSync(process.env.T3CODE_HOME!, { recursive: true, force: true });
+});
+
+test("the CLI refuses a gated step or wait with exit code 1 and the message on stderr", () => {
+  const { id } = createPipeline({ repos: [{ path: repo }], title: "t", source: "text" });
+  const run = (...args: string[]) => spawnSync("bun", [join(import.meta.dir, "../src/cli.ts"), ...args], { encoding: "utf8", env: process.env });
+  const step = run("step", id, "plan", "running");
+  expect(step.status).toBe(1);
+  expect(step.stderr).toContain("cannot mark plan running: explore is pending");
+  const wait = run("wait", id, "questions");
+  expect(wait.status).toBe(1);
+  expect(wait.stderr).toContain("cannot wait on questions: explore is pending");
+  expect(readState(id).steps.every((x) => x.status === "pending")).toBe(true);
 });
 
 test("refreshSessionId records the new id after /clear for the same harness and cwd only", () => {
@@ -1419,6 +1567,7 @@ test("setMode quick sets the mode and skips only pending quick steps; full only 
   expect(plan()).toBe("skipped");
 
   const running = createPipeline({ repos: [{ path: repo }], title: "Plan running", source: "text" });
+  doneBefore(running.id, "plan");
   setStep(running.id, "plan", "running");
   setMode(running.id, "quick");
   expect(readState(running.id).steps.find((s) => s.name === "plan")!.status).toBe("running");
@@ -2190,6 +2339,7 @@ test("diffRequests: whole stack skips repos without branches, a chunk targets it
 
 test("wait marks its step running and shows the question until the step moves on", () => {
   const { id } = createPipeline({ repos: [{ path: repo }], title: "t", source: "text" });
+  doneBefore(id, "stack");
   waitForUser(id, "stack", "Push the branches and open the PRs?");
   let state = readState(id);
   expect(state.status).toBe("waiting_for_user");
@@ -2397,6 +2547,7 @@ test("a done pipeline starts its preview, becomes ready, and is done again once 
 
 test("a stop request keeps a failed or archived pipeline's status", async () => {
   const failed = rules();
+  doneBefore(failed, "review");
   setStep(failed, "review", "failed");
   expect((await stopPipeline(failed)).status).toBe("failed");
   const archived = rules();

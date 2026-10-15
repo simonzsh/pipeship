@@ -30,7 +30,7 @@ This skill runs in both. Where they differ:
 pipeship new [--repo <path>]... --title <t> [--source <s>] [--ref <r> --url <u>]... [--name <words>] [--mode quick] [--skip a,b]
 pipeship repo <id> <path>              # add a repo to the pipeline (once per repo); prints its base and whether it is dirty
 pipeship get <id>                      # read state: check stopRequested and skipped steps
-pipeship step <id> <step> running|done|skipped|failed
+pipeship step <id> <step> running|done|skipped|failed   # running|done|failed need every earlier step done or skipped
 pipeship mode <id> quick|full         # switch the mode after creation; quick skips the pending plan step
 pipeship wait <id> <step> [--reason <question>]   # pause for the user on this step: the step runs, the card shows the question
 pipeship archive <id>                            # done, failed or stopped only; the user archives, not the agent
@@ -50,13 +50,14 @@ Steps: `explore`, `questions`, `plan`, `implement`, `review`, `stack`, `preview`
 - **Each chunk**: set it to its activity (`coding`, `reviewing`, `fixing`) when its subagent starts. When that subagent reports, set the chunk to `done` (`failed` if it failed) at once, while the other subagents still run. The user follows each chunk live in the dashboard.
 - **Before each step**, run `pipeship get <id>`. If `stopRequested` is true, stop and tell the user, unless the user just asked you to resume. If the step is `skipped`, move on.
 - **The user can change the steps at any time** ("skip the review", "ask me your questions anyway"). Update the state with `pipeship step <id> <step> skipped|pending` and continue.
+- **Steps run in order.** `step ... running|done|failed` and `wait` are refused while an earlier step is not `done` or `skipped`; the error names it. To move past a step, mark it `skipped` (the user's choice). `pending` and `skipped` are always allowed, so reopening an earlier step works. A step set back to `pending` must be `done` or `skipped` again before a later step can be marked.
 - **Keep the steps that later steps need**: the test environment needs a worktree; PRs need commits.
 - On failure: `pipeship step <id> <step> failed`, explain what failed, and ask the user what to do.
 - **The checks** are the **fast checks** (typecheck, lint, format, repo rule scripts: they run in full) plus the **targeted tests** for the diff: test files added or changed, tests of the changed modules, and cross-cutting tests the diff can break (infra, env, routes, imports). Do not run the full suite: CI runs it on each PR. Exception: if CI does not run the full suite on PRs, or the user asks for it, run it once only, on the top of the stack, before step 6.
 - **Report the tests.** Every report that mentions checks lists the tests that ran and says that CI covers the rest. If the full suite ran locally instead, say so.
 - **One test suite at a time on the machine.** Never run two suites in parallel (several subagents, several worktrees). Subagents that run together run only their targeted tests.
 - **Every pause for the user names its step**: `pipeship wait <id> <step> --reason "<the question, in one short line>"`, then stop. This covers the questions of step 2 and any decision you cannot make. The step shows amber on the dashboard and the card shows the question. When the user answers, the next `step` call ends the wait.
-- **A step that waits does not block an independent later step.** Example: when a step needs a decision, run the later steps that do not depend on it first, then run `wait` and ask once for everything that waits. Run `wait` last: any step that starts ends the wait.
+- **Within a step that needs a decision, do the work that does not depend on it first, then run `wait` last and ask once.** Later steps are refused until this step is done or skipped.
 - While this pipeline runs, it replaces process skills such as brainstorming, writing-plans, using-git-worktrees, subagent-driven-development and finishing-a-development-branch. The only skills it uses are `simplify` and `code-review`, in step 5.
 - If the dashboard shows *Agent stopped*, the user can resume with the command copied from the agent logo in the pipeline header, then continue from the first step that is not done or skipped (`pipeship get <id>`). Marking that step `running` clears `stopRequested`.
 - To resume an archived pipeline, mark the step you reopen `running`: that unarchives it. Never archive or unarchive it yourself. For feedback after the end, see **Feedback after the pipeline**.

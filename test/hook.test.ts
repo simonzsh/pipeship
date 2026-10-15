@@ -45,6 +45,14 @@ describe("pendingPipelines", () => {
     expect(pendingPipelines(states, {}, {})).toEqual([]);
   });
 
+  test("matches a codex pipeline by session_id and by CODEX_THREAD_ID", () => {
+    const states = [fixture("c", "running", { harness: "codex", id: "thread-1", cwd: "/work" })];
+    expect(pendingPipelines(states, { session_id: "thread-1" }, {})).toHaveLength(1);
+    expect(pendingPipelines(states, {}, { CODEX_THREAD_ID: "thread-1" })).toHaveLength(1);
+    expect(pendingPipelines(states, {}, { CLAUDE_CODE_SESSION_ID: "x", CODEX_THREAD_ID: "thread-1" })).toEqual([]);
+    expect(pendingPipelines(states, {}, { CODEX_THREAD_ID: "other" })).toEqual([]);
+  });
+
   test("after /clear, falls back to the same claude harness and cwd", () => {
     const states = [
       fixture("same", "running", { harness: "claude", id: "old", cwd: "/work" }),
@@ -55,6 +63,10 @@ describe("pendingPipelines", () => {
     const input = { session_id: "new", cwd: "/work" };
     expect(pendingPipelines(states, { ...input, source: "clear" }, {}).map((s) => s.id)).toEqual(["same"]);
     expect(pendingPipelines(states, { ...input, source: "compact" }, {})).toEqual([]);
+    // In Codex (CODEX_THREAD_ID set) the fallback picks codex pipelines instead.
+    expect(pendingPipelines(states, { ...input, source: "clear" }, { CODEX_THREAD_ID: "t" }).map((s) => s.id)).toEqual(["codex"]);
+    // Env vars leak into nested agents: with both set, Claude wins, like for the session id.
+    expect(pendingPipelines(states, { ...input, source: "clear" }, { CLAUDE_CODE_SESSION_ID: "c", CODEX_THREAD_ID: "t" }).map((s) => s.id)).toEqual(["same"]);
     // The fallback keeps running and waiting_for_user only, not stopped.
     const mixed = ["running", "waiting_for_user", "stopped"].map((st) => fixture(st, st as Status, { harness: "claude", id: "old", cwd: "/work" }));
     expect(pendingPipelines(mixed, { ...input, source: "clear" }, {}).map((s) => s.id)).toEqual(["running", "waiting_for_user"]);
@@ -104,9 +116,14 @@ describe("reminder", () => {
   });
 
   test("the routing rule sends work requests to pipeship:run and excludes small edits", () => {
-    for (const part of ["`pipeship:run`", "ticket to handle", "delegated request", "small edit in one file", "question"]) {
+    for (const part of ["`pipeship:run`", "`$run` in Codex", "ticket to handle", "delegated request", "small edit in one file", "question"]) {
       expect(ROUTING_RULE).toContain(part);
     }
+  });
+
+  test("the README AGENTS.md snippet holds the routing rule verbatim", () => {
+    const readme = readFileSync(resolve(import.meta.dir, "../README.md"), "utf8");
+    expect(readme).toContain(`\`\`\`\n${ROUTING_RULE}\n\`\`\``);
   });
 
   test("the default skill path points to an existing SKILL.md", () => {
