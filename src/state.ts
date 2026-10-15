@@ -1,7 +1,7 @@
 import { closeSync, existsSync, mkdirSync, openSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
-import { assertRepoName, findRepo, repoName } from "./repos.ts";
+import { assertRepoName, chunksOf, findRepo, repoName } from "./repos.ts";
 
 export const STEPS = ["explore", "questions", "plan", "implement", "review", "stack", "preview"] as const;
 export type StepName = (typeof STEPS)[number];
@@ -35,6 +35,15 @@ export const CLOSED = "closed";
 export function allMerged(p: Pick<State, "chunks">): boolean {
   const prChunks = p.chunks.filter((c) => c.pr && c.status !== CLOSED);
   return prChunks.length > 0 && prChunks.every((c) => c.status === MERGED);
+}
+
+// One PR per repo: once the repo's PRs are all merged (closed ones aside), its chunks without a PR are merged too.
+// Mutates `s` (call it inside a lock); returns the names it changed.
+export function markRepoMerged(s: State, repo: string): string[] {
+  if (!allMerged({ chunks: chunksOf(s, repo) })) return [];
+  const changed = chunksOf(s, repo).filter((c) => !c.pr && c.status !== MERGED);
+  for (const c of changed) c.status = MERGED;
+  return changed.map((c) => c.name);
 }
 
 export type MergeStatus = "running" | "done" | "failed";

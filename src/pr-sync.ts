@@ -1,7 +1,7 @@
 import { archiveIfAllMerged } from "./preview.ts";
 import { mergeRunning } from "./repos.ts";
 import { defaultRunner, errorMessage, type Runner } from "./merge.ts";
-import { CLOSED, home, listStates, MERGED, readState, withStateLock, writeState, type Chunk, type State } from "./state.ts";
+import { CLOSED, home, listStates, markRepoMerged, MERGED, readState, withStateLock, writeState, type Chunk, type State } from "./state.ts";
 
 export const SYNC_INTERVAL_MS = 60_000;
 export const KICK_MIN_MS = 15_000; // throttle for the page-load trigger
@@ -89,6 +89,7 @@ export async function syncPrStatuses(deps: Partial<SyncDeps> = {}): Promise<{ ch
       const changes = withStateLock(id, () => {
         const x = readState(id);
         const lines: string[] = [];
+        const mergedRepos = new Set<string>();
         for (const r of results) {
           const c = x.chunks.find((k) => k.name === r.name);
           if (!c || c.pr !== r.pr || c.status === MERGED || mergeRunning(x, c.repo!)) continue; // a merge may have started on this repo
@@ -101,7 +102,10 @@ export async function syncPrStatuses(deps: Partial<SyncDeps> = {}): Promise<{ ch
           if (!next) continue;
           c.status = next;
           lines.push(`pr sync: ${id}/${c.name} -> ${next}`);
+          if (next === MERGED) mergedRepos.add(c.repo!);
         }
+        // One PR per repo: its other chunks have no PR to sync, so they follow the merged one.
+        for (const repo of mergedRepos) for (const name of markRepoMerged(x, repo)) lines.push(`pr sync: ${id}/${name} -> ${MERGED}`);
         if (lines.length > 0) writeState(x);
         return lines;
       });

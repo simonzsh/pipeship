@@ -1,6 +1,6 @@
 import { archiveIfAllMerged, isAlive } from "./preview.ts";
 import { chunksOf, repoName } from "./repos.ts";
-import { listStates, lookupRepo, MERGED, readState, updateState, upsertChunk, type Chunk, type MergeRun, type Repo, type State } from "./state.ts";
+import { listStates, lookupRepo, markRepoMerged, MERGED, readState, updateState, upsertChunk, type Chunk, type MergeRun, type Repo, type State } from "./state.ts";
 
 export interface RunResult {
   code: number;
@@ -75,7 +75,7 @@ const failed = (c: Check) =>
     : c.status === "COMPLETED" && !["SUCCESS", "NEUTRAL", "SKIPPED", "STALE"].includes(c.conclusion ?? "");
 const pending = (c: Check) => (isContext(c) ? c.state === "PENDING" || c.state === "EXPECTED" : c.status !== "COMPLETED");
 
-// waitChecks false (the folds): pending checks do not hold the merge, and BLOCKED is final. The final squash waits.
+// waitChecks false (the folds): pending checks do not hold the merge, and BLOCKED is final. The final merge waits.
 export function classifyPr(v: PrView, { waitChecks = true } = {}): Verdict {
   const n = v.number;
   const checks = v.statusCheckRollup ?? [];
@@ -184,7 +184,7 @@ interface Ctx {
   view: (url: string) => Promise<PrView>;
   progress: (c: Chunk, message: string) => void;
   finish: (message: string) => void;
-  mergePr: (c: Chunk, head: string, method: "merge" | "squash", message: string) => Promise<void>;
+  mergePr: (c: Chunk, head: string, method: "fold" | "final", message: string) => Promise<void>;
   waitReady: (c: Chunk, first: PrView, expectedHead: string, pushed: boolean, reuseFirst: boolean, waitChecks?: boolean) => Promise<PrView>;
 }
 
@@ -211,9 +211,14 @@ function makeCtx(id: string, repo: string, d: MergeDeps): Ctx {
     const n = parsePrUrl(url).number;
     // No -d: the branches of a stack go together, after the last merge (see deleteBranches).
     const args = (kind: string) => ["pr", "merge", url, kind, "--match-head-commit", head];
-    let r = await gh(args(method === "merge" ? "--merge" : "--squash"));
-    // Squash is the fallback only when the repo refuses merge commits, not for any other failure.
-    if (method === "merge" && r.code !== 0 && /merge commits are not allowed/i.test(r.stderr)) r = await gh(args("--squash"));
+    let r = await gh(args("--merge"));
+    const refused = r.code !== 0 && /merge commits are not allowed/i.test(r.stderr);
+    // Only a fold of an old stack may fall back to squash; the final merge must keep the chunk commits.
+    if (refused && method === "fold") r = await gh(args("--squash"));
+    else if (refused) {
+      const p = parsePrUrl(url);
+      throw new Error(`merge commits are not allowed on ${p.owner}/${p.repo}: enable "Allow merge commits" in the GitHub settings, or merge #${n} by hand`);
+    }
     if (r.code !== 0) throw new Error(`gh pr merge #${n} failed: ${firstLine(r.stderr)}`);
     upsertChunk(id, { name: c.name, status: MERGED });
     progress(c, message);
@@ -303,7 +308,7 @@ async function combine(x: Ctx, chunks: Chunk[]): Promise<{ tip?: string; warning
     if (first.baseRefName !== below.headRefName) throw new Error(`PR #${n} targets ${first.baseRefName}, not ${below.headRefName}`);
     const v = await x.waitReady(c, first, foldTip ?? first.headRefOid, foldTip !== undefined, i === top, false);
 
-    await x.mergePr(c, v.headRefOid, "merge", `combined #${n} into ${below.headRefName}`);
+    await x.mergePr(c, v.headRefOid, "fold", `combined #${n} into ${below.headRefName}`);
     const tip = await x.d.run("git", ["ls-remote", "origin", `refs/heads/${below.headRefName}`], { cwd: x.repo });
     foldTip = tip.stdout.split(/\s/)[0];
     if (tip.code !== 0 || !foldTip) throw new Error(`could not read the new head of ${below.headRefName}: ${firstLine(tip.stderr)}`);
@@ -325,7 +330,7 @@ async function relistFolded(x: Ctx, chunks: Chunk[]): Promise<string | undefined
 // Deletes the stack's remote branches, never the base. Returns the branches that could not go:
 // a failure here must not undo a merge that already happened.
 async function deleteBranches(x: Ctx, chunks: Chunk[], keep: string[]): Promise<string[]> {
-  const names = [...new Set(chunks.map((c) => c.branch).filter((b): b is string => !!b && !keep.includes(b)))];
+  const names = [...new Set(chunks.filter((c) => c.pr && c.branch).map((c) => c.branch).filter((b): b is string => !!b && !keep.includes(b)))];
   const left: string[] = [];
   for (const b of names) {
     const r = await x.d.run("git", ["push", "origin", "--delete", b], { cwd: x.repo });
@@ -335,7 +340,7 @@ async function deleteBranches(x: Ctx, chunks: Chunk[], keep: string[]): Promise<
   return left;
 }
 
-// Squash-merge the single PR left into the base branch. No rebase, push or retarget:
+// Merge the single PR left into the base branch with a merge commit. No rebase, push or retarget:
 // combine already put the whole stack on this PR's branch. `afterFold` is the new head after a fold.
 async function mergeIntoBase(x: Ctx, repo: Repo, chunks: Chunk[], remove: boolean, afterFold?: string, warning?: string): Promise<void> {
   const open = chunks.filter((c) => c.status !== MERGED);
@@ -351,8 +356,10 @@ async function mergeIntoBase(x: Ctx, repo: Repo, chunks: Chunk[], remove: boolea
   else {
     // Right after a fold GitHub may still show the old head and its old green checks.
     const ready = afterFold ? await x.waitReady(c, v, afterFold, true, true) : await x.waitReady(c, v, v.headRefOid, false, true);
-    await x.mergePr(c, ready.headRefOid, "squash", `merged #${n}`);
+    await x.mergePr(c, ready.headRefOid, "final", `merged #${n}`);
   }
+  // One PR per repo: the chunks without a PR are merged with it.
+  updateState(x.id, (s) => void markRepoMerged(s, x.repo));
   const left = remove ? await deleteBranches(x, chunks, [base, repo.base ?? base]) : [];
   x.finish(`merged #${n} into ${base}` + (left.length ? `; could not delete ${left.join(", ")}` : "") + (warning ? `; ${warning}` : ""));
 }

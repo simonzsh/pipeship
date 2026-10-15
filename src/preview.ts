@@ -629,8 +629,8 @@ function removeWorktree(repos: Repo[], wt: string): void {
 }
 
 // Deletes the worktrees and the pipeline's files, then the local branches of merged chunks.
-// Unmerged branches and the PRs stay: they live in the repo. -D is safe here: a squash merge
-// leaves the branch "unmerged" for git, but GitHub already holds its work.
+// Unmerged branches and the PRs stay: they live in the repo. -D is safe here: a squash merge (old
+// stacks) leaves the branch "unmerged" for git, but GitHub already holds its work.
 export async function deletePipeline(id: string, opts: { force?: boolean } = {}): Promise<void> {
   const state = readState(id);
   if (state.status === "running" || state.status === "waiting_for_user") {
