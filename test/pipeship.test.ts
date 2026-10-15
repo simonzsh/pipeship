@@ -8,7 +8,7 @@ import {
 import { chunksOf, diffRange, repoName, repoStacks, sharesRepo, stackRows, topChunk } from "../src/repos.ts";
 import {
   archiveIfAllMerged, archivePipeline, DASHBOARD_PORT, deletePipeline, findRecipe, isAlive, mainService, normalizeRecipe, pickPorts, previewLines, resolveEnv,
-  requestPreviewStart, savedRecipePath, startOrder, startPreview, stopPipeline, stopPreview, stopPreviewAndSettle, type Service, unarchivePipeline,
+  requestPreviewStart, savedRecipePath, startOrder, startPreview, stopPipeline, stopPreview, stopPreviewAndSettle, type Service, unarchivePipeline, waitReady,
 } from "../src/preview.ts";
 import { diffTotals, parseDiff } from "../src/diff.ts";
 import { baseRef, DiffError, gitDiff, headRef, pipelineDiff, resetFetchCache } from "../src/diff-git.ts";
@@ -664,6 +664,30 @@ test("env templates resolve ports and leave other placeholders", () => {
   const env = { A: "http://localhost:${api.port}", B: "${HOME}", C: "${api.portx}" };
   expect(resolveEnv(env, { api: 4000 })).toEqual({ A: "http://localhost:4000", B: "${HOME}", C: "${api.portx}" });
 });
+
+test("waitReady keeps waiting on 5xx answers and reports the last status", async () => {
+  const server = Bun.serve({ port: 0, fetch: () => new Response("boom", { status: 503 }) });
+  try {
+    const app = { name: "app", ready: "http" as const, readyPath: "/" };
+    await expect(waitReady(app, server.port!, process.pid, join(root, "none.log"), 2000)).rejects.toThrow(
+      'service "app" not ready after 2s (last status 503)',
+    );
+  } finally {
+    server.stop(true);
+  }
+}, 15_000);
+
+test("waitReady accepts a 404 and a server that recovers from a 500", async () => {
+  let hits = 0;
+  const server = Bun.serve({ port: 0, fetch: () => new Response("x", { status: ++hits <= 2 ? 500 : 404 }) });
+  try {
+    const app = { name: "app", ready: "http" as const, readyPath: "/" };
+    await waitReady(app, server.port!, process.pid, join(root, "none.log"), 15_000);
+    expect(hits).toBeGreaterThanOrEqual(3);
+  } finally {
+    server.stop(true);
+  }
+}, 20_000);
 
 test("start order is back and other kinds, then fronts; the main service is the first front", () => {
   const list = [svc("web", "front"), svc("api", "back"), svc("admin", "front"), svc("worker", "job")];

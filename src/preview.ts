@@ -294,22 +294,33 @@ function tcpOpen(port: number): Promise<boolean> {
   });
 }
 
-async function waitReady(svc: Service, port: number, pid: number, log: string): Promise<void> {
+export async function waitReady(
+  svc: Pick<Service, "name" | "ready" | "readyPath">,
+  port: number,
+  pid: number,
+  log: string,
+  timeoutMs = READY_TIMEOUT_MS,
+): Promise<void> {
   const { name } = svc;
-  const deadline = Date.now() + READY_TIMEOUT_MS;
+  const deadline = Date.now() + timeoutMs;
+  let last: number | undefined;
   while (Date.now() < deadline) {
     if (!isAlive(pid)) throw new Error(`service "${name}" exited before it was ready. Log tail:\n${tail(log)}`);
     try {
       if (svc.ready === "tcp") {
         if (await tcpOpen(port)) return;
       } else {
-        await fetch(`http://localhost:${port}${svc.readyPath}`, { redirect: "manual", signal: AbortSignal.timeout(5000) });
-        return;
+        const res = await fetch(`http://localhost:${port}${svc.readyPath}`, { redirect: "manual", signal: AbortSignal.timeout(5000) });
+        if (res.status < 500) return;
+        // A 5xx is a server that runs but fails (a compile error page): keep waiting.
+        last = res.status;
+        await res.body?.cancel();
       }
     } catch {}
     await Bun.sleep(1000);
   }
-  throw new Error(`service "${name}" not ready after ${READY_TIMEOUT_MS / 1000}s. Log tail:\n${tail(log)}`);
+  const status = last === undefined ? "" : ` (last status ${last})`;
+  throw new Error(`service "${name}" not ready after ${timeoutMs / 1000}s${status}. Log tail:\n${tail(log)}`);
 }
 
 type Homes = Map<string, { repo: string; worktree: string }>;

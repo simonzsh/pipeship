@@ -41,7 +41,7 @@ For a monorepo or a front with its own API, list one service per app. `install` 
 - Start each app with its own command that takes the port, rather than the repo's global dev command (`turbo dev`, a root `pnpm dev`), which starts apps on fixed ports.
 - A service gets another service's URL through `env`: `"API_URL": "http://localhost:${api.port}"`.
 - pipeship picks every port first: fronts from 3000, other kinds from 4000 (4400 is skipped).
-- Back ends and other kinds start first, then fronts. Each service must answer on its `readyPath` before the next one starts (`"ready": "tcp"` only waits for a connection to its port, for a database or queue).
+- Back ends and other kinds start first, then fronts. Each service must answer on its `readyPath` before the next one starts. A status below 500 is ready (a 404 counts); a 5xx, such as a compile error page, is not. `"ready": "tcp"` only waits for a connection to its port (for a database or queue).
 - If a port truly cannot be set, write `"fixedPort": <port>`. pipeship then refuses to start a second pipeline that shares a repo while one runs.
 
 ## Several repos
