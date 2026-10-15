@@ -28,11 +28,12 @@ const ACTIVE: readonly Status[] = ["running", "waiting_for_user"];
 
 // byFolder is true when the match comes from the /clear fallback, not from the session id.
 export function matchPipelines(states: State[], input: HookInput, env: Env = process.env): { states: State[]; byFolder: boolean } {
-  const id = input.session_id ?? env.CLAUDE_CODE_SESSION_ID;
+  const id = input.session_id ?? env.CLAUDE_CODE_SESSION_ID ?? env.CODEX_THREAD_ID;
   if (!id) return { states: [], byFolder: false };
   const byId = states.filter((s) => UNFINISHED.includes(s.status) && s.session?.id === id);
   if (byId.length > 0 || input.source !== "clear" || !input.cwd) return { states: byId, byFolder: false };
-  const byCwd = states.filter((s) => ACTIVE.includes(s.status) && s.session?.harness === "claude" && s.session.cwd === input.cwd);
+  const harness = env.CODEX_THREAD_ID ? "codex" : "claude";
+  const byCwd = states.filter((s) => ACTIVE.includes(s.status) && s.session?.harness === harness && s.session.cwd === input.cwd);
   return { states: byCwd, byFolder: byCwd.length > 0 };
 }
 
@@ -56,7 +57,7 @@ export function readStates(): State[] {
 // Without it the agent picks the skill only from its description, and a detailed request often bypasses it.
 export const ROUTING_RULE = [
   "pipeship: when the user asks for work on code (a ticket to handle, a feature, a fix, a refactor, a change in a repo),",
-  "invoke the `pipeship:run` skill before you read or change code. Pass the ticket, or the request with its plan, as the argument.",
+  "invoke the `pipeship:run` skill (`$run` in Codex) before you read or change code. Pass the ticket, or the request with its plan, as the argument.",
   "This holds for a delegated request too, even when it comes with a step-by-step plan.",
   "Do not use it for a small edit in one file, a config tweak, a question, a review or a status request.",
 ].join("\n");
@@ -79,7 +80,7 @@ export function reminderText(states: State[], paths: { skill: string; helper: st
   ].join("\n");
 }
 
-// Returns one JSON line for Claude Code: the routing rule, then the reminder of unfinished pipelines.
+// Returns one JSON line for Claude Code and Codex: the routing rule, then the reminder of unfinished pipelines.
 export function sessionStartOutput(
   input: HookInput,
   opts: { states?: State[]; env?: Env; paths?: { skill: string; helper: string } } = {},
