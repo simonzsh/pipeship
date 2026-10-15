@@ -5,7 +5,8 @@ import { parseArgs } from "node:util";
 import { archivePipeline, deletePipeline, findRecipe, git, isAlive, killGroup, loadRecipe, previewLines, startPreview, stopPipeline, unarchivePipeline } from "./preview.ts";
 import { repoName } from "./repos.ts";
 import { detectSession, findT3Thread } from "./session.ts";
-import { DEFAULT_PORT, isDashboardUp, serve, spawnDashboard } from "./server.ts";
+import { DEFAULT_PORT, isDashboardUp, requestDashboardUpdate, serve, spawnDashboard } from "./server.ts";
+import { getUpdateInfo, updateInPlace } from "./update.ts";
 import {
   STEPS, addRepo, createPipeline, home, listStates, pipelineDir, readState, refreshSessionId, setMode, setStep, updateState, upsertChunk,
   waitForUser,
@@ -35,6 +36,8 @@ const USAGE = `pipeship — state, test environments and dashboard for the /pipe
   archive <id>                 archive a done, failed or stopped pipeline (its preview stops)
   unarchive <id>               unarchive an archived pipeline; its preview stays stopped
   delete <id> [--force]        delete its worktrees and files (local branches of merged PRs go; other branches and PRs stay); --force drops uncommitted changes
+  update [--check] [--port n]  update the plugin in every harness (Claude Code, Codex) that installed it;
+                               a running dashboard does it and restarts; --check only prints the versions
   dashboard [start|stop] [--port n]   start the dashboard in the background (default) or stop it
   serve [--port n]             run the dashboard in the foreground`;
 
@@ -44,7 +47,7 @@ const { positionals, values } = parseArgs({
     repo: { type: "string", multiple: true }, title: { type: "string" }, name: { type: "string" }, source: { type: "string" },
     ref: { type: "string", multiple: true }, url: { type: "string", multiple: true }, mode: { type: "string" }, skip: { type: "string" },
     worktree: { type: "string" }, branch: { type: "string" }, status: { type: "string" }, pr: { type: "string" },
-    port: { type: "string" }, recipe: { type: "string" }, reason: { type: "string" }, force: { type: "boolean" }, help: { type: "boolean", short: "h" },
+    port: { type: "string" }, recipe: { type: "string" }, reason: { type: "string" }, force: { type: "boolean" }, check: { type: "boolean" }, help: { type: "boolean", short: "h" },
   },
 });
 const [command, ...args] = positionals;
@@ -166,6 +169,9 @@ async function main() {
     case "delete":
       await deletePipeline(need(args[0], "<id>"), { force: values.force });
       return print("deleted");
+    case "update":
+      if (values.check) return print(await getUpdateInfo());
+      return print((await isDashboardUp(port)) ? await requestDashboardUpdate(port) : await updateInPlace());
     case "dashboard":
       return print(args[0] === "stop" ? await stopDashboard() : await startDashboard());
     case "serve":

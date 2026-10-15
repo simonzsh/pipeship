@@ -177,6 +177,8 @@ The pipeline starts the dashboard for you. To start or stop it yourself, use `/p
 
 When a newer version is on GitHub (`main`, checked at most once every 10 minutes), the bottom of the left column shows **Update available** with an **Update** button. It works for Claude Code and Codex installs (a git checkout shows a hint instead of the button). It updates every harness where pipeship is installed (`claude plugin update pipeship@pipeship`, and `codex plugin marketplace upgrade pipeship` then `codex plugin add pipeship@pipeship`), because one dashboard serves both. A failure in one harness does not block the other. It then restarts the dashboard on the same port, from the running copy or from a newer one, and reloads the page. It refuses while a test environment is starting or a merge runs. Pipelines and their test servers keep running.
 
+The agent can do the same without the dashboard: ask it to update pipeship (`/pipeship:update` in Claude Code, `$update` in Codex), or run `scripts/pipeship update` from a terminal. When the dashboard runs, the command asks it to update and waits until it restarts on the new version. Otherwise it updates the installs itself. `scripts/pipeship update --check` only prints the running and the latest version. The current session keeps the old skills: start a new session to load the new ones.
+
 The page is React, Tailwind and [shadcn/ui](https://ui.shadcn.com) components (`src/dashboard/`). Bun builds it in memory when the dashboard starts: no Vite, no build step.
 
 State lives in `~/.pipeship/pipelines/<id>/` (`state.json`, `ticket.md`, `explore.md`, `plan.md`, `test.md`, worktrees, `preview.log`).

@@ -7,7 +7,8 @@ import { DiffError, pipelineDiff } from "./diff-git.ts";
 import type { DiffErrorBody } from "./diff.ts";
 import { startPrSync } from "./pr-sync.ts";
 import { home, listDashboardStates, type Harness } from "./state.ts";
-import { currentHarness, currentVersion, getUpdateInfo, installUpdate, UpdateError, type InstallDeps } from "./update.ts";
+import { currentHarness, currentVersion, getUpdateInfo, installUpdate, UpdateError, type InstallDeps, type InstallResponse } from "./update.ts";
+import { shouldReload } from "./dashboard/update-info.ts";
 import {
   anyPreviewStarting, archivePipeline, deletePipeline, isPreviewStarting, PreviewError, requestPreviewStart, stopPipeline, stopPreviewAndSettle,
   unarchivePipeline,
@@ -85,20 +86,20 @@ export async function serve(port = DEFAULT_PORT, opts: ServeOptions = {}) {
       "/api/update": async () => Response.json(await getUpdateInfo({ harness: opts.harness }), { headers: { "Cache-Control": "no-store" } }),
       "/api/update/install": {
         POST: async () => {
-          if (restarting) return Response.json({ restarting: true, from: currentVersion() });
+          const reply = (body: InstallResponse, status = 200) => Response.json(body, { status });
+          if (restarting) return reply({ restarting: true, from: currentVersion() });
           try {
             const blocker = () =>
               anyPreviewStarting() ? "A preview is starting: wait for it, then update" :
               isMergeRunning() ? "A merge is running: wait for it, then update" : undefined;
             const result = await installUpdate(opts.harness !== undefined ? opts.harness : currentHarness(), { blocker, ...opts.update });
-            if (!result.restarting) return Response.json({ restarting: false, message: result.message });
+            if (!result.restarting) return reply({ restarting: false, message: result.message });
             restarting = true;
             if (result.warning) console.error(`update: ${result.warning}`);
             setTimeout(() => handoff(result.launcher), 300); // let the response go out first
-            return Response.json({ restarting: true, from: currentVersion() });
+            return reply({ restarting: true, from: currentVersion() });
           } catch (err) {
-            const status = err instanceof UpdateError ? err.status : 500;
-            return Response.json({ error: errorMessage(err) }, { status });
+            return reply({ error: errorMessage(err) }, err instanceof UpdateError ? err.status : 500);
           }
         },
       },
@@ -221,11 +222,31 @@ export async function serve(port = DEFAULT_PORT, opts: ServeOptions = {}) {
   return server;
 }
 
-export async function isDashboardUp(port = DEFAULT_PORT): Promise<boolean> {
+// The version of the pipeship dashboard on this port, or undefined when none answers.
+export async function dashboardVersion(port = DEFAULT_PORT, doFetch: typeof fetch = fetch): Promise<string | undefined> {
   try {
-    const res = await fetch(`http://localhost:${port}/api/health`, { signal: AbortSignal.timeout(1000) });
-    return (await res.json()).app === "pipeship";
+    const res = await doFetch(`http://localhost:${port}/api/health`, { signal: AbortSignal.timeout(1000) });
+    const body = (await res.json()) as { app?: string; version?: string };
+    return body.app === "pipeship" ? (body.version ?? "") : undefined;
   } catch {
-    return false;
+    return undefined;
   }
+}
+
+export const isDashboardUp = async (port = DEFAULT_PORT) => (await dashboardVersion(port)) !== undefined;
+
+// `pipeship update` with a dashboard: it owns the blockers and restarts itself, so ask it and wait for the new version.
+export async function requestDashboardUpdate(port: number, deps: { fetch?: typeof fetch; sleep?: (ms: number) => Promise<unknown>; waitMs?: number } = {}): Promise<string> {
+  const { fetch: doFetch = fetch, sleep = Bun.sleep, waitMs = 30_000 } = deps;
+  const base = `http://localhost:${port}`;
+  const res = await doFetch(`${base}/api/update/install`, { method: "POST" });
+  const body = (await res.json()) as InstallResponse;
+  if ("error" in body) throw new Error(body.error);
+  if (!body.restarting) return body.message;
+  for (const deadline = Date.now() + waitMs; Date.now() < deadline; ) {
+    await sleep(500);
+    const version = await dashboardVersion(port, doFetch);
+    if (shouldReload(body.from, version)) return `Updated from ${body.from} to ${version}: the dashboard restarted on ${base}`;
+  }
+  throw new Error(`Updated, but the dashboard did not come back on ${base} within ${waitMs / 1000}s: see ${join(home(), "dashboard.log")}`);
 }

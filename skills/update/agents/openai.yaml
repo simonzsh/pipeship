@@ -1,0 +1,6 @@
+interface:
+  display_name: "pipeship: update"
+  short_description: "Update the pipeship plugin"
+  default_prompt: "Use $update to update pipeship"
+policy:
+  allow_implicit_invocation: true

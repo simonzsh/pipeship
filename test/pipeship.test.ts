@@ -12,7 +12,7 @@ import {
 } from "../src/preview.ts";
 import { diffTotals, parseDiff } from "../src/diff.ts";
 import { baseRef, DiffError, gitDiff, headRef, pipelineDiff, resetFetchCache } from "../src/diff-git.ts";
-import { DEFAULT_PORT, serve } from "../src/server.ts";
+import { DEFAULT_PORT, requestDashboardUpdate, serve } from "../src/server.ts";
 import {
   classifyPr, defaultRunner, DEFAULT_LIMITS, failStaleMerges, isMergeRunning, mergeStack, MergeError, resolveMergeRepo, startMerge, type MergeDeps, type PrView, type Runner,
 } from "../src/merge.ts";
@@ -27,7 +27,7 @@ import { allMerged, displaySteps, finished, formatElapsed, timeAgo, timeAgoShort
 import { diffRequests, diffUrl } from "../src/dashboard/diff-requests.ts";
 import { highlightLines, languageOf } from "../src/dashboard/highlight.tsx";
 import { chunkActivity } from "../src/dashboard/status.tsx";
-import { compareVersions, currentVersion, getUpdateInfo, detectHarness, installUpdate, readCodexInstalled, resetUpdateCache, UpdateError } from "../src/update.ts";
+import { compareVersions, currentVersion, getUpdateInfo, detectHarness, installUpdate, readCodexInstalled, resetUpdateCache, UpdateError, updateInPlace } from "../src/update.ts";
 import type { Harness, MergeRun } from "../src/state.ts";
 import { shouldReload } from "../src/dashboard/update-info.ts";
 
@@ -2877,4 +2877,39 @@ test("POST /api/update/install does not restart when nothing changed, and /api/h
   } finally {
     server.stop(true);
   }
+});
+
+test("updateInPlace reports where the new version is, or why nothing changed", async () => {
+  const restart = { restarting: true as const, launcher: "/cache/2.0.0/scripts/pipeship" };
+  expect(await updateInPlace(async () => restart)).toBe("Updated: the next pipeship command runs the new version from /cache/2.0.0");
+  expect(await updateInPlace(async () => ({ restarting: false, message: "Already up to date" }))).toBe("Already up to date");
+});
+
+describe("requestDashboardUpdate", () => {
+  // A fake dashboard: install answers `install`, health reports each version of `versions` in turn, then is down.
+  const fakeDashboard = (install: { status?: number; body: object }, versions: string[] = []) => ({
+    sleep: async () => {},
+    fetch: (async (url: string | URL | Request) => {
+      if (new URL(String(url)).pathname === "/api/update/install") return Response.json(install.body, { status: install.status ?? 200 });
+      const version = versions.shift();
+      if (version === undefined) throw new Error("down");
+      return Response.json({ app: "pipeship", version });
+    }) as typeof fetch,
+  });
+
+  test("waits for the restarted dashboard to report a new version", async () => {
+    const deps = fakeDashboard({ body: { restarting: true, from: "1.0.0" } }, ["1.0.0", "2.0.0"]);
+    expect(await requestDashboardUpdate(4400, deps)).toBe("Updated from 1.0.0 to 2.0.0: the dashboard restarted on http://localhost:4400");
+  });
+
+  test("relays a message and an error", async () => {
+    expect(await requestDashboardUpdate(4400, fakeDashboard({ body: { restarting: false, message: "Already up to date" } }))).toBe("Already up to date");
+    const busy = fakeDashboard({ status: 409, body: { error: "A merge is running: wait for it, then update" } });
+    await expect(requestDashboardUpdate(4400, busy)).rejects.toThrow("A merge is running");
+  });
+
+  test("fails when the dashboard does not come back", async () => {
+    const deps = fakeDashboard({ body: { restarting: true, from: "1.0.0" } });
+    await expect(requestDashboardUpdate(4400, { ...deps, waitMs: 5 })).rejects.toThrow("did not come back");
+  });
 });
