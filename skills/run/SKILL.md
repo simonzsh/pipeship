@@ -132,7 +132,7 @@ Push the branches and open the PRs without asking: running the ticket through pi
 If the exception in **The checks** applies (CI does not run the full suite on PRs, or the user asks for it), run the full suite once now, on the top of each repo's stack. If it fails, fix it before you push.
 
 1. Push only the top chunk branch of each repo: it holds the whole feature. The lower chunk branches stay local.
-2. For each repo, open ONE PR: `gh pr create --head <top branch> --base <that repo's base>`. Title from the ticket; body: what the feature does, a link to the ticket, the chunks in stack order each with its commits (one commit per chunk, so the user can review commit by commit), the tests that ran, and a note that CI covers the rest.
+2. For each repo, open ONE PR: `gh pr create --head <top branch> --base <that repo's base>`. Title from the ticket; body: what the feature does, a link to the ticket, the chunks in stack order each with its commits, the tests that ran, and a note that CI covers the rest.
 3. `pipeship chunk <id> <top chunk> --pr <url>`, for the top chunk only. Every chunk stays `done`: the dashboard shows the repo's PR on the other chunks, and sets every chunk of the repo to `merged` once that PR is merged. It also sets `closed` from GitHub.
 
 With several repos, once every PR exists, add a "Related PRs" list with the other repos' PRs to each PR body (`gh pr edit <url> --body-file <file>`).
@@ -172,6 +172,6 @@ The user may ask for changes after the end, or comment on a PR. Do not fix it al
 3. **Implement.** One subagent per chunk concerned (model `sonnet`), in its existing worktree. Brief: `<skill dir>/prompts/implement.md`. Give it the feedback. It fixes and commits.
 4. **Restack once**, in stack order, then run the targeted checks for the diff of the feedback. Mark `implement` `done`.
 5. **Review the delta only.** Mark `review` `running`. Run one cleanup subagent (model `sonnet`, brief `<skill dir>/prompts/cleanup.md`, chunks `reviewing`) on the diff of the feedback. Run the global review (model `opus`, brief `<skill dir>/prompts/global-review.md`) only if the feedback touches several chunks or a contract. Then mark `review` `done`.
-6. **Push** the top branch of each repo concerned, with `--force-with-lease` after a restack: its PR updates on its own. If the PR is already merged, open a new PR on the base of the repo. A pipeline from an older pipeship has one PR per chunk: push every chunk branch as before.
+6. **Push** the top branch of each repo concerned, with `--force-with-lease` after a restack: its PR updates on its own. If the PR is already merged, open a new PR on the base of the repo. Record it with `pipeship chunk <id> <top chunk> --pr <url>`: pipeship sets that chunk back to `done`, so the dashboard polls and merges the new PR. A pipeline from an older pipeship has one PR per chunk: push every chunk branch as before.
 7. **Small feedback** (one line, a name, a text): you may fix it yourself. Commit in the chunk that owns the code, restack, re-run the checks, and update the steps.
 8. **Test again.** If the tested behaviour changed, run `pipeship preview <id>` again and update `<dir>/verify.md` and `<dir>/test.md`.
