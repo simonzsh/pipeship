@@ -124,7 +124,7 @@ Cleanups first, then the global review on the cleaned top. Every finding has a s
 7. **Re-check** after a `blocking` fix: run the global review once more (same brief), on the diff `<noted top>..<top branch>` only. Sort and fix what it finds, then restack. No second re-check.
 8. **Safety rule**: re-run the checks once: the fast checks and the targeted tests for the diff. If a check fails, fix it or revert the pass. A failure listed under `## Baseline` in `explore.md` is not a regression. Run one test suite at a time.
 
-In `quick` mode, skip the global review and the re-check. Run one cleanup pass (one subagent, model `sonnet`, same brief) on the whole diff. Give it the worktree of every chunk and `<dir>/explore.md`, and tell it that it runs in quick mode. It covers every chunk, so all chunks are `reviewing` together. Sort and fix its findings as in item 4, then run the checks once, for the whole diff.
+In `quick` mode, skip the global review and the re-check. Run one cleanup pass (one subagent, model `sonnet`, same brief) on the whole diff `<base>..<top branch>`. Give it the worktree of every chunk and `<dir>/explore.md`, and tell it that it runs in quick mode. It covers every chunk, so all chunks are `reviewing` together. Sort and fix its findings as in item 4, then run the checks once, for the whole diff.
 
 Write a short summary to `<dir>/review.md`: the findings fixed, the findings left with their severity and why, the tests that ran, and a note that CI covers the rest.
 
