@@ -208,7 +208,7 @@ function makeCtx(id: string, repo: string, d: MergeDeps): Ctx {
 
   const mergePr: Ctx["mergePr"] = async (c, head, method, message) => {
     const url = c.pr!;
-    const n = parsePrUrl(url).number;
+    const { owner, repo: name, number: n } = parsePrUrl(url);
     // No -d: the branches of a stack go together, after the last merge (see deleteBranches).
     const args = (kind: string) => ["pr", "merge", url, kind, "--match-head-commit", head];
     let r = await gh(args("--merge"));
@@ -216,8 +216,7 @@ function makeCtx(id: string, repo: string, d: MergeDeps): Ctx {
     // Only a fold of an old stack may fall back to squash; the final merge must keep the chunk commits.
     if (refused && method === "fold") r = await gh(args("--squash"));
     else if (refused) {
-      const p = parsePrUrl(url);
-      throw new Error(`merge commits are not allowed on ${p.owner}/${p.repo}: enable "Allow merge commits" in the GitHub settings, or merge #${n} by hand`);
+      throw new Error(`merge commits are not allowed on ${owner}/${name}: enable "Allow merge commits" in the GitHub settings, or merge #${n} by hand`);
     }
     if (r.code !== 0) throw new Error(`gh pr merge #${n} failed: ${firstLine(r.stderr)}`);
     upsertChunk(id, { name: c.name, status: MERGED });
@@ -330,7 +329,7 @@ async function relistFolded(x: Ctx, chunks: Chunk[]): Promise<string | undefined
 // Deletes the stack's remote branches, never the base. Returns the branches that could not go:
 // a failure here must not undo a merge that already happened.
 async function deleteBranches(x: Ctx, chunks: Chunk[], keep: string[]): Promise<string[]> {
-  const names = [...new Set(chunks.filter((c) => c.pr && c.branch).map((c) => c.branch).filter((b): b is string => !!b && !keep.includes(b)))];
+  const names = [...new Set(chunks.filter((c) => c.pr).map((c) => c.branch).filter((b): b is string => !!b && !keep.includes(b)))];
   const left: string[] = [];
   for (const b of names) {
     const r = await x.d.run("git", ["push", "origin", "--delete", b], { cwd: x.repo });
