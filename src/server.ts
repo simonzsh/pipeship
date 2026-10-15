@@ -173,7 +173,7 @@ export async function serve(port = DEFAULT_PORT, opts: ServeOptions = {}) {
         POST: async (req) => {
           try {
             const body = (await req.json().catch(() => null)) as { mode?: unknown; repo?: unknown; deleteBranches?: unknown } | null;
-            // An old tab would send {mode:"combine"} without deleteBranches: reject, never reinterpret.
+            // An old tab would send a {mode} field without deleteBranches: reject, never reinterpret.
             if (body?.mode !== undefined) throw new MergeError("mode is no longer supported: reload the dashboard", 400);
             return Response.json(startMerge(req.params.id, {}, body?.repo, body?.deleteBranches).state, { status: 202 });
           } catch (err) {
