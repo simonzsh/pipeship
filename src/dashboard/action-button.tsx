@@ -1,5 +1,5 @@
 import { Archive, ArchiveRestore, Play, Square, Trash2, type LucideIcon } from "lucide-react";
-import { Spinner } from "./components/ui/spinner";
+import { LogoLoader } from "./logo-loader";
 import type { VariantProps } from "class-variance-authority";
 import { useState } from "react";
 import {
@@ -141,7 +141,7 @@ export function StartPreviewButton({ id, starting }: { id: string; starting: boo
     <>
       {error && <span className="text-xs text-destructive">{error}</span>}
       <Button variant="outline" size="xs" disabled={busy} onClick={run}>
-        {busy ? <Spinner /> : <Play className="text-emerald-600 dark:text-emerald-400" />}
+        {busy ? <LogoLoader className="size-4 text-emerald-600 dark:text-emerald-400" label="Starting" /> : <Play className="text-emerald-600 dark:text-emerald-400" />}
         {busy ? "Starting…" : "Start preview"}
       </Button>
     </>
