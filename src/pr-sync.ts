@@ -88,22 +88,22 @@ export async function syncPrStatuses(deps: Partial<SyncDeps> = {}): Promise<{ ch
       // Lock the read-modify-write: a chunk or merge may have changed while gh ran.
       const changes = withStateLock(id, () => {
         const x = readState(id);
-        const changes: string[] = [];
+        const lines: string[] = [];
         for (const r of results) {
           const c = x.chunks.find((k) => k.name === r.name);
           if (!c || c.pr !== r.pr || c.status === MERGED || mergeRunning(x, c.repo!)) continue; // a merge may have started on this repo
           // A PR can be retargeted on GitHub (by hand, or when the branch below it is deleted).
           if (r.base && r.base !== c.prBase) {
             c.prBase = r.base;
-            changes.push(`pr sync: ${id}/${c.name} base ${r.base}`);
+            lines.push(`pr sync: ${id}/${c.name} base ${r.base}`);
           }
           const next = syncedStatus(c.status, r.state);
           if (!next) continue;
           c.status = next;
-          changes.push(`pr sync: ${id}/${c.name} -> ${next}`);
+          lines.push(`pr sync: ${id}/${c.name} -> ${next}`);
         }
-        if (changes.length > 0) writeState(x);
-        return changes;
+        if (lines.length > 0) writeState(x);
+        return lines;
       });
       if (!changes.length) continue;
       total.changed += changes.length;
