@@ -44,6 +44,25 @@ For a monorepo or a front with its own API, list one service per app. `install` 
 - Back ends and other kinds start first, then fronts. Each service must answer on its `readyPath` before the next one starts. A status below 500 is ready (a 404 counts); a 5xx, such as a compile error page, is not. `"ready": "tcp"` only waits for a connection to its port (for a database or queue).
 - If a port truly cannot be set, write `"fixedPort": <port>`. pipeship then refuses to start a second pipeline that shares a repo while one runs.
 
+## A database per pipeline
+
+Previews of a repo share its local database by default. To give each pipeline its own, name the database after the pipeline with `${pipeline.id}` in `env`, and create it in `start`:
+
+```json
+{
+  "services": [
+    { "name": "app", "kind": "front",
+      "start": "createdb \"$DB_NAME\" 2>/dev/null; bun run db:migrate && bun run dev",
+      "env": { "DB_NAME": "app_${pipeline.id}", "DATABASE_URL": "postgres://localhost:5432/app_${pipeline.id}" } }
+  ]
+}
+```
+
+- `${pipeline.id}` works in every `env` value. The id has lowercase letters, digits and `-`: quote it in SQL.
+- `env` is set per service: for one app, write `services` with one service.
+- `start` creates the database when it is missing and keeps it when it exists. Seed it there if the app needs data.
+- pipeship does not drop it: drop it by hand (`dropdb`) once the pipeline is done.
+
 ## Several repos
 
 For a ticket that spans repos, list `services` and give each one its `repo` (the repo's folder name). Each service runs from the top worktree of its repo.

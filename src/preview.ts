@@ -13,7 +13,7 @@ export interface ServiceRecipe {
   portEnv?: string;
   readyPath?: string;
   ready?: "http" | "tcp"; // "tcp": ready as soon as the port accepts a connection (databases, queues)
-  env?: Record<string, string>; // values may hold ${<service>.port}
+  env?: Record<string, string>; // values may hold ${<service>.port} and ${pipeline.id}
   fixedPort?: number;
   repo?: string; // repo NAME (repoName of a pipeline repo)
   install?: string; // run in this service's worktree, before any service starts
@@ -53,6 +53,7 @@ export const DASHBOARD_PORT = 4400;
 const PORT_SCAN = 1000;
 const READY_TIMEOUT_MS = 180_000; // per service
 const PORT_REF = /\$\{([A-Za-z0-9_-]+)\.port\}/g;
+const PIPELINE_REF = /\$\{pipeline\.id\}/g;
 
 export function savedRecipePath(repos: string[]): string {
   if (repos.length === 1) {
@@ -209,10 +210,10 @@ export async function pickPorts(
   return ports;
 }
 
-export function resolveEnv(env: Record<string, string>, ports: Record<string, number>): Record<string, string> {
+export function resolveEnv(env: Record<string, string>, ports: Record<string, number>, pipelineId: string): Record<string, string> {
   const out: Record<string, string> = {};
   for (const [key, value] of Object.entries(env)) {
-    out[key] = value.replace(PORT_REF, (_, name: string) => {
+    out[key] = value.replace(PIPELINE_REF, pipelineId).replace(PORT_REF, (_, name: string) => {
       if (ports[name] === undefined) throw new Error(`env "${key}" refers to unknown service "${name}"`);
       return String(ports[name]);
     });
@@ -482,7 +483,7 @@ export async function startPreview(id: string, worktree?: string, draft?: string
           stdio: ["ignore", fd, fd],
           env: {
             ...process.env,
-            ...resolveEnv(svc.env, ports),
+            ...resolveEnv(svc.env, ports, id),
             ...(svc.portEnv ? { [svc.portEnv]: String(plan.port) } : {}),
           },
         });

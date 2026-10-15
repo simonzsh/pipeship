@@ -661,9 +661,9 @@ test("fixed ports are reserved and must be free", async () => {
   await expect(pickPorts(services, async (p) => p !== 4000)).rejects.toThrow("fixed port 4000 is already in use");
 });
 
-test("env templates resolve ports and leave other placeholders", () => {
-  const env = { A: "http://localhost:${api.port}", B: "${HOME}", C: "${api.portx}" };
-  expect(resolveEnv(env, { api: 4000 })).toEqual({ A: "http://localhost:4000", B: "${HOME}", C: "${api.portx}" });
+test("env templates resolve ports and the pipeline id, and leave other placeholders", () => {
+  const env = { A: "http://localhost:${api.port}", B: "${HOME}", C: "${api.portx}", D: "app_${pipeline.id}" };
+  expect(resolveEnv(env, { api: 4000 }, "abc-1")).toEqual({ A: "http://localhost:4000", B: "${HOME}", C: "${api.portx}", D: "app_abc-1" });
 });
 
 test("waitReady keeps waiting on 5xx answers and reports the last status", async () => {
@@ -768,13 +768,14 @@ test("a failed service stops the services already started", async () => {
     JSON.stringify({
       services: [
         { name: "api", kind: "back", start: `bun -e "${api}"` },
-        { name: "web", kind: "front", start: "echo api=$API_URL; exit 1", env: { API_URL: "http://localhost:${api.port}" } },
+        { name: "web", kind: "front", start: "echo api=$API_URL db=$DB_NAME; exit 1", env: { API_URL: "http://localhost:${api.port}", DB_NAME: "app_${pipeline.id}" } },
       ],
     }),
   );
   const { id } = createPipeline({ repos: [{ path: repo }], title: "t", source: "text" });
   const error = await startPreview(id, repo).catch((e: Error) => e);
   expect((error as Error).message).toMatch(/service "web" exited.*api=http:\/\/localhost:\d+/s);
+  expect((error as Error).message).toContain(`db=app_${id}`);
   const port = /api=http:\/\/localhost:(\d+)/.exec((error as Error).message)![1];
   await expect(fetch(`http://localhost:${port}`)).rejects.toThrow();
   expect(readState(id).preview).toBeUndefined();
