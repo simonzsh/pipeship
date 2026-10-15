@@ -1,6 +1,6 @@
 import { GitMerge } from "lucide-react";
 import { useState } from "react";
-import type { Chunk, MergeRun } from "../state.ts";
+import { CLOSED, type Chunk, type MergeRun } from "../state.ts";
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription,
   AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger,
@@ -25,6 +25,8 @@ export function MergeButton({ id, repo, chunks, base, merge, finished }: {
   // The run's startedAt seen at the click (null: no click). Ends when the stream shows another run, or the POST fails.
   const [clickedAt, setClickedAt] = useState<string | undefined | null>(null);
   const todo = chunks.filter((c) => c.pr && c.status !== "merged");
+  // The server refuses a stack with a closed PR: hide the button when nothing open is left, disable it otherwise.
+  const closed = todo.find((c) => c.status === CLOSED);
   const running = merge?.status === "running";
   const starting = clickedAt !== null && merge?.startedAt === clickedAt;
   const run = async () => {
@@ -43,7 +45,7 @@ export function MergeButton({ id, repo, chunks, base, merge, finished }: {
       </Button>
     );
   }
-  if (!finished || todo.length === 0) return null;
+  if (!finished || todo.every((c) => c.status === CLOSED)) return null;
   const failure = (error || merge?.status === "failed") && (
     <span className="flex min-w-0 items-center text-xs text-destructive" title={error ?? merge?.error}>
       <span className="max-w-72 truncate">{error ?? `Merge stopped: ${merge?.error}`}</span>
@@ -52,6 +54,13 @@ export function MergeButton({ id, repo, chunks, base, merge, finished }: {
   const bottom = prNumber(todo[0]!.pr!);
   const target = base ?? "its base branch";
   const into = base ? `Merge into ${base}` : "Merge";
+  if (closed) {
+    return (
+      <Button variant="outline" size="xs" disabled>
+        <GitMerge className={ICON} /> {into}
+      </Button>
+    );
+  }
   return (
     <AlertDialog>
       {failure}
