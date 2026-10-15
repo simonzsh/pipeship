@@ -971,13 +971,14 @@ test("base: checks that stay pending stop the merge after 15 min", async () => {
   expect(gh.calls).toEqual([]);
 });
 
-test("base: a PR that targets another branch than the pipeline base fails", async () => {
+test("base: a PR that targets another branch than the pipeline base merges into the branch GitHub shows", async () => {
   const stack = makeStack(1);
   const gh = fakeGh(stack, 1);
   gh.prs[1]!.base = "develop";
+  sh(stack.origin, "branch", "develop", "main");
   await mergeStack(stack.id, gh.deps);
-  expect(readState(stack.id).merges?.[stack.clone]?.error).toBe("PR #1 targets develop, not main: retarget it");
-  expect(gh.calls).toEqual([]);
+  expect(readState(stack.id).merges?.[stack.clone]).toMatchObject({ status: "done", message: "merged #1 into develop" });
+  expect(gh.calls).toEqual(["merge 1"]);
 });
 
 test("a run on two stacked PRs combines, then squashes into main in one go", async () => {
