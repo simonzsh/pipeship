@@ -44,7 +44,7 @@ You can also ask in plain words: "handle ABC-123 with pipeship".
 
 A SessionStart hook runs after startup, resume, clear or compact. It always injects a routing rule: a work request on code (a ticket to handle, a feature, a fix, a change in a repo) goes through `pipeship:run`, even when it comes with a detailed plan; a small edit in one file, a question, a review or a status request does not. When the session has unfinished pipelines, it adds a reminder: their step and folder, the key rules, and the path of the skill to re-read. The hook comes with the plugin install: the dev symlink of `skills/run` gets no hook.
 
-Codex runs the same hook (`hooks/hooks.json` of the plugin) and matches pipelines by `CODEX_THREAD_ID`.
+Codex discovers the same hook (`hooks/hooks.json` of the plugin). See "In Codex" for its trust step.
 
 ### In Codex
 
@@ -57,7 +57,7 @@ $run quick https://github.com/org/repo/issues/42
 
 You can also ask in plain words: "handle ABC-123 with pipeship". pipeship writes to `~/.pipeship`, starts background servers and pushes branches, so Codex's default sandbox asks for approval: approve these commands, or run Codex with a sandbox that allows them.
 
-The plugin hook works in Codex too. Codex asks once to trust it (review the hooks in `/hooks`), and the hook does not run until you trust it. If you prefer not to trust it, add this rule to your `AGENTS.md` instead:
+Codex discovers the plugin hook, but it is untrusted by default: review it in `/hooks`. It does not run until you trust it. If you prefer not to trust it, add this rule to your `AGENTS.md` instead:
 
 ```
 pipeship: when the user asks for work on code (a ticket to handle, a feature, a fix, a refactor, a change in a repo),
