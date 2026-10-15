@@ -108,7 +108,7 @@ export interface PreviewService {
   port: number;
   url: string; // http://localhost:<port>
   pid?: number; // unset until the service is spawned
-  startedAt?: string; // ps lstart at spawn; absent in old states
+  startedAt?: string; // processStart() at spawn; absent in old states
   log: string; // <pipelineDir>/preview-<name>.log
   repo: string; // Repo.path the service starts from
   worktree: string; // directory the service runs in

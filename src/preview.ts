@@ -261,8 +261,18 @@ export function previewLines(preview: Preview): string[] {
   return [preview.url, ...(services.length > 1 ? services.map((s) => `${label(s)}: ${s.url}`) : [])];
 }
 
-// Start time as ps prints it. Fixed locale and zone so the dashboard and the CLI agree.
+// Linux: start in ticks since boot from /proc, which a wall-clock jump does not shift (ps lstart does).
+// Elsewhere: ps lstart, with a fixed locale and zone so the dashboard and the CLI agree.
 export function processStart(pid: number): string | undefined {
+  if (process.platform === "linux") {
+    try {
+      const stat = readFileSync(`/proc/${pid}/stat`, "utf8");
+      // Field 22; the command name (field 2) may hold spaces, so count after its closing paren.
+      return stat.slice(stat.lastIndexOf(")") + 2).split(" ")[19] || undefined;
+    } catch {
+      return undefined;
+    }
+  }
   const res = spawnSync("ps", ["-o", "lstart=", "-p", String(pid)], {
     encoding: "utf8",
     env: { ...process.env, LC_ALL: "C", TZ: "UTC" },
