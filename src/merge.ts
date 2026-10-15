@@ -112,7 +112,7 @@ function runningMerge(repo: string, startedAt: string): MergeRun {
   return { status: "running", repo, pid: process.pid, message: "starting", startedAt, updatedAt: new Date().toISOString() };
 }
 
-// The repo whose stack to merge: optional with one repo, required with several.
+// The repo to merge: optional with one repo, required with several.
 export function resolveMergeRepo(state: State, raw: unknown): Repo {
   const { repos } = state;
   if (raw === undefined || raw === null) {

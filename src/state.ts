@@ -48,7 +48,7 @@ export function markRepoMerged(s: State, repo: string): string[] {
 export type MergeStatus = "running" | "done" | "failed";
 export interface MergeRun {
   status: MergeStatus;
-  repo: string; // Repo.path whose stack this run merges
+  repo: string; // Repo.path this run merges
   pid?: number; // process that runs the merge (the dashboard server)
   current?: string; // name of the chunk being merged, or the one that stopped the merge
   message?: string; // progress, e.g. "waiting for checks on #12 (2 pending)"
