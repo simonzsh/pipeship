@@ -2140,6 +2140,8 @@ test("allMerged and finished", () => {
   expect(allMerged({ chunks: [] })).toBe(false);
   expect(allMerged({ chunks: [{ name: "a", pr: "u", status: "merged" }] as never })).toBe(true);
   expect(allMerged({ chunks: [{ name: "a", pr: "u", status: "merged" }, { name: "b", pr: "v", status: "done" }] as never })).toBe(false);
+  expect(allMerged({ chunks: [{ name: "a", pr: "u", status: "merged" }, { name: "b", pr: "v", status: "closed" }] as never })).toBe(true);
+  expect(allMerged({ chunks: [{ name: "a", pr: "u", status: "closed" }] as never })).toBe(false);
   expect(finished({ status: "ready" })).toBe(true);
   for (const status of ["done", "failed", "stopped", "archived"] as const) expect(finished({ status })).toBe(true);
   expect(finished({ status: "running" })).toBe(false);

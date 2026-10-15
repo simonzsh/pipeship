@@ -28,13 +28,14 @@ export interface Chunk {
 // Chunk.status stays free text; the merge engine writes this value.
 export const MERGED = "merged";
 
-// True when the pipeline has PRs and all of them are merged. Server and dashboard share it.
-export function allMerged(p: Pick<State, "chunks">): boolean {
-  const prChunks = p.chunks.filter((c) => c.pr);
-  return prChunks.length > 0 && prChunks.every((c) => c.status === MERGED);
-}
 // Written by the dashboard's PR sync for a PR closed without merge.
 export const CLOSED = "closed";
+
+// True when at least one PR is merged and every other PR is merged or closed. Server and dashboard share it.
+export function allMerged(p: Pick<State, "chunks">): boolean {
+  const prChunks = p.chunks.filter((c) => c.pr && c.status !== CLOSED);
+  return prChunks.length > 0 && prChunks.every((c) => c.status === MERGED);
+}
 
 export type MergeStatus = "running" | "done" | "failed";
 export interface MergeRun {

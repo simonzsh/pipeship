@@ -105,7 +105,7 @@ export async function syncPrStatuses(deps: Partial<SyncDeps> = {}): Promise<{ ch
       writeState(x);
       total.changed += changes.length;
       changes.forEach((l) => d.log(l));
-      if (changes.some((l) => l.endsWith(`-> ${MERGED}`))) await d.archive(id);
+      if (changes.some((l) => l.endsWith(`-> ${MERGED}`) || l.endsWith(`-> ${CLOSED}`))) await d.archive(id);
     } catch (err) {
       d.log(`pr sync: cannot update ${id}: ${errorMessage(err)}`);
     }
