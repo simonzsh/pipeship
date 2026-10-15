@@ -1,7 +1,7 @@
 import { archiveIfAllMerged } from "./preview.ts";
 import { mergeRunning } from "./repos.ts";
 import { defaultRunner, errorMessage, type Runner } from "./merge.ts";
-import { CLOSED, home, listStates, MERGED, readState, writeState, type Chunk, type State } from "./state.ts";
+import { CLOSED, home, listStates, MERGED, readState, withStateLock, writeState, type Chunk, type State } from "./state.ts";
 
 export const SYNC_INTERVAL_MS = 60_000;
 export const KICK_MIN_MS = 15_000; // throttle for the page-load trigger
@@ -85,24 +85,27 @@ export async function syncPrStatuses(deps: Partial<SyncDeps> = {}): Promise<{ ch
       }
     }
     try {
-      // Sync read-modify-write, no await between: a chunk or merge may have changed while gh ran.
-      const x = readState(id);
-      const changes: string[] = [];
-      for (const r of results) {
-        const c = x.chunks.find((k) => k.name === r.name);
-        if (!c || c.pr !== r.pr || c.status === MERGED || mergeRunning(x, c.repo!)) continue; // a merge may have started on this repo
-        // A PR can be retargeted on GitHub (by hand, or when the branch below it is deleted).
-        if (r.base && r.base !== c.prBase) {
-          c.prBase = r.base;
-          changes.push(`pr sync: ${id}/${c.name} base ${r.base}`);
+      // Lock the read-modify-write: a chunk or merge may have changed while gh ran.
+      const changes = withStateLock(id, () => {
+        const x = readState(id);
+        const changes: string[] = [];
+        for (const r of results) {
+          const c = x.chunks.find((k) => k.name === r.name);
+          if (!c || c.pr !== r.pr || c.status === MERGED || mergeRunning(x, c.repo!)) continue; // a merge may have started on this repo
+          // A PR can be retargeted on GitHub (by hand, or when the branch below it is deleted).
+          if (r.base && r.base !== c.prBase) {
+            c.prBase = r.base;
+            changes.push(`pr sync: ${id}/${c.name} base ${r.base}`);
+          }
+          const next = syncedStatus(c.status, r.state);
+          if (!next) continue;
+          c.status = next;
+          changes.push(`pr sync: ${id}/${c.name} -> ${next}`);
         }
-        const next = syncedStatus(c.status, r.state);
-        if (!next) continue;
-        c.status = next;
-        changes.push(`pr sync: ${id}/${c.name} -> ${next}`);
-      }
+        if (changes.length > 0) writeState(x);
+        return changes;
+      });
       if (!changes.length) continue;
-      writeState(x);
       total.changed += changes.length;
       changes.forEach((l) => d.log(l));
       if (changes.some((l) => l.endsWith(`-> ${MERGED}`) || l.endsWith(`-> ${CLOSED}`))) await d.archive(id);

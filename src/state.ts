@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { closeSync, existsSync, mkdirSync, openSync, readdirSync, readFileSync, renameSync, rmSync, statSync, unlinkSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import { assertRepoName, findRepo, repoName } from "./repos.ts";
@@ -222,20 +222,116 @@ function upgrade(raw: Raw): State {
   return { ...raw, ticket: { ...ticket, links: refs.map((r, i) => (i === 0 && url ? { ref: r, url } : { ref: r })) } };
 }
 
-// Write to a temp file then rename, so the dashboard never reads half a file.
+export const LOCK_WAIT_MS = 2_000; // longest wait for a live lock, then throw
+export const LOCK_STALE_MS = 10_000; // older than this = stale even if the pid is alive
+
+export function lockPath(id: string): string {
+  return join(pipelineDir(id), "state.lock");
+}
+
+const lockDepth = new Map<string, number>();
+let seq = 0;
+
+function pidAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (err) {
+    return (err as NodeJS.ErrnoException).code === "EPERM";
+  }
+}
+
+function readLock(path: string): { pid?: number; token?: string; raw: string } | undefined {
+  try {
+    const raw = readFileSync(path, "utf8");
+    try {
+      const j = JSON.parse(raw);
+      return { pid: typeof j?.pid === "number" ? j.pid : undefined, token: typeof j?.token === "string" ? j.token : undefined, raw };
+    } catch {
+      return { raw };
+    }
+  } catch {
+    return undefined;
+  }
+}
+
+// Cross-process lock for read-modify-write on state.json. Sync on purpose: callers rely on no await in between.
+export function withStateLock<T>(id: string, fn: () => T, opts: { waitMs?: number; staleMs?: number } = {}): T {
+  const depth = lockDepth.get(id) ?? 0;
+  if (depth > 0) {
+    lockDepth.set(id, depth + 1);
+    try {
+      return fn();
+    } finally {
+      lockDepth.set(id, depth);
+    }
+  }
+  const waitMs = opts.waitMs ?? LOCK_WAIT_MS;
+  const staleMs = opts.staleMs ?? LOCK_STALE_MS;
+  const path = lockPath(id);
+  const token = `${process.pid}-${Date.now()}-${++seq}`;
+  const deadline = Date.now() + waitMs;
+  for (;;) {
+    try {
+      const fd = openSync(path, "wx");
+      try {
+        writeFileSync(fd, JSON.stringify({ pid: process.pid, token }));
+      } finally {
+        closeSync(fd);
+      }
+      break;
+    } catch (err) {
+      const code = (err as NodeJS.ErrnoException).code;
+      if (code === "ENOENT") throw new Error(`unknown pipeline: ${id}`);
+      if (code !== "EEXIST") throw err;
+    }
+    const held = readLock(path);
+    let age = 0;
+    try {
+      age = Date.now() - statSync(path).mtimeMs;
+    } catch {
+      continue; // lock vanished: retry at once
+    }
+    const stale = age > staleMs || (held?.pid !== undefined && !pidAlive(held.pid));
+    if (stale) {
+      // Re-check the token before unlink. The tiny race between check and unlink is accepted.
+      if (readLock(path)?.raw === held?.raw) rmSync(path, { force: true });
+      continue;
+    }
+    if (Date.now() >= deadline) throw new Error(`state of ${id} is locked by pid ${held?.pid ?? "?"} (${path}); try again`);
+    Bun.sleepSync(10);
+  }
+  lockDepth.set(id, 1);
+  try {
+    return fn();
+  } finally {
+    lockDepth.delete(id);
+    if (readLock(path)?.token === token) rmSync(path, { force: true });
+  }
+}
+
+// Write to a unique temp file then rename, so the dashboard never reads half a file. Callers hold the lock.
 export function writeState(state: State): void {
   state.status = pipelineStatus(state);
   state.updatedAt = new Date().toISOString();
   const path = statePath(state.id);
-  writeFileSync(`${path}.tmp`, JSON.stringify(state, null, 2) + "\n");
-  renameSync(`${path}.tmp`, path);
+  const tmp = `${path}.${process.pid}.${++seq}.tmp`;
+  try {
+    writeFileSync(tmp, JSON.stringify(state, null, 2) + "\n");
+    renameSync(tmp, path);
+  } catch (err) {
+    rmSync(tmp, { force: true });
+    throw err;
+  }
 }
 
 export function updateState(id: string, change: (s: State) => void): State {
-  const state = readState(id);
-  change(state);
-  writeState(state);
-  return state;
+  return withStateLock(id, () => {
+    const state = readState(id);
+    change(state);
+    writeState(state);
+    return state;
+  });
 }
 
 // After /clear the session id changes: record the new one so later hook matches still work.
