@@ -333,7 +333,8 @@ function copyAll(recipe: Recipe, services: Service[], homes: Homes): void {
 }
 
 // Top-level install first, then each service's, once per worktree and command.
-function runInstalls(recipe: Recipe, services: Service[], homes: Homes, log: string, several: boolean): void {
+// Async so a slow install does not block the dashboard's event loop.
+async function runInstalls(recipe: Recipe, services: Service[], homes: Homes, log: string, several: boolean): Promise<void> {
   const first = homes.get(services[0]!.name)!;
   const jobs = [
     ...(recipe.install ? [{ cmd: recipe.install, ...first }] : []),
@@ -346,8 +347,12 @@ function runInstalls(recipe: Recipe, services: Service[], homes: Homes, log: str
       const key = `${job.worktree}\0${job.cmd}`;
       if (done.has(key)) continue;
       done.add(key);
-      const result = spawnSync("sh", ["-c", job.cmd], { cwd: job.worktree, stdio: ["ignore", fd, fd] });
-      if (result.status !== 0) {
+      const failed = await new Promise<boolean>((resolve) => {
+        const child = spawn("sh", ["-c", job.cmd], { cwd: job.worktree, stdio: ["ignore", fd, fd] });
+        child.on("error", () => resolve(true));
+        child.on("close", (code) => resolve(code !== 0));
+      });
+      if (failed) {
         throw new Error(`install failed (${job.cmd})${several ? ` in ${repoName(job.repo)}` : ""}. Log tail:\n${tail(log)}`);
       }
     }
@@ -435,7 +440,7 @@ export async function startPreview(id: string, worktree?: string, draft?: string
 
   try {
     copyAll(recipe, services, homes);
-    runInstalls(recipe, services, homes, installLog, repos.length > 1);
+    await runInstalls(recipe, services, homes, installLog, repos.length > 1);
 
     for (const svc of order) {
       // A stop during a slow install or readiness wait must not leave a service behind.
