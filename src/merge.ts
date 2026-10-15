@@ -345,8 +345,8 @@ async function mergeIntoBase(x: Ctx, repo: Repo, chunks: Chunk[], remove: boolea
   x.progress(c, `checking #${n}`);
   const v = await x.view(c.pr!);
   if (v.state === "CLOSED") throw new Error(`PR #${n} is closed`);
-  const base = repo.base ?? v.baseRefName;
-  if (v.baseRefName !== base) throw new Error(`PR #${n} targets ${v.baseRefName}, not ${base}: retarget it`);
+  // GitHub is the truth: the state base only serves before a PR exists, so a stale one must not block.
+  const base = v.baseRefName;
   if (v.state === "MERGED") upsertChunk(x.id, { name: c.name, status: MERGED });
   else {
     // Right after a fold GitHub may still show the old head and its old green checks.
