@@ -276,6 +276,9 @@ export function withStateLock<T>(id: string, fn: () => T, opts: { waitMs?: numbe
       const fd = openSync(path, "wx");
       try {
         writeFileSync(fd, JSON.stringify({ pid: process.pid, token }));
+      } catch (err) {
+        rmSync(path, { force: true }); // an empty lock would block every writer until it is stale
+        throw err;
       } finally {
         closeSync(fd);
       }

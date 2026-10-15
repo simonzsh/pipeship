@@ -641,7 +641,8 @@ export async function deletePipeline(id: string, opts: { force?: boolean } = {})
     if (dirty.length) throw new Error(`uncommitted changes would be lost in: ${dirty.join(", ")}`);
   }
   for (const wt of worktrees) removeWorktree(state.repos, wt);
-  rmSync(pipelineDir(id), { recursive: true, force: true });
+  // Retries: a state write may create a lock or tmp file during the removal.
+  rmSync(pipelineDir(id), { recursive: true, force: true, maxRetries: 3 });
   for (const repo of state.repos) git(repo.path, "worktree", "prune");
   for (const c of state.chunks) {
     const base = state.repos.find((r) => r.path === c.repo)?.base;
