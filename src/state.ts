@@ -41,7 +41,7 @@ export function allMerged(p: Pick<State, "chunks">): boolean {
 // Mutates `s` (call it inside a lock); returns the names it changed.
 export function markRepoMerged(s: State, repo: string): string[] {
   if (!allMerged({ chunks: chunksOf(s, repo) })) return [];
-  const changed = chunksOf(s, repo).filter((c) => !c.pr && c.status !== MERGED);
+  const changed = chunksOf(s, repo).filter((c) => !c.pr && c.status === "done");
   for (const c of changed) c.status = MERGED;
   return changed.map((c) => c.name);
 }
@@ -476,6 +476,9 @@ export function upsertChunk(id: string, chunk: ChunkInput): State {
     if (repo !== existing.repo) throw new Error(`chunk "${chunk.name}" belongs to ${repoName(existing.repo)}`);
     // A new PR has its own base: the sync reads it again.
     if (chunk.pr && chunk.pr !== existing.pr) delete existing.prBase;
+    // A feedback PR on a merged repo must be polled again: its chunk leaves merged/closed.
+    const reopened = chunk.pr && chunk.pr !== existing.pr && !chunk.status && (existing.status === MERGED || existing.status === CLOSED);
     Object.assign(existing, chunk, { repo });
+    if (reopened) existing.status = "done";
   });
 }

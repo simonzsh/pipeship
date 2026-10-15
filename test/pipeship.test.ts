@@ -2358,14 +2358,14 @@ test("allMerged and finished", () => {
   expect(allMerged({ chunks: [{ name: "a", pr: "u", status: "merged" }, { name: "b", pr: "v", status: "closed" }] as never })).toBe(true);
   expect(allMerged({ chunks: [{ name: "a", pr: "u", status: "closed" }] as never })).toBe(false);
   const feature = (...c: object[]) => ({ chunks: c, merged: [] as string[] }) as never as State;
-  const f = feature({ name: "a", repo: "r" }, { name: "b", repo: "r" }, { name: "c", repo: "r", pr: "u", status: "merged" }, { name: "d", repo: "o" });
+  const f = feature({ name: "a", repo: "r", status: "done" }, { name: "b", repo: "r", status: "done" }, { name: "c", repo: "r", pr: "u", status: "merged" }, { name: "d", repo: "o" }, { name: "e", repo: "r", status: "coding" });
   expect(markRepoMerged(f, "r")).toEqual(["a", "b"]);
-  expect(f.chunks.map((c) => c.status)).toEqual(["merged", "merged", "merged", undefined]);
-  const open = feature({ name: "a", repo: "r" }, { name: "c", repo: "r", pr: "u", status: "done" });
+  expect(f.chunks.map((c) => c.status)).toEqual(["merged", "merged", "merged", undefined, "coding"]);
+  const open = feature({ name: "a", repo: "r", status: "done" }, { name: "c", repo: "r", pr: "u", status: "done" });
   expect(markRepoMerged(open, "r")).toEqual([]);
-  const closed = feature({ name: "a", repo: "r" }, { name: "c", repo: "r", pr: "u", status: "closed" });
+  const closed = feature({ name: "a", repo: "r", status: "done" }, { name: "c", repo: "r", pr: "u", status: "closed" });
   expect(markRepoMerged(closed, "r")).toEqual([]);
-  expect(closed.chunks.map((c) => c.status)).toEqual([undefined, "closed"]);
+  expect(closed.chunks.map((c) => c.status)).toEqual(["done", "closed"]);
   expect(finished({ status: "ready" })).toBe(true);
   for (const status of ["done", "failed", "stopped", "archived"] as const) expect(finished({ status })).toBe(true);
   expect(finished({ status: "running" })).toBe(false);
@@ -2917,6 +2917,41 @@ syncTest("pr sync: a PR merged elsewhere marks every chunk of its repo merged", 
   expect(chunkStatuses(id)).toEqual(["merged", "merged", "merged"]);
   expect(logs.filter((l) => l.includes("->"))).toEqual([`pr sync: ${id}/c3 -> merged`, `pr sync: ${id}/c1 -> merged`, `pr sync: ${id}/c2 -> merged`]);
   expect(readState(id).status).toBe("archived");
+});
+
+syncTest("pr sync: lower chunks left done after the PR chunk merged catch up", async () => {
+  const id = syncPipeline("sync catch up", [undefined, undefined, 162]);
+  finishSteps(id);
+  upsertChunk(id, { name: "c3", status: "merged" });
+  const logs: string[] = [];
+  const gh = syncGh({});
+  await syncPrStatuses({ run: gh.run, log: (l) => logs.push(l) });
+  expect(gh.calls).toEqual([]);
+  expect(chunkStatuses(id)).toEqual(["merged", "merged", "merged"]);
+  expect(logs).toEqual([`pr sync: ${id}/c1 -> merged`, `pr sync: ${id}/c2 -> merged`]);
+  expect(readState(id).status).toBe("archived");
+});
+
+syncTest("pr sync: a repo with a merge running keeps its lower chunks", async () => {
+  const id = syncPipeline("sync catch up busy", [undefined, 163]);
+  upsertChunk(id, { name: "c2", status: "merged" });
+  updateState(id, (s) => {
+    s.merges = { [repo]: { status: "running", repo, startedAt: "t", updatedAt: "t" } };
+  });
+  await syncPrStatuses({ run: syncGh({}).run, log: () => {} });
+  expect(chunkStatuses(id)).toEqual(["done", "merged"]);
+});
+
+syncTest("upsertChunk: a new PR on a merged or closed chunk sets it back to done", async () => {
+  const id = syncPipeline("upsert reopen", [170]);
+  upsertChunk(id, { name: "c1", status: "merged" });
+  upsertChunk(id, { name: "c1", pr: prUrl(171) });
+  expect(chunkStatuses(id)).toEqual(["done"]);
+  upsertChunk(id, { name: "c1", status: "closed" });
+  upsertChunk(id, { name: "c1", pr: prUrl(172), status: "merged" });
+  expect(chunkStatuses(id)).toEqual(["merged"]);
+  upsertChunk(id, { name: "c1", pr: prUrl(172) });
+  expect(chunkStatuses(id)).toEqual(["merged"]);
 });
 
 syncTest("pr sync: an open top PR leaves the chunks without a PR untouched", async () => {

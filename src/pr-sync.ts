@@ -73,7 +73,6 @@ export async function syncPrStatuses(deps: Partial<SyncDeps> = {}): Promise<{ ch
     }
     // Skip only the repos that merge: the others still sync.
     const polled = polledChunks(s).filter((c) => !mergeRunning(s, c.repo!));
-    if (!polled.length) continue;
     const results: { name: string; pr: string; state: string; base?: string }[] = [];
     for (const c of polled) {
       try {
@@ -89,7 +88,6 @@ export async function syncPrStatuses(deps: Partial<SyncDeps> = {}): Promise<{ ch
       const changes = withStateLock(id, () => {
         const x = readState(id);
         const lines: string[] = [];
-        const mergedRepos = new Set<string>();
         for (const r of results) {
           const c = x.chunks.find((k) => k.name === r.name);
           if (!c || c.pr !== r.pr || c.status === MERGED || mergeRunning(x, c.repo!)) continue; // a merge may have started on this repo
@@ -102,10 +100,10 @@ export async function syncPrStatuses(deps: Partial<SyncDeps> = {}): Promise<{ ch
           if (!next) continue;
           c.status = next;
           lines.push(`pr sync: ${id}/${c.name} -> ${next}`);
-          if (next === MERGED) mergedRepos.add(c.repo!);
         }
-        // One PR per repo: its other chunks have no PR to sync, so they follow the merged one.
-        for (const repo of mergedRepos) for (const name of markRepoMerged(x, repo)) lines.push(`pr sync: ${id}/${name} -> ${MERGED}`);
+        // One PR per repo: its chunks without a PR follow the merged one. Run on every pass (idempotent)
+        // so a chunk left `done` by old code or a crash between two writes still catches up.
+        for (const { path: repo } of x.repos) if (!mergeRunning(x, repo)) for (const name of markRepoMerged(x, repo)) lines.push(`pr sync: ${id}/${name} -> ${MERGED}`);
         if (lines.length > 0) writeState(x);
         return lines;
       });
