@@ -27,19 +27,19 @@ export function syncedStatus(status: string | undefined, ghState: string): strin
   return undefined;
 }
 
-async function ghState(run: Runner, c: Chunk, timeoutMs: number): Promise<{ state: string; base?: string }> {
+async function ghState(run: Runner, c: Chunk, timeoutMs: number): Promise<{ state: string }> {
   let timer: Timer | undefined;
   const timeout = new Promise<never>((_, reject) => {
     timer = setTimeout(() => reject(new Error(`gh timed out after ${timeoutMs} ms`)), timeoutMs);
   });
   try {
-    const args = ["pr", "view", c.pr!, "--json", "state,mergedAt,baseRefName"];
+    const args = ["pr", "view", c.pr!, "--json", "state,mergedAt"];
     const res = await Promise.race([run("gh", args, { cwd: c.repo ?? home(), timeoutMs }), timeout]);
     if (res.code !== 0) throw new Error(res.stderr.trim() || `gh exited with ${res.code}`);
-    const view = JSON.parse(res.stdout) as { state?: string; mergedAt?: string | null; baseRefName?: string };
+    const view = JSON.parse(res.stdout) as { state?: string; mergedAt?: string | null };
     const state = view.mergedAt || view.state === "MERGED" ? "MERGED" : view.state;
     if (state !== "MERGED" && state !== "OPEN" && state !== "CLOSED") throw new Error(`unexpected PR state ${String(view.state)}`);
-    return { state, base: view.baseRefName || undefined };
+    return { state };
   } finally {
     clearTimeout(timer);
   }
@@ -73,7 +73,7 @@ export async function syncPrStatuses(deps: Partial<SyncDeps> = {}): Promise<{ ch
     }
     // Skip only the repos that merge: the others still sync.
     const polled = polledChunks(s).filter((c) => !mergeRunning(s, c.repo!));
-    const results: { name: string; pr: string; state: string; base?: string }[] = [];
+    const results: { name: string; pr: string; state: string }[] = [];
     for (const c of polled) {
       try {
         results.push({ name: c.name, pr: c.pr!, ...(await ghState(d.run, c, d.timeoutMs)) });
@@ -91,11 +91,6 @@ export async function syncPrStatuses(deps: Partial<SyncDeps> = {}): Promise<{ ch
         for (const r of results) {
           const c = x.chunks.find((k) => k.name === r.name);
           if (!c || c.pr !== r.pr || c.status === MERGED || mergeRunning(x, c.repo!)) continue; // a merge may have started on this repo
-          // A PR can be retargeted on GitHub (by hand, or when the branch below it is deleted).
-          if (r.base && r.base !== c.prBase) {
-            c.prBase = r.base;
-            lines.push(`pr sync: ${id}/${c.name} base ${r.base}`);
-          }
           const next = syncedStatus(c.status, r.state);
           if (!next) continue;
           c.status = next;

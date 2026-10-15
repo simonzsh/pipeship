@@ -1,5 +1,6 @@
 import { GitMerge } from "lucide-react";
 import { useState } from "react";
+import { stackRefusal } from "../repos.ts";
 import { CLOSED, type Chunk, type MergeRun } from "../state.ts";
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription,
@@ -25,7 +26,7 @@ export function MergeButton({ id, repo, chunks, base, merge, finished }: {
   // The run's startedAt seen at the click (null: no click). Ends when the stream shows another run, or the POST fails.
   const [clickedAt, setClickedAt] = useState<string | undefined | null>(null);
   const todo = chunks.filter((c) => c.pr && c.status !== "merged");
-  // The server refuses a stack with a closed PR: hide the button when nothing open is left, disable it otherwise.
+  // The server refuses a closed PR and a stack of 2 or more: hide the button when nothing open is left, disable it otherwise.
   const closed = todo.find((c) => c.status === CLOSED);
   const running = merge?.status === "running";
   const starting = clickedAt !== null && merge?.startedAt === clickedAt;
@@ -46,17 +47,18 @@ export function MergeButton({ id, repo, chunks, base, merge, finished }: {
     );
   }
   if (!finished || todo.every((c) => c.status === CLOSED)) return null;
-  const failure = (error || merge?.status === "failed") && (
-    <span className="flex min-w-0 items-center text-xs text-destructive" title={error ?? merge?.error}>
-      <span className="max-w-72 truncate">{error ?? `Merge stopped: ${merge?.error}`}</span>
+  const stack = todo.length > 1 ? stackRefusal(repo, todo.length) : undefined;
+  const failure = (stack || error || merge?.status === "failed") && (
+    <span className="flex min-w-0 items-center text-xs text-destructive" title={stack ?? error ?? merge?.error}>
+      <span className="max-w-72 truncate">{stack ?? error ?? `Merge stopped: ${merge?.error}`}</span>
     </span>
   );
   const bottom = prNumber(todo[0]!.pr!);
   const target = base ?? "its base branch";
   const into = base ? `Merge into ${base}` : "Merge";
-  if (closed) {
+  if (closed || stack) {
     return (
-      <Button variant="outline" size="xs" disabled>
+      <Button variant="outline" size="xs" disabled title={stack}>
         <GitMerge className={ICON} /> {into}
       </Button>
     );
@@ -71,9 +73,9 @@ export function MergeButton({ id, repo, chunks, base, merge, finished }: {
       </AlertDialogTrigger>
       <AlertDialogContent>
         <AlertDialogHeader>
-          <AlertDialogTitle>{todo.length > 1 ? `Merge ${todo.length} PRs` : `Merge #${bottom}`} into {target}?</AlertDialogTitle>
+          <AlertDialogTitle>Merge #{bottom} into {target}?</AlertDialogTitle>
           <AlertDialogDescription>
-            {todo.length > 1 ? `Combines the stack into #${bottom}, then merges it once its checks pass.` : "Merges the PR once its checks pass."}
+            Merges the PR once its checks pass.
           </AlertDialogDescription>
         </AlertDialogHeader>
         <label className="flex items-center gap-2 text-sm">

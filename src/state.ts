@@ -22,7 +22,6 @@ export interface Chunk {
   branch?: string;
   status?: string;
   pr?: string;
-  prBase?: string; // base branch of the PR on GitHub, written by the PR sync; wins over the stack order
 }
 
 // Chunk.status stays free text; the merge engine writes this value.
@@ -200,6 +199,8 @@ type Raw = State & { merge?: MergeRun & { mode?: unknown }; repo?: string; base?
 function upgrade(raw: Raw): State {
   // Files from before multi-repo hold `repo` and `base` at the top level.
   if (!raw.repos) raw.repos = raw.repo ? [{ path: raw.repo, ...(raw.base && { base: raw.base }) }] : [];
+  // The PR base is no longer stored: the dashboard follows the chunk order.
+  for (const c of raw.chunks) delete (c as { prBase?: string }).prBase;
   delete raw.repo;
   delete raw.base;
   const only = raw.repos.length === 1 ? raw.repos[0]!.path : undefined;
@@ -474,8 +475,6 @@ export function upsertChunk(id: string, chunk: ChunkInput): State {
     }
     const repo = chunk.repo ? lookupRepo(s, chunk.repo).path : existing.repo;
     if (repo !== existing.repo) throw new Error(`chunk "${chunk.name}" belongs to ${repoName(existing.repo)}`);
-    // A new PR has its own base: the sync reads it again.
-    if (chunk.pr && chunk.pr !== existing.pr) delete existing.prBase;
     // A feedback PR on a merged repo must be polled again: its chunk leaves merged/closed.
     const reopened = chunk.pr && chunk.pr !== existing.pr && !chunk.status && (existing.status === MERGED || existing.status === CLOSED);
     Object.assign(existing, chunk, { repo });

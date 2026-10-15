@@ -11,7 +11,7 @@ import { MergeButton } from "./merge-button";
 import { allMerged, displaySteps, finished, timeAgo } from "./pipeline-info";
 import { NoPreviewPanel, PreviewPanel } from "./preview-panel";
 import { AgentLogo, T3ThreadButton } from "./session";
-import { StackTree } from "./stack-tree";
+import { ChunkList } from "./chunk-list";
 import { StatusBadge } from "./status";
 import { Steps } from "./steps";
 import { TestGuide } from "./test-guide";
@@ -34,11 +34,11 @@ export function PipelineDetail({ p, onBack }: { p: DashboardState; onBack: () =>
     setTarget(t);
     setTab("code");
   };
-  // The tree of one repo's stack, or a hint when it has no branch yet.
+  // The chunks of one repo, or a hint when it has no branch yet.
   const tree = (repo: DashboardState["repos"][number], chunks: DashboardState["chunks"], merge: MergeRun | undefined) => (
     <>
       {chunks.length > 0 ? (
-        <StackTree repo={repo} chunks={chunks} merge={merge} selected={target.chunk} onSelect={(chunk) => select({ chunk })} onSelectBase={() => select({})} />
+        <ChunkList repo={repo} chunks={chunks} merge={merge} selected={target.chunk} onSelect={(chunk) => select({ chunk })} onSelectBase={() => select({})} />
       ) : (
         <p className="text-xs text-muted-foreground">No branch yet</p>
       )}

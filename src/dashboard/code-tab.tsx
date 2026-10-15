@@ -21,12 +21,11 @@ type Result = { loading: true } | { data: DiffResponse } | { error: string };
 
 export interface RefreshKeys {
   manual: number; // Refresh button: forces the server fetch
-  prBase: string; // a chunk's prBase changed: forces too
   soft: string; // branch/status changed: goes through the server cache
 }
 
 // Stale-while-revalidate: each URL keeps its last result and shows it while a refetch runs.
-// Refetch on manual refresh or a branch/status/prBase change, not on every SSE tick.
+// Refetch on manual refresh or a branch/status change, not on every SSE tick.
 function useDiff(id: string, requests: DiffRequest[], keys: RefreshKeys): { results: Result[]; fetching: boolean } {
   const [results, setResults] = useState<Record<string, Result>>({});
   const [fetching, setFetching] = useState(false);
@@ -34,9 +33,8 @@ function useDiff(id: string, requests: DiffRequest[], keys: RefreshKeys): { resu
   const urls = requests.map((r) => diffUrl(id, r));
   const urlsKey = urls.join("\n");
   useEffect(() => {
-    // prBase is repo-wide, so it only counts as a change while the target stays the same.
     const last = prev.current;
-    const force = keys.manual !== last.manual || (keys.prBase !== last.prBase && urlsKey === last.urlsKey);
+    const force = keys.manual !== last.manual;
     prev.current = { ...keys, urlsKey };
     const ctl = new AbortController();
     setFetching(true);
@@ -67,7 +65,7 @@ function useDiff(id: string, requests: DiffRequest[], keys: RefreshKeys): { resu
     }
     return () => ctl.abort();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [urlsKey, keys.manual, keys.prBase, keys.soft]);
+  }, [urlsKey, keys.manual, keys.soft]);
   return { results: urls.map((u) => results[u] ?? ({ loading: true } as Result)), fetching };
 }
 
@@ -320,7 +318,7 @@ export function CodeTab({ p, target, onTarget }: CodeTabProps) {
   // A chunk's range starts at the previous chunk, so any chunk of the repo can move it.
   const repos = new Set(requests.map((r) => r.repo));
   const mine = p.chunks.filter((c) => repos.has(c.repo));
-  const keys = { manual, prBase: JSON.stringify(mine.map((c) => c.prBase)), soft: JSON.stringify(mine.map((c) => [c.branch, c.status])) };
+  const keys = { manual, soft: JSON.stringify(mine.map((c) => [c.branch, c.status])) };
   const { results, fetching } = useDiff(p.id, requests, keys);
   const multi = p.repos.length > 1;
 

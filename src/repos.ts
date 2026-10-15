@@ -56,69 +56,12 @@ export function repoStacks(state: Pick<State, "repos" | "chunks" | "merges">): R
   }));
 }
 
-type Parent = Chunk | string | undefined; // a chunk of the stack, or a branch outside it
-
-// Each chunk's parent: the chunk whose branch is its base, else the base branch itself.
-// Base: the PR's base on GitHub, else the previous branched chunk, else the repo base.
-// A cycle of retargeted PRs is cut at the repo base.
-function stackParents(chunks: Chunk[], repo: Repo): Map<Chunk, Parent> {
-  const byBranch = new Map(chunks.flatMap((c) => (c.branch ? [[c.branch, c] as const] : [])));
-  const parents = new Map<Chunk, Parent>();
-  let prev = repo.base;
-  // With one PR per repo the top PR targets the base: following it would drop the chain.
-  // So a PR base counts only while every branched chunk before it has a PR.
-  let followPrs = true;
-  for (const c of chunks) {
-    const base = (followPrs ? c.prBase : undefined) ?? prev;
-    if (c.branch && !c.pr) followPrs = false;
-    const parent = base === undefined ? undefined : byBranch.get(base);
-    parents.set(c, parent && parent !== c ? parent : base);
-    if (c.branch) prev = c.branch;
-  }
-  for (const c of chunks) {
-    const seen = new Set<Chunk>();
-    for (let p = parents.get(c); typeof p === "object" && !seen.has(p); p = parents.get(p)) {
-      if (p === c) {
-        parents.set(c, repo.base);
-        break;
-      }
-      seen.add(p);
-    }
-  }
-  return parents;
-}
-
-export type StackRow = { kind: "root"; branch: string } | { kind: "chunk"; chunk: Chunk; depth: number; rise: number };
-
-// Tree rows for the stack panel, siblings in state order. rise = rows from the parent's row down to this one.
-// Roots: the repo base first, then any other branch a PR targets outside the stack.
-export function stackRows(chunks: Chunk[], repo: Repo): StackRow[] {
-  const parents = stackParents(chunks, repo);
-  const children = new Map<Parent, Chunk[]>();
-  for (const c of chunks) children.set(parents.get(c), [...(children.get(parents.get(c)) ?? []), c]);
-  const rows: StackRow[] = [];
-  const place = (parent: Parent, depth: number) => {
-    const at = rows.length - 1;
-    for (const c of children.get(parent) ?? []) {
-      rows.push({ kind: "chunk", chunk: c, depth, rise: rows.length - at });
-      place(c, depth + 1);
-    }
-  };
-  const roots = [...children.keys()].filter((p) => typeof p !== "object");
-  roots.sort((a, b) => Number(b === repo.base) - Number(a === repo.base));
-  for (const root of roots) {
-    if (root !== undefined) rows.push({ kind: "root", branch: root });
-    place(root, root === undefined ? 0 : 1);
-  }
-  return rows;
-}
-
 export type DiffRange =
   | { from: string; to: string }
   | { error: string; code: "not_found" | "no_branch" | "no_base" };
 
-// chunk undefined = whole stack: <root of the last branched chunk>...<its branch>.
-// chunk = name: <its parent's branch>...<chunk.branch>.
+// chunk undefined = whole repo: <repo base>...<last branched chunk>.
+// chunk = name: <previous branched chunk's branch, else the repo base>...<chunk.branch>.
 export function diffRange(state: Pick<State, "repos" | "chunks">, repo: Repo, chunk?: string): DiffRange {
   const chunks = chunksOf(state, repo.path);
   const name = repoName(repo.path);
@@ -131,10 +74,12 @@ export function diffRange(state: Pick<State, "repos" | "chunks">, repo: Repo, ch
     if (!target) return { error: `unknown chunk: ${chunk}`, code: "not_found" };
     if (!target.branch) return { error: `chunk ${chunk} has no branch yet`, code: "no_branch" };
   }
-  const parents = stackParents(chunks, repo);
-  let p = parents.get(target);
-  if (chunk === undefined) while (typeof p === "object") p = parents.get(p);
-  const from = typeof p === "object" ? p.branch : p;
+  const before = chunk === undefined ? undefined : chunks.slice(0, chunks.indexOf(target)).findLast((c) => c.branch);
+  const from = before?.branch ?? repo.base;
   if (!from) return { error: `${name} has no base branch`, code: "no_base" };
   return { from, to: target.branch! };
 }
+
+// A stack of PRs from an older pipeship is not merged here.
+export const stackRefusal = (repo: string, open: number) =>
+  `${open} PRs of ${repoName(repo)} are not merged: pipeship merges one PR per repo. Merge this stack on GitHub, or with an older pipeship that combines stacks.`;
