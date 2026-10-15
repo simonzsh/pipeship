@@ -65,6 +65,8 @@ describe("pendingPipelines", () => {
     expect(pendingPipelines(states, { ...input, source: "compact" }, {})).toEqual([]);
     // In Codex (CODEX_THREAD_ID set) the fallback picks codex pipelines instead.
     expect(pendingPipelines(states, { ...input, source: "clear" }, { CODEX_THREAD_ID: "t" }).map((s) => s.id)).toEqual(["codex"]);
+    // Env vars leak into nested agents: with both set, Claude wins, like for the session id.
+    expect(pendingPipelines(states, { ...input, source: "clear" }, { CLAUDE_CODE_SESSION_ID: "c", CODEX_THREAD_ID: "t" }).map((s) => s.id)).toEqual(["same"]);
     // The fallback keeps running and waiting_for_user only, not stopped.
     const mixed = ["running", "waiting_for_user", "stopped"].map((st) => fixture(st, st as Status, { harness: "claude", id: "old", cwd: "/work" }));
     expect(pendingPipelines(mixed, { ...input, source: "clear" }, {}).map((s) => s.id)).toEqual(["running", "waiting_for_user"]);

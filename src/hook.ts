@@ -32,7 +32,8 @@ export function matchPipelines(states: State[], input: HookInput, env: Env = pro
   if (!id) return { states: [], byFolder: false };
   const byId = states.filter((s) => UNFINISHED.includes(s.status) && s.session?.id === id);
   if (byId.length > 0 || input.source !== "clear" || !input.cwd) return { states: byId, byFolder: false };
-  const harness = env.CODEX_THREAD_ID ? "codex" : "claude";
+  // Same order as the id above; env vars leak into nested agents, so Claude wins when both are set.
+  const harness = !env.CLAUDE_CODE_SESSION_ID && env.CODEX_THREAD_ID ? "codex" : "claude";
   const byCwd = states.filter((s) => ACTIVE.includes(s.status) && s.session?.harness === harness && s.session.cwd === input.cwd);
   return { states: byCwd, byFolder: byCwd.length > 0 };
 }
