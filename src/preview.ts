@@ -229,9 +229,13 @@ export function mainService<T extends { kind: string }>(services: T[]): T {
   return services.find((s) => s.kind === "front") ?? services[0]!;
 }
 
+// Legacy states (no services) have only preview.pid, without a start time.
+function previewProcs(preview: Preview): { pid: number | undefined; startedAt?: string }[] {
+  return preview.services?.length ? preview.services.map((s) => ({ pid: s.pid, startedAt: s.startedAt })) : [{ pid: preview.pid }];
+}
+
 export function previewAlive(preview: Preview): boolean {
-  const pids = preview.services?.length ? preview.services.map((s) => s.pid) : [preview.pid];
-  return pids.some((pid) => pid !== undefined && isAlive(pid));
+  return previewProcs(preview).some((p) => p.pid !== undefined && isAlive(p.pid, p.startedAt));
 }
 
 // Ports are planned before install, so a pipeline can hold ports while no process runs yet.
@@ -256,18 +260,31 @@ export function previewLines(preview: Preview): string[] {
   return [preview.url, ...(services.length > 1 ? services.map((s) => `${label(s)}: ${s.url}`) : [])];
 }
 
-export function isAlive(pid: number): boolean {
+// Start time as ps prints it. Fixed locale and zone so the dashboard and the CLI agree.
+export function processStart(pid: number): string | undefined {
+  const res = spawnSync("ps", ["-o", "lstart=", "-p", String(pid)], {
+    encoding: "utf8",
+    env: { ...process.env, LC_ALL: "C", TZ: "UTC" },
+  });
+  return res.stdout?.trim() || undefined;
+}
+
+// With a recorded start time, a different one means the pid was recycled: the process is gone.
+export function isAlive(pid: number, startedAt?: string): boolean {
   try {
     process.kill(pid, 0);
-    return true;
   } catch {
     return false;
   }
+  if (startedAt === undefined) return true;
+  const now = processStart(pid);
+  return now === undefined || now === startedAt;
 }
 
 // The server runs in its own process group: killing the group also stops
 // the workers that dev servers spawn (Next.js, Vite...).
-export async function killGroup(pid: number): Promise<void> {
+export async function killGroup(pid: number, startedAt?: string): Promise<void> {
+  if (startedAt !== undefined && !isAlive(pid, startedAt)) return;
   const send = (signal: NodeJS.Signals) => {
     try {
       process.kill(-pid, signal);
@@ -440,7 +457,7 @@ export async function startPreview(id: string, worktree?: string, draft?: string
   const abort = async (err: Error): Promise<never> => {
     const errors: string[] = [];
     for (const svc of [...started].reverse()) {
-      await killGroup(svc.pid!).catch((e: Error) => errors.push(e.message));
+      await killGroup(svc.pid!, svc.startedAt).catch((e: Error) => errors.push(e.message));
     }
     updateState(id, (s) => {
       s.preview = undefined;
@@ -471,6 +488,8 @@ export async function startPreview(id: string, worktree?: string, draft?: string
         });
         child.unref();
         plan.pid = child.pid!;
+        const at = processStart(plan.pid);
+        if (at) plan.startedAt = at;
       } finally {
         closeSync(fd);
       }
@@ -507,12 +526,11 @@ export async function stopPreview(id: string): Promise<void> {
   const killed = new Set<number>();
   const killAll = async (preview: Preview | undefined) => {
     if (!preview) return;
-    const pids = preview.services?.length ? [...preview.services].reverse().map((s) => s.pid) : [preview.pid];
-    for (const pid of pids) {
-      if (pid === undefined || killed.has(pid) || !isAlive(pid)) continue;
+    for (const { pid, startedAt } of previewProcs(preview).reverse()) {
+      if (pid === undefined || killed.has(pid) || !isAlive(pid, startedAt)) continue;
       killed.add(pid);
       try {
-        await killGroup(pid);
+        await killGroup(pid, startedAt);
       } catch (err) {
         errors.push((err as Error).message);
       }
