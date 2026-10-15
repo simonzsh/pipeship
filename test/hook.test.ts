@@ -3,7 +3,7 @@ import { spawnSync } from "node:child_process";
 import { accessSync, constants, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { parseHookInput, pendingPipelines, reminderText, sessionStartOutput, UNFINISHED } from "../src/hook.ts";
+import { parseHookInput, pendingPipelines, reminderText, ROUTING_RULE, sessionStartOutput, UNFINISHED } from "../src/hook.ts";
 import type { State, Status } from "../src/state.ts";
 
 const root = mkdtempSync(join(tmpdir(), "pipeship-hook-"));
@@ -87,14 +87,26 @@ describe("reminder", () => {
     expect(byId).toContain("this session has unfinished pipelines");
   });
 
-  test("sessionStartOutput is empty without a pipeline, else one JSON line", () => {
-    expect(sessionStartOutput({ session_id: "s1" }, { states: [], env: {}, paths })).toBe("");
-    expect(sessionStartOutput({ session_id: "s1" }, { states: [fixture("a", "done")], env: {}, paths })).toBe("");
+  test("sessionStartOutput has only the routing rule without a pipeline", () => {
+    for (const states of [[], [fixture("a", "done")]]) {
+      const json = JSON.parse(sessionStartOutput({ session_id: "s1" }, { states, env: {}, paths }));
+      expect(json.hookSpecificOutput.hookEventName).toBe("SessionStart");
+      expect(json.hookSpecificOutput.additionalContext).toBe(ROUTING_RULE);
+    }
+  });
+
+  test("sessionStartOutput puts the routing rule before the reminder, on one JSON line", () => {
     const out = sessionStartOutput({ session_id: "s1" }, { states: [fixture("a", "running")], env: {}, paths });
     expect(out).not.toContain("\n");
-    const json = JSON.parse(out);
-    expect(json.hookSpecificOutput.hookEventName).toBe("SessionStart");
-    expect(json.hookSpecificOutput.additionalContext).toContain('a "Ticket a"');
+    const text: string = JSON.parse(out).hookSpecificOutput.additionalContext;
+    expect(text.startsWith(ROUTING_RULE)).toBe(true);
+    expect(text).toContain('a "Ticket a"');
+  });
+
+  test("the routing rule sends work requests to pipeship:run and excludes small edits", () => {
+    for (const part of ["`pipeship:run`", "ticket to handle", "delegated request", "small edit in one file", "question"]) {
+      expect(ROUTING_RULE).toContain(part);
+    }
   });
 
   test("the default skill path points to an existing SKILL.md", () => {
@@ -144,11 +156,11 @@ describe("hook script", () => {
     rmSync(bad, { recursive: true, force: true });
   });
 
-  test("prints nothing for another session or bad stdin, and exits 0", () => {
+  test("prints only the routing rule for another session or bad stdin, and exits 0", () => {
     for (const stdin of [JSON.stringify({ session_id: "other" }), "garbage", ""]) {
       const r = run(stdin);
       expect(r.status).toBe(0);
-      expect(r.stdout).toBe("");
+      expect(JSON.parse(r.stdout).hookSpecificOutput.additionalContext).toBe(ROUTING_RULE);
     }
   });
 
