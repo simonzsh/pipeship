@@ -378,9 +378,20 @@ export function setMode(id: string, mode: Mode): State {
   });
 }
 
+// Steps run in order: every earlier step must be done or skipped. Throws inside the lock, so a refusal writes nothing.
+function assertPrerequisites(s: State, name: StepName, action: string): void {
+  for (const prev of STEPS.slice(0, STEPS.indexOf(name))) {
+    const status = s.steps.find((x) => x.name === prev)?.status;
+    if (status !== "done" && status !== "skipped") {
+      throw new Error(`cannot ${action}: ${prev} is ${status} (earlier steps must be done or skipped)`);
+    }
+  }
+}
+
 export function setStep(id: string, name: StepName, status: StepStatus): State {
   if (!STEPS.includes(name)) throw new Error(`unknown step: ${name} (expected ${STEPS.join(", ")})`);
   return updateState(id, (s) => {
+    if (status === "running" || status === "done" || status === "failed") assertPrerequisites(s, name, `mark ${name} ${status}`);
     const step = s.steps.find((x) => x.name === name)!;
     const now = new Date().toISOString();
     step.status = status;
@@ -407,6 +418,7 @@ export function waitForUser(id: string, name: StepName, reason?: string): State 
   return updateState(id, (s) => {
     const step = s.steps.find((x) => x.name === name)!;
     if (step.status === "done" || step.status === "skipped") throw new Error(`step ${name} is ${step.status}: nothing to wait on`);
+    assertPrerequisites(s, name, `wait on ${name}`);
     if (step.status !== "running") {
       step.status = "running";
       step.startedAt = new Date().toISOString();
