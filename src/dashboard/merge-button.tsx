@@ -26,8 +26,6 @@ export function MergeButton({ id, repo, chunks, base, merge, finished }: {
   // The run's startedAt seen at the click (null: no click). Ends when the stream shows another run, or the POST fails.
   const [clickedAt, setClickedAt] = useState<string | undefined | null>(null);
   const todo = openPrChunks(chunks);
-  // The server refuses a closed PR and a stack of 2 or more: hide the button when nothing open is left, disable it otherwise.
-  const closed = todo.find((c) => c.status === CLOSED);
   const running = merge?.status === "running";
   const starting = clickedAt !== null && merge?.startedAt === clickedAt;
   const run = async () => {
@@ -46,6 +44,8 @@ export function MergeButton({ id, repo, chunks, base, merge, finished }: {
       </Button>
     );
   }
+  // The server refuses a closed PR and a stack of 2 or more: hide the button when only closed PRs are left,
+  // disable it for a stack (a closed PR among 2 or more is a stack too).
   if (!finished || todo.every((c) => c.status === CLOSED)) return null;
   const stack = todo.length > 1 ? stackRefusal(repo, todo.length) : undefined;
   const failure = (stack || error || merge?.status === "failed") && (
@@ -56,11 +56,14 @@ export function MergeButton({ id, repo, chunks, base, merge, finished }: {
   const bottom = prNumber(todo[0]!.pr!);
   const target = base ?? "its base branch";
   const into = base ? `Merge into ${base}` : "Merge";
-  if (closed || stack) {
+  if (stack) {
     return (
-      <Button variant="outline" size="xs" disabled title={stack}>
-        <GitMerge className={ICON} /> {into}
-      </Button>
+      <>
+        {failure}
+        <Button variant="outline" size="xs" disabled title={stack}>
+          <GitMerge className={ICON} /> {into}
+        </Button>
+      </>
     );
   }
   return (
@@ -80,7 +83,7 @@ export function MergeButton({ id, repo, chunks, base, merge, finished }: {
         </AlertDialogHeader>
         <label className="flex items-center gap-2 text-sm">
           <Checkbox checked={deleteBranches} onCheckedChange={(v) => setDeleteBranches(v === true)} />
-          Delete the remote branches after the merge
+          Delete the PR's remote branch after the merge
         </label>
         <AlertDialogFooter>
           <AlertDialogCancel>Cancel</AlertDialogCancel>

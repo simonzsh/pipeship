@@ -165,7 +165,7 @@ The test URLs, one per service, and the agent's `test.md` guide: the page to ope
 
 The code diff, to review the work without leaving the dashboard.
 
-- **Whole stack** by default: `<base>...<top branch>`, one diff per repo.
+- **Whole repo** by default: `<base>...<top branch>`, one diff per repo.
 - **One chunk**: click it for `<previous chunk's branch>...<branch>`. A chunk without a PR shows `in #N`, the PR of its repo. The breadcrumb ("Whole repo › <chunk>") or the base branch row brings you back.
 - Every file opens as a collapsible block with its line numbers, its +/− counts and syntax highlighting. "Collapse all" and "Expand all" toggle every file; "Refresh" reloads the diff.
 

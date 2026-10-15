@@ -14,7 +14,7 @@ export type { DiffTarget };
 export interface CodeTabProps {
   p: DashboardState;
   target: DiffTarget;
-  onTarget: (t: DiffTarget) => void; // the "Whole stack" breadcrumb link
+  onTarget: (t: DiffTarget) => void; // the "Whole repo" breadcrumb link
 }
 
 type Result = { loading: true } | { data: DiffResponse } | { error: string };
@@ -332,17 +332,17 @@ export function CodeTab({ p, target, onTarget }: CodeTabProps) {
   return (
     <div ref={root} className="flex flex-col gap-4">
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1 px-6 text-sm">
-        {/* Breadcrumb: "Whole stack" is the way back once a PR is picked. */}
+        {/* Breadcrumb: "Whole repo" is the way back once a chunk is picked. */}
         {chunk ? (
           <span className="flex items-center gap-1.5">
             <button type="button" onClick={() => onTarget({})} className="text-muted-foreground underline-offset-4 hover:text-foreground hover:underline">
-              Whole stack
+              Whole repo
             </button>
             <ChevronRight className="size-3.5 text-muted-foreground" />
             <span className="font-medium">{`${pr ? `PR #${pr} · ` : ""}${chunk.name}`}</span>
           </span>
         ) : (
-          <span className="font-medium">Whole stack</span>
+          <span className="font-medium">Whole repo</span>
         )}
         {!multi && datas[0] && <code className="rounded bg-muted px-1.5 py-0.5 text-xs text-muted-foreground">{datas[0].range}</code>}
         {!multi && datas[0] && <OriginSync data={datas[0]} />}
