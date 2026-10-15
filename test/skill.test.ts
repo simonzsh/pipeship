@@ -7,7 +7,7 @@ const folders = readdirSync(skillsRoot, { withFileTypes: true })
   .filter((d) => d.isDirectory() && existsSync(join(skillsRoot, d.name, "SKILL.md")))
   .map((d) => d.name);
 
-const IMPLICIT: Record<string, boolean> = { run: true, review: true, dashboard: false };
+const IMPLICIT: Record<string, boolean> = { run: true, review: true, dashboard: false, update: true };
 const BRIEFS = ["explore", "plan", "implement", "global-review", "cleanup"];
 const REFS: Record<string, string[]> = {
   run: BRIEFS.map((name) => `<skill dir>/prompts/${name}.md`),

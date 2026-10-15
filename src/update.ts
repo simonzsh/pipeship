@@ -182,3 +182,14 @@ export async function installUpdate(harness: Harness | null, deps: Partial<Insta
     installing = false;
   }
 }
+
+// What `POST /api/update/install` returns.
+export type InstallResponse = { restarting: true; from: string } | { restarting: false; message: string } | { error: string };
+
+// `pipeship update` without a dashboard: update the installs; the next command runs the new copy.
+export async function updateInPlace(install: () => Promise<InstallResult> = () => installUpdate(currentHarness())): Promise<string> {
+  const result = await install();
+  if (!result.restarting) return result.message;
+  const note = result.warning ? ` (${result.warning})` : "";
+  return `Updated: the next pipeship command runs the new version from ${dirname(dirname(result.launcher))}${note}`;
+}
