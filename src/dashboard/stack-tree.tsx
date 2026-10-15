@@ -34,7 +34,6 @@ function clickable(pick: (() => void) | undefined, isSelected: boolean) {
 }
 
 // Each PR sits under the branch it targets on GitHub: a retargeted PR moves in the tree.
-// A chunk without a PR shows the PR it is part of.
 export function StackTree({ repo, chunks, merge, selected, onSelect, onSelectBase }: {
   repo: Repo;
   chunks: Chunk[];
