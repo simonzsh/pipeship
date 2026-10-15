@@ -12,4 +12,4 @@ Give each finding in this shape, most severe first:
   Failure: concrete scenario (input or state, what happens, what goes wrong). `none` for a minor finding with no failure.
   Fix: the change to make.
 
-Severity: `blocking` is a wrong result, a crash, data loss, a security hole or a broken contract; `important` is a real failure on a plausible path, a duplicated helper, or a test that does not test what it claims; `minor` is the rest. Proof: re-read the code of each finding and trace the path that fails; drop what you cannot show. A failure listed under `## Baseline` in `explore.md` was there before: it is not a finding. If you find nothing, say so.
+Severity: `blocking` is a wrong result, a crash, data loss, a security hole or a broken contract; `important` is a real failure on a plausible path, a duplicated helper, or a test that does not test what it claims; `minor` is the rest. Proof: re-read the code of each finding and trace the path that fails; drop what you cannot show. A failure listed under `## Baseline` in `explore.md` (if you get that file) was there before: it is not a finding. If you find nothing, say so.

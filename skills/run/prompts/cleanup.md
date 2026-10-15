@@ -7,9 +7,9 @@ Look for: simplification, dead code, repo conventions, readability. Use the `sim
 Rules:
 - Only the diff: change only code the diff adds or changes. Leave the code around it as it is.
 - Do not change behaviour: same inputs, same outputs, same errors. A cleanup that needs a behaviour change is a finding, not a fix.
-- Work in your worktree, run only the fast checks, and commit. A check that already failed on the base (`## Baseline` in `explore.md`) is not yours to fix.
+- Work in your worktree, run only the fast checks, and commit. A check that already failed on the base (`## Baseline` in `explore.md`, if you get that file) is not yours to fix.
 
-Report what you changed. Then list the problems you found and did not fix, most severe first:
+Report what you changed, if you changed anything. Then list the problems you found and did not fix, most severe first:
 
 - [blocking|important|minor] `path/to/file.ts:42` – one-line summary.
   Failure: concrete scenario (input or state, what happens, what goes wrong). `none` for a minor finding with no failure.

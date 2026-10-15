@@ -115,7 +115,7 @@ When all are done, **restack**: in stack order, rebase each chunk branch onto th
 
 Cleanups first, then the global review on the cleaned top. Every finding has a severity (`blocking`, `important`, `minor`), a `file:line`, a failure scenario and a fix (see the briefs).
 
-1. **Cleanup per chunk** (one subagent per chunk, model `sonnet`, status `reviewing`), started together. Brief: `<skill dir>/prompts/cleanup.md`. Give each one its worktree, the diff of its chunk and `<dir>/explore.md`.
+1. **Cleanup per chunk** (one subagent per chunk, model `sonnet`, status `reviewing`), all started together. Brief: `<skill dir>/prompts/cleanup.md`. Give each one its worktree, the diff of its chunk (`<previous chunk branch or base>..<chunk branch>`) and `<dir>/explore.md`.
 2. When all are done, **restack** in stack order, per repo.
 3. **Global review** (one subagent, model `opus`, top worktree, diff `<base>..<top branch>`; with several repos, the top worktree and diff of every repo). Brief: `<skill dir>/prompts/global-review.md`. Give it `<dir>/explore.md` too.
 4. **Sort** the findings of the global review and the ones the cleanups did not fix. Re-read the code of each one and drop those that do not hold. Fix every `blocking` and `important` finding. Fix a `minor` one only if the fix is safe and small. List the others in `review.md`.
