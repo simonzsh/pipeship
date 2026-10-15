@@ -42,7 +42,7 @@ Type `/pipeship:run` followed by the ticket or the request (`/run` if you use th
 
 You can also ask in plain words: "handle ABC-123 with pipeship".
 
-A SessionStart hook keeps long sessions on track. After startup, resume, clear or compact, it re-injects a short reminder: the pipelines of this session that are not finished, their step and folder, the key rules, and the path of the skill to re-read. It stays silent when no pipeline of the session is unfinished. The hook comes with the plugin install: the dev symlink of `skills/run` gets no hook.
+A SessionStart hook runs after startup, resume, clear or compact. It always injects a routing rule: a work request on code (a ticket to handle, a feature, a fix, a change in a repo) goes through `pipeship:run`, even when it comes with a detailed plan; a small edit in one file, a question, a review or a status request does not. When the session has unfinished pipelines, it adds a reminder: their step and folder, the key rules, and the path of the skill to re-read. The hook comes with the plugin install: the dev symlink of `skills/run` gets no hook.
 
 ### In Codex
 

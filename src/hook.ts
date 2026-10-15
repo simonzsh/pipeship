@@ -53,6 +53,14 @@ export function readStates(): State[] {
   return states;
 }
 
+// Without it the agent picks the skill only from its description, and a detailed request often bypasses it.
+export const ROUTING_RULE = [
+  "pipeship: when the user asks for work on code (a ticket to handle, a feature, a fix, a refactor, a change in a repo),",
+  "invoke the `pipeship:run` skill before you read or change code. Pass the ticket, or the request with its plan, as the argument.",
+  "This holds for a delegated request too, even when it comes with a step-by-step plan.",
+  "Do not use it for a small edit in one file, a config tweak, a question, a review or a status request.",
+].join("\n");
+
 export function reminderText(states: State[], paths: { skill: string; helper: string }, byFolder = false): string {
   const lines = states.map((s) => {
     const waiting = s.waiting ? `, waiting: ${s.waiting.reason ?? s.waiting.step}` : "";
@@ -71,18 +79,18 @@ export function reminderText(states: State[], paths: { skill: string; helper: st
   ].join("\n");
 }
 
-// Returns "" (inject nothing) or one JSON line for Claude Code.
+// Returns one JSON line for Claude Code: the routing rule, then the reminder of unfinished pipelines.
 export function sessionStartOutput(
   input: HookInput,
   opts: { states?: State[]; env?: Env; paths?: { skill: string; helper: string } } = {},
 ): string {
   const { states: found, byFolder } = matchPipelines(opts.states ?? readStates(), input, opts.env);
-  if (found.length === 0) return "";
   const paths = opts.paths ?? {
     skill: resolve(import.meta.dir, "../skills/run/SKILL.md"),
     helper: resolve(import.meta.dir, "../scripts/pipeship"),
   };
-  return JSON.stringify({ hookSpecificOutput: { hookEventName: "SessionStart", additionalContext: reminderText(found, paths, byFolder) } });
+  const context = found.length === 0 ? ROUTING_RULE : `${ROUTING_RULE}\n\n${reminderText(found, paths, byFolder)}`;
+  return JSON.stringify({ hookSpecificOutput: { hookEventName: "SessionStart", additionalContext: context } });
 }
 
 // A hook must never break a session: any error prints nothing and exits 0.
