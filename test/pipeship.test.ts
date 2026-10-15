@@ -45,6 +45,7 @@ beforeEach(() => {
 // The status is derived: tests set the facts it comes from.
 const ALL_STEPS = ["explore", "questions", "plan", "implement", "review", "stack", "preview"] as const;
 const finishBeforePreview = (id: string) => ALL_STEPS.slice(0, -1).forEach((name) => setStep(id, name, "done"));
+const doneBefore = (id: string, step: (typeof ALL_STEPS)[number]) => ALL_STEPS.slice(0, ALL_STEPS.indexOf(step)).forEach((name) => setStep(id, name, "done"));
 const finishSteps = (id: string) => ALL_STEPS.forEach((name) => setStep(id, name, "done"));
 const requestStop = (id: string) => updateState(id, (s) => void (s.stopRequested = true));
 const archiveNow = (id: string) => updateState(id, (s) => void (s.archivedAt = new Date().toISOString()));
@@ -79,7 +80,7 @@ test("steps and chunks update the state", () => {
 
 test("the pipeline is done once every step is done or skipped, and ready when a preview runs", () => {
   const { id } = createPipeline({ repos: [{ path: repo }], title: "t", source: "text", skip: ["preview"] });
-  for (const name of ["explore", "questions", "plan", "implement", "review"] as const) setStep(id, name, "done");
+  doneBefore(id, "stack");
   expect(readState(id).status).toBe("running");
   setStep(id, "stack", "done");
   expect(readState(id).status).toBe("done");
@@ -126,7 +127,7 @@ test("a step run again loses the end of its previous run", () => {
 
 test("a failed step run again and done lets the pipeline go back to running, then done", () => {
   const { id } = createPipeline({ repos: [{ path: repo }], title: "t", source: "text", mode: "quick" });
-  for (const name of ["explore", "questions", "implement"] as const) setStep(id, name, "done");
+  doneBefore(id, "review");
   setStep(id, "review", "failed");
   expect(readState(id).status).toBe("failed");
   expect(setStep(id, "review", "running").status).toBe("running");
@@ -1515,7 +1516,7 @@ test("setMode quick sets the mode and skips only pending quick steps; full only 
   expect(plan()).toBe("skipped");
 
   const running = createPipeline({ repos: [{ path: repo }], title: "Plan running", source: "text" });
-  for (const name of ["explore", "questions"] as const) setStep(running.id, name, "done");
+  doneBefore(running.id, "plan");
   setStep(running.id, "plan", "running");
   setMode(running.id, "quick");
   expect(readState(running.id).steps.find((s) => s.name === "plan")!.status).toBe("running");
@@ -2287,7 +2288,7 @@ test("diffRequests: whole stack skips repos without branches, a chunk targets it
 
 test("wait marks its step running and shows the question until the step moves on", () => {
   const { id } = createPipeline({ repos: [{ path: repo }], title: "t", source: "text" });
-  for (const name of ["explore", "questions", "plan", "implement", "review"] as const) setStep(id, name, "done");
+  doneBefore(id, "stack");
   waitForUser(id, "stack", "Push the branches and open the PRs?");
   let state = readState(id);
   expect(state.status).toBe("waiting_for_user");
@@ -2495,7 +2496,7 @@ test("a done pipeline starts its preview, becomes ready, and is done again once 
 
 test("a stop request keeps a failed or archived pipeline's status", async () => {
   const failed = rules();
-  for (const name of ["explore", "questions", "plan", "implement"] as const) setStep(failed, name, "done");
+  doneBefore(failed, "review");
   setStep(failed, "review", "failed");
   expect((await stopPipeline(failed)).status).toBe("failed");
   const archived = rules();

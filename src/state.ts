@@ -378,7 +378,7 @@ export function setMode(id: string, mode: Mode): State {
   });
 }
 
-// Steps run in order: every earlier step must be done or skipped. Throws inside the lock, so a refusal writes nothing.
+// Every earlier step must be done or skipped. Called inside the lock, so a refusal writes nothing.
 function assertPrerequisites(s: State, name: StepName, action: string): void {
   for (const prev of STEPS.slice(0, STEPS.indexOf(name))) {
     const status = s.steps.find((x) => x.name === prev)?.status;
