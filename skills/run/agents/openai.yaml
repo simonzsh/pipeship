@@ -1,6 +1,6 @@
 interface:
   display_name: "pipeship: run"
-  short_description: "From a ticket or a work request to stacked PRs and a running test app"
+  short_description: "From a ticket or a work request to one PR per repo and a running test app"
   default_prompt: "Use $run to handle ABC-123"
 policy:
   allow_implicit_invocation: true

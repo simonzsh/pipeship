@@ -1,6 +1,6 @@
 ---
 name: run
-description: Feature pipeline from a work request to stacked PRs and a running test environment. Use whenever the user asks to make, fix, build or change something, with or without a ticket: a ticket reference (ABC-123), a Linear/Notion/GitHub/Jira URL, a ticket text, or a task decided after a discussion. Use it only for a code change big enough for a branch and a pull request. Do not use it for a one-line tweak, a config or file edit, a chart or document, or a task that needs no pull request. Never use it for a question, an explanation, a plain discussion, a review or a status request.
+description: Feature pipeline from a work request to one PR per repo and a running test environment. Use whenever the user asks to make, fix, build or change something, with or without a ticket: a ticket reference (ABC-123), a Linear/Notion/GitHub/Jira URL, a ticket text, or a task decided after a discussion. Use it only for a code change big enough for a branch and a pull request. Do not use it for a one-line tweak, a config or file edit, a chart or document, or a task that needs no pull request. Never use it for a question, an explanation, a plain discussion, a review or a status request.
 argument-hint: "[quick|full] [--skip step,step] <ticket ref, URL or text, or the work request>"
 ---
 
@@ -131,9 +131,9 @@ Push the branches and open the PRs without asking: running the ticket through pi
 
 If the exception in **The checks** applies (CI does not run the full suite on PRs, or the user asks for it), run the full suite once now, on the top of each repo's stack. If it fails, fix it before you push.
 
-1. Push every chunk branch.
-2. In stack order, open one PR per chunk: `gh pr create --head <branch> --base <previous branch>` (the first PR of each repo targets that repo's base). Title from the ticket and chunk; body: what this chunk does, a link to the ticket, the stack position ("2/3"), the tests that ran, and a note that CI covers the rest.
-3. `pipeship chunk <id> <chunk> --pr <url>`. The chunk stays `done`: the dashboard shows the PR link. The dashboard later sets `merged` or `closed` from GitHub.
+1. Push only the top chunk branch of each repo: it holds the whole feature. The lower chunk branches stay local.
+2. For each repo, open ONE PR: `gh pr create --head <top branch> --base <that repo's base>`. Title from the ticket; body: what the feature does, a link to the ticket, the chunks in stack order each with its commits (one commit per chunk, so the user can review commit by commit), the tests that ran, and a note that CI covers the rest.
+3. `pipeship chunk <id> <top chunk> --pr <url>`, for the top chunk only. Every chunk stays `done`: the dashboard shows the repo's PR on the other chunks, and sets every chunk of the repo to `merged` once that PR is merged. It also sets `closed` from GitHub.
 
 With several repos, once every PR exists, add a "Related PRs" list with the other repos' PRs to each PR body (`gh pr edit <url> --body-file <file>`).
 
@@ -146,7 +146,7 @@ Run the changed code, front end or back end. An API, MCP or engine change needs 
 1. **Start.** If there is a draft recipe or the preview fails, read `<skill dir>/recipe.md`. First run `pipeship recipe <repo>...` again with the final repo list. If the list changed since step 1, update the `repo` names in the draft. Then run `pipeship preview <id>`. It uses each repo's top worktree. Add `--recipe <dir>/recipe.json` if there is a draft. It copies local files, installs, starts each service of the recipe on its own free port (back ends first, then fronts), waits until each answers, and marks the `preview` step done. A draft recipe that works is saved, so later pipelines in this repo skip this work. Give the user the URLs it prints (the first is the main front).
    Services the app needs (a local database, a queue) belong in a `start` command of the recipe, so the dashboard's "Stop preview" button stops them with the app (see `<skill dir>/recipe.md`). Run other one-off setup yourself; for test data, see **Data** below.
 2. **Verify.** Use the changed behaviour the way its client does, and write what you called and what came back to `<dir>/verify.md`: a UI change in a browser (the preview tools of your harness), an HTTP API with `curl`, an MCP or other protocol with a real client. Cover the main path and one failure path. If you cannot exercise it (no test data, a missing service), say so in the summary. Report as working only what you exercised.
-3. **Fix.** If verification fails, fix the code in the worktree of the chunk that owns it, commit, restack and re-run the checks for the diff of the fix. Push only if step 6 opened PRs.
+3. **Fix.** If verification fails, fix the code in the worktree of the chunk that owns it, commit, restack and re-run the checks for the diff of the fix. Push the top branch of the repo (`--force-with-lease` after a restack) only if step 6 opened a PR.
 4. **Test guide.** After verify, write `<dir>/test.md` for the user, in the user's language. The dashboard shows it in the pipeline's Test tab, so the user can test without leaving the dashboard. `verify.md` stays your evidence; `test.md` is the user's guide. Keep it short:
    - the direct URL of the changed page, not only the root;
    - how to log in if the app needs it: which local account, and where its credentials live;
@@ -161,7 +161,7 @@ If the preview fails to start, it prints the log tail: diagnose, fix the recipe 
 
 ## End
 
-Give the user a short summary: the test URL, the PRs in stack order (per repo), what the verification covered (or why it was skipped), the tests that ran (CI covers the rest), and anything to check by hand. Point to the test guide: the user finds it in the pipeline's Test tab. The test servers keep running on purpose; the user stops them with the dashboard's "Stop preview" button and starts them again with "Start preview".
+Give the user a short summary: the test URL, the PR of each repo, what the verification covered (or why it was skipped), the tests that ran (CI covers the rest), and anything to check by hand. Point to the test guide: the user finds it in the pipeline's Test tab. The test servers keep running on purpose; the user stops them with the dashboard's "Stop preview" button and starts them again with "Start preview".
 
 ## Feedback after the pipeline
 
@@ -172,6 +172,6 @@ The user may ask for changes after the end, or comment on a PR. Do not fix it al
 3. **Implement.** One subagent per chunk concerned (model `sonnet`), in its existing worktree. Brief: `<skill dir>/prompts/implement.md`. Give it the feedback. It fixes and commits.
 4. **Restack once**, in stack order, then run the targeted checks for the diff of the feedback. Mark `implement` `done`.
 5. **Review the delta only.** Mark `review` `running`. Run one cleanup subagent (model `sonnet`, brief `<skill dir>/prompts/cleanup.md`, chunks `reviewing`) on the diff of the feedback. Run the global review (model `opus`, brief `<skill dir>/prompts/global-review.md`) only if the feedback touches several chunks or a contract. Then mark `review` `done`.
-6. **Push** the same branches: open PRs update on their own. Use `--force-with-lease` after a restack. If the PRs are already merged, open a new PR on the base of the repo.
+6. **Push** the top branch of each repo concerned, with `--force-with-lease` after a restack: its PR updates on its own. If the PR is already merged, open a new PR on the base of the repo. A pipeline from an older pipeship has one PR per chunk: push every chunk branch as before.
 7. **Small feedback** (one line, a name, a text): you may fix it yourself. Commit in the chunk that owns the code, restack, re-run the checks, and update the steps.
 8. **Test again.** If the tested behaviour changed, run `pipeship preview <id>` again and update `<dir>/verify.md` and `<dir>/test.md`.

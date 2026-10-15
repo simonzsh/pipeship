@@ -1,12 +1,12 @@
 {
   "name": "pipeship",
-  "description": "pipeship: from a ticket or a work request to stacked PRs and a running test environment, plus a review-only skill.",
+  "description": "pipeship: from a ticket or a work request to one PR per repo and a running test environment, plus a review-only skill.",
   "owner": { "name": "simonzsh" },
   "plugins": [
     {
       "name": "pipeship",
       "source": "./",
-      "description": "Feature pipeline from a ticket or a work request: questions → plan → parallel implementation → cleanup → stacked PRs → running test environment. Also a review-only skill."
+      "description": "Feature pipeline from a ticket or a work request: questions → plan → parallel implementation → cleanup → one PR per repo → running test environment. Also a review-only skill."
     }
   ]
 }

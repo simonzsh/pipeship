@@ -1,7 +1,7 @@
 {
   "name": "pipeship",
   "version": "0.14.7",
-  "description": "Feature pipeline for Claude Code: from ticket to stacked PRs and a running test environment.",
+  "description": "Feature pipeline for Claude Code: from ticket to one PR per repo and a running test environment.",
   "type": "module",
   "bin": {
     "pipeship": "src/cli.ts"

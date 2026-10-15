@@ -1,7 +1,7 @@
 {
   "name": "pipeship",
   "version": "0.14.7",
-  "description": "Feature pipeline from a ticket or a work request: questions → plan → parallel implementation → cleanup → stacked PRs → running test environment. Also a review-only skill.",
+  "description": "Feature pipeline from a ticket or a work request: questions → plan → parallel implementation → cleanup → one PR per repo → running test environment. Also a review-only skill.",
   "author": { "name": "simonzsh" },
   "homepage": "https://github.com/simonzsh/pipeship",
   "repository": "https://github.com/simonzsh/pipeship",
@@ -10,7 +10,7 @@
   "skills": "./skills/",
   "interface": {
     "displayName": "pipeship",
-    "shortDescription": "From a ticket or a work request to stacked PRs and a running test app",
+    "shortDescription": "From a ticket or a work request to one PR per repo and a running test app",
     "category": "Developer Tools",
     "developerName": "simonzsh",
     "capabilities": ["Read", "Write"],

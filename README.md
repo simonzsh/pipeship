@@ -1,6 +1,6 @@
 # pipeship
 
-Feature pipeline for Claude Code and Codex. Give it a ticket, an issue or a work request from any source; it maps the code, asks its questions in one batch, plans, implements chunks in parallel worktrees, cleans up the code, opens stacked PRs, and starts the app so you can test it at a URL. It works with [T3 Code](https://github.com/pingdotgg/t3code): each pipeline links back to its T3 Code thread.
+Feature pipeline for Claude Code and Codex. Give it a ticket, an issue or a work request from any source; it maps the code, asks its questions in one batch, plans, implements chunks in parallel worktrees, cleans up the code, opens one PR per repo, and starts the app so you can test it at a URL. It works with [T3 Code](https://github.com/pingdotgg/t3code): each pipeline links back to its T3 Code thread.
 
 ## Install
 
@@ -70,7 +70,7 @@ Do not use it for a small edit in one file, a config tweak, a question, a review
 
 - **Modes**: `full` (default, all 7 steps) and `quick` (one chunk, blocking questions only, explore in the main session, one `sonnet` cleanup pass instead of the full review, no `opus`).
 - **`--skip`** removes steps, e.g. `--skip questions,stack`. You can also say "skip the review" during the run. Steps run in order: `pipeship step` and `pipeship wait` refuse a step whose earlier steps are not done or skipped, so mark a step `skipped` to pass it.
-- **Several repos**: a ticket can span several repos. Pass `--repo` once per repo, or let the explore step find them. Each repo gets its own stack of PRs.
+- **Several repos**: a ticket can span several repos. Pass `--repo` once per repo, or let the explore step find them. Each repo gets its own PR.
 - **Checks**: subagents run the fast checks (typecheck, lint, format) and only the tests related to the diff, never the full suite. CI runs the full suite on each PR. pipeship runs the full suite locally, once on the top of the stack, only when CI does not run it on PRs or when you ask for it. Never two test suites at once on the machine.
 - pipeship starts on its own on a work request: make, fix, build or change something, with or without a ticket (a reference, a URL, a text, or a task decided after a discussion). You do not need to name it. It never starts on a question, an explanation, a plain discussion, a review or a status request.
 
@@ -146,16 +146,16 @@ Each pipeline's header shows the logo of the agent that runs the pipeline (Claud
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/dashboard-dark.png">
-  <img alt="The pipeship dashboard: the pipelines grouped by status on the left; on the right a pipeline over two repos with its steps, one PR stack per repo and the Test tab" src="docs/dashboard-light.png" width="720">
+  <img alt="The pipeship dashboard: the pipelines grouped by status on the left; on the right a pipeline over two repos with its steps, one PR per repo and the Test tab" src="docs/dashboard-light.png" width="720">
 </picture>
 
 ### Actions
 
-The header can request a pipeline stop (the agents stop after their current step; the pipeline shows "Stopped"), stop the test servers ("Stop preview": a ready pipeline becomes done) and start them again ("Start preview" on a done pipeline, with no confirmation; a failure shows in the Test tab). A pipeline is `ready` while its preview runs and `done` when every step is finished and no preview runs. A done, failed or stopped pipeline can be archived ("Archive", with a confirmation): it moves to the collapsed "Archived" group, out of the header count, and cannot be unarchived. A pipeline whose PRs are all merged (by the merge engine or on GitHub) is archived by itself once every repo's merge has ended; it is archived when it is ready, done, failed or stopped, and its preview stops. A finished pipeline can be deleted: its worktrees and files go, and so do the local branches of its merged PRs; the other branches and the PRs stay.
+The header can request a pipeline stop (the agents stop after their current step; the pipeline shows "Stopped"), stop the test servers ("Stop preview": a ready pipeline becomes done) and start them again ("Start preview" on a done pipeline, with no confirmation; a failure shows in the Test tab). A pipeline is `ready` while its preview runs and `done` when every step is finished and no preview runs. A done, failed or stopped pipeline can be archived ("Archive", with a confirmation): it moves to the collapsed "Archived" group, out of the header count, and cannot be unarchived. A pipeline whose PRs are all merged (by the merge engine or on GitHub) is archived by itself once every repo's merge has ended; it is archived when it is ready, done, failed or stopped, and its preview stops. A finished pipeline can be deleted: its worktrees and files go, and so do the local branches of its merged chunks; the other branches and the PRs stay.
 
-The PR stack is always visible, with one row per repo, its path and its merge button. A finished pipeline's PRs merge with one violet "Merge into <base>" button, after a confirmation. The confirmation has a checkbox, checked by default, that deletes the remote branches after the merge (never the base). One run does it all. When 2 or more PRs are open, it merges each into the branch below, from the top, with no rebase or force-push, so one PR is left. Then it waits for the checks on that PR and squash-merges it into the base branch: one commit on the base. The run stops at the first PR that cannot merge, with the reason in the pipeline's detail, and the same button resumes it. One merge runs at a time per repo; the repos of a pipeline can merge at the same time.
+Each repo is always visible, with one row per repo, its path, its chunks and its merge button. A finished pipeline's PR merges with one violet "Merge into <base>" button, after a confirmation. The confirmation has a checkbox, checked by default, that deletes the remote branch of the PR after the merge (never the base). One run does it all. It waits for the checks on the PR and merges it into the base branch with a merge commit, so the chunk commits stay in its history. A pipeline from an older version with 2 or more open PRs first merges each into the branch below, from the top, with no rebase or force-push. The run stops at the first PR that cannot merge, or when GitHub refuses merge commits, with the reason in the pipeline's detail, and the same button resumes it. One merge runs at a time per repo; the repos of a pipeline can merge at the same time.
 
-The dashboard also syncs PR statuses with GitHub. At startup, on page load and every 60 seconds, it runs `gh pr view` for each chunk that has a PR and is not merged. It skips pipelines with no such PR, and the repos of a pipeline while they merge. A PR merged elsewhere sets the chunk to `merged`. A PR closed without merge sets it to `closed`, and a reopened PR sets it back to `done`. Without `gh`, or on an error, the state stays as it is and the error goes to `~/.pipeship/dashboard.log`. While any merge runs, the Delete button stays disabled. The merge buttons stay for a closed PR: Merge then fails with "PR #n is closed". The page-load check runs at most once every 15 seconds. In the pipeline list, a violet merge icon shows that all PRs of a pipeline are merged.
+The dashboard also syncs PR statuses with GitHub. At startup, on page load and every 60 seconds, it runs `gh pr view` for each chunk that has a PR and is not merged. It skips pipelines with no such PR, and the repos of a pipeline while they merge. Once the PR of a repo is merged, by the button or on GitHub, every chunk of that repo becomes `merged`. A PR closed without merge sets it to `closed`, and a reopened PR sets it back to `done`. Without `gh`, or on an error, the state stays as it is and the error goes to `~/.pipeship/dashboard.log`. While any merge runs, the Delete button stays disabled. The merge buttons stay for a closed PR: Merge then fails with "PR #n is closed". The page-load check runs at most once every 15 seconds. In the pipeline list, a violet merge icon shows that all PRs of a pipeline are merged.
 
 ### Test tab
 
@@ -165,15 +165,15 @@ The test URLs, one per service, and the agent's `test.md` guide: the page to ope
 
 The code diff, to review the work without leaving the dashboard.
 
-- **Whole stack** by default: `<base>...<top branch>`, one diff per repo. The base is the branch at the bottom of the top PR's chain of bases.
-- **One PR**: click it in the stack for `<PR base>...<branch>`. The breadcrumb ("Whole stack › PR #17") or the base branch row brings you back.
+- **Whole stack** by default: `<base>...<top branch>`, one diff per repo.
+- **One chunk**: click it for `<previous chunk's branch>...<branch>`. A chunk without a PR shows `in #N`, the PR of its repo. The breadcrumb ("Whole stack › PR #17") or the base branch row brings you back.
 - Every file opens as a collapsible block with its line numbers, its +/− counts and syntax highlighting. "Collapse all" and "Expand all" toggle every file; "Refresh" reloads the diff.
 
-The base of each diff is `origin/<base>`, fetched before each diff: a base that moved on the remote does not add its commits to the diff. The other end is the local branch (or `origin/<branch>` when the local one is gone). The PR base comes from GitHub: the dashboard reads it with the PR status, every minute. A retargeted PR (by hand, or by GitHub when the branch below it is deleted) moves in the stack tree and in its diff. Before a chunk has a PR, its base is the previous chunk's branch. When the local branch differs from `origin/<branch>`, a badge says so, for example "2 commits not pushed": the PR on GitHub does not show this work yet. A missing branch shows a message in its repo's section.
+The base of each diff is `origin/<base>`, fetched before each diff: a base that moved on the remote does not add its commits to the diff. The other end is the local branch (or `origin/<branch>` when the local one is gone). For a pipeline from an older version, with a PR per chunk, the base comes from GitHub: the dashboard reads it with the PR status, every minute, and a retargeted PR moves in the tree and in its diff. Before a chunk has a PR, its base is the previous chunk's branch. When the local branch differs from `origin/<branch>`, a badge says so, for example "2 commits not pushed": the PR on GitHub does not show this work yet. A missing branch shows a message in its repo's section.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/dashboard-code-dark.png">
-  <img alt="The Code tab: the diff of one PR of the stack, with line numbers and syntax highlighting" src="docs/dashboard-code-light.png" width="720">
+  <img alt="The Code tab: the diff of one chunk, with line numbers and syntax highlighting" src="docs/dashboard-code-light.png" width="720">
 </picture>
 
 ### T3 Code
