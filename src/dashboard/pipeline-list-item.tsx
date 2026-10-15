@@ -1,4 +1,5 @@
 import { GitMerge } from "lucide-react";
+import { mergeRunning } from "../repos.ts";
 import type { DashboardState } from "../state.ts";
 import { allMerged, displaySteps, timeAgoShort } from "./pipeline-info";
 import { StatusBadge, statusConfig } from "./status";
@@ -28,7 +29,7 @@ export function PipelineListItem({ p, selected, onSelect }: { p: DashboardState;
       <span className="flex items-center justify-between gap-2">
         <Steps steps={displaySteps(p)} compact />
         <span className="flex items-center gap-1.5">
-          {allMerged(p) && (
+          {allMerged(p) && !mergeRunning(p) && (
             <span title="All PRs merged" className="inline-flex">
               <GitMerge className="size-3.5 text-violet-600 dark:text-violet-400" aria-label="All PRs merged" />
             </span>

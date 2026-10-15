@@ -87,7 +87,7 @@ export function PipelineDetail({ p, onBack }: { p: DashboardState; onBack: () =>
                     <Zap /> Quick
                   </Badge>
                 )}
-                {allMerged(p) && (
+                {allMerged(p) && !merging && (
                   <Badge variant="secondary" className="bg-violet-500/15 text-violet-700 dark:text-violet-400">
                     <GitMerge /> Merged
                   </Badge>
