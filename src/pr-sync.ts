@@ -1,5 +1,5 @@
 import { archiveIfAllMerged } from "./preview.ts";
-import { mergeRunning } from "./repos.ts";
+import { mergeRunning, openPrChunks } from "./repos.ts";
 import { defaultRunner, errorMessage, type Runner } from "./merge.ts";
 import { CLOSED, home, listStates, markRepoMerged, MERGED, readState, withStateLock, writeState, type Chunk, type State } from "./state.ts";
 
@@ -17,7 +17,7 @@ export interface SyncDeps {
 
 // Closed PRs stay polled: a reopened PR sends its chunk back to done.
 export function polledChunks(s: Pick<State, "chunks">): Chunk[] {
-  return s.chunks.filter((c) => c.pr && c.status !== MERGED);
+  return openPrChunks(s.chunks);
 }
 
 export function syncedStatus(status: string | undefined, ghState: string): string | undefined {

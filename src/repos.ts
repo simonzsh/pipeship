@@ -83,3 +83,7 @@ export function diffRange(state: Pick<State, "repos" | "chunks">, repo: Repo, ch
 // A stack of PRs from an older pipeship is not merged here.
 export const stackRefusal = (repo: string, open: number) =>
   `${open} PRs of ${repoName(repo)} are not merged: pipeship merges one PR per repo. Merge this stack on GitHub, or with an older pipeship that combines stacks.`;
+
+// The PRs still to merge. A closed PR counts: the merge refuses it rather than skip it.
+// "merged" is spelled out: importing MERGED from state.ts would pull node: into the browser.
+export const openPrChunks = (chunks: Chunk[]): Chunk[] => chunks.filter((c) => c.pr && c.status !== "merged");

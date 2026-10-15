@@ -1,6 +1,6 @@
 import { GitMerge } from "lucide-react";
 import { useState } from "react";
-import { stackRefusal } from "../repos.ts";
+import { openPrChunks, stackRefusal } from "../repos.ts";
 import { CLOSED, type Chunk, type MergeRun } from "../state.ts";
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription,
@@ -25,7 +25,7 @@ export function MergeButton({ id, repo, chunks, base, merge, finished }: {
   const [deleteBranches, setDeleteBranches] = useState(true);
   // The run's startedAt seen at the click (null: no click). Ends when the stream shows another run, or the POST fails.
   const [clickedAt, setClickedAt] = useState<string | undefined | null>(null);
-  const todo = chunks.filter((c) => c.pr && c.status !== "merged");
+  const todo = openPrChunks(chunks);
   // The server refuses a closed PR and a stack of 2 or more: hide the button when nothing open is left, disable it otherwise.
   const closed = todo.find((c) => c.status === CLOSED);
   const running = merge?.status === "running";

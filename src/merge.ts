@@ -1,5 +1,5 @@
 import { archiveIfAllMerged, isAlive } from "./preview.ts";
-import { chunksOf, repoName, stackRefusal } from "./repos.ts";
+import { chunksOf, openPrChunks, repoName, stackRefusal } from "./repos.ts";
 import { listStates, lookupRepo, markRepoMerged, MERGED, readState, updateState, upsertChunk, type Chunk, type MergeRun, type Repo, type State } from "./state.ts";
 
 export interface RunResult {
@@ -146,7 +146,7 @@ export function startMerge(
   if (active.has(key) || (prev?.status === "running" && !isStale(prev, isAlive))) {
     throw new MergeError("a merge is already running", 409);
   }
-  const open = chunksOf(s, repo.path).filter((c) => c.pr && c.status !== MERGED).length;
+  const open = openPrChunks(chunksOf(s, repo.path)).length;
   if (open === 0) throw new MergeError("no open PR to merge", 400);
   if (open >= 2) throw new MergeError(stackRefusal(repo.path, open), 409);
   if (rawDelete !== undefined && rawDelete !== null && typeof rawDelete !== "boolean") throw new MergeError("deleteBranches must be a boolean", 400);
@@ -262,7 +262,7 @@ async function deleteBranches(x: Ctx, chunks: Chunk[], keep: string[]): Promise<
 // Merge the repo's single open PR into its base with a merge commit. No rebase, push or retarget.
 async function mergeIntoBase(x: Ctx, repo: Repo, chunks: Chunk[], remove: boolean): Promise<void> {
   const prs = chunks.filter((c) => c.pr);
-  const open = prs.filter((c) => c.status !== MERGED);
+  const open = openPrChunks(chunks);
   if (open.length >= 2) throw new Error(stackRefusal(repo.path, open.length));
   if (!open.length) throw new Error("no open PR to merge");
   const c = open[0]!;

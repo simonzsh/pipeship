@@ -5,7 +5,7 @@ import { join } from "node:path";
 import {
   addRepo, markRepoMerged, createPipeline, listStates, pipelineDir, pipelineStatus, readState, refreshSessionId, setMode, setStep, updateState, upsertChunk, waitForUser, type State,
 } from "../src/state.ts";
-import { chunksOf, diffRange, repoName, repoStacks, sharesRepo, stackRefusal, topChunk } from "../src/repos.ts";
+import { chunksOf, diffRange, openPrChunks, repoName, repoStacks, sharesRepo, stackRefusal, topChunk } from "../src/repos.ts";
 import {
   archiveIfAllMerged, archivePipeline, DASHBOARD_PORT, deletePipeline, findRecipe, isAlive, mainService, normalizeRecipe, pickPorts, previewLines, resolveEnv,
   requestPreviewStart, savedRecipePath, startOrder, startPreview, stopPipeline, stopPreview, stopPreviewAndSettle, type Service, unarchivePipeline,
@@ -1887,6 +1887,16 @@ test("parseDiff handles no-newline markers, quoted and spaced paths, truncation,
 
   expect(parseDiff("")).toEqual([]);
   expect(() => parseDiff("@@ nonsense\n+++\n\0\ndiff --git\n@@ -x\n \\ \n")).not.toThrow();
+});
+
+test("openPrChunks keeps the chunks with a PR not merged, closed ones included", () => {
+  const chunks = [
+    { name: "a", repo: "r" },
+    { name: "b", repo: "r", pr: "u1", status: "merged" },
+    { name: "c", repo: "r", pr: "u2", status: "closed" },
+    { name: "d", repo: "r", pr: "u3", status: "done" },
+  ];
+  expect(openPrChunks(chunks).map((c) => c.name)).toEqual(["c", "d"]);
 });
 
 test("diffRange follows the local chunk order, with one PR on the top chunk only", () => {
