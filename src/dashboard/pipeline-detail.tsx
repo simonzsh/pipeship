@@ -151,7 +151,7 @@ export function PipelineDetail({ p, onBack }: { p: DashboardState; onBack: () =>
                 Preview failed: <span className="line-clamp-3 whitespace-pre-wrap break-words font-mono text-xs">{p.previewError}</span>
               </p>
             )}
-            {p.preview ? <PreviewPanel preview={p.preview} /> : !p.previewError && <NoPreviewPanel />}
+            {p.preview && !starting ? <PreviewPanel preview={p.preview} /> : !p.previewError && <NoPreviewPanel />}
             {p.testGuide && <TestGuide guide={p.testGuide} />}
           </TabsContent>
           {/* The code tab pads its own rows. */}
