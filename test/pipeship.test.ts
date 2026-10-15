@@ -364,6 +364,57 @@ test("preview fails clearly when the server crashes", async () => {
   expect(existsSync(join(pipelineDir(id), "preview-app.log"))).toBe(true);
 }, 30_000);
 
+test("a failing install rejects with its log and never starts the services", async () => {
+  const marker = join(root, "started-marker");
+  writeFileSync(join(repo, ".pipeship.json"), JSON.stringify({ install: "echo oops; exit 3", start: `touch ${marker}; sleep 60` }));
+  const { id } = createPipeline({ repos: [{ path: repo }], title: "t", source: "text" });
+  const err = await startPreview(id, repo).then(() => undefined, (e: Error) => e);
+  expect(err?.message).toContain("install failed (");
+  expect(err?.message).toContain("oops");
+  expect(readState(id).preview).toBeUndefined();
+  expect(existsSync(marker)).toBe(false);
+}, 30_000);
+
+test("the same install command runs once per worktree", async () => {
+  const wt = mkdtempSync(join(root, "wt-"));
+  const install = "echo x >> count";
+  writeFileSync(
+    join(repo, ".pipeship.json"),
+    JSON.stringify({
+      install,
+      services: [
+        { name: "a", kind: "back", start: "exit 1", install },
+        { name: "b", kind: "back", start: "exit 1", install },
+      ],
+    }),
+  );
+  const { id } = createPipeline({ repos: [{ path: repo }], title: "t", source: "text" });
+  await startPreview(id, wt).catch(() => undefined);
+  expect(readFileSync(join(wt, "count"), "utf8").trim().split("\n")).toHaveLength(1);
+}, 30_000);
+
+test("a slow install does not block the event loop", async () => {
+  writeFileSync(
+    join(repo, ".pipeship.json"),
+    JSON.stringify({
+      install: "sleep 1",
+      start: `bun -e "Bun.serve({ port: Number(process.env.APP_PORT), fetch: () => new Response('ok') })"`,
+      portEnv: "APP_PORT",
+    }),
+  );
+  const { id } = createPipeline({ repos: [{ path: repo }], title: "t", source: "text" });
+  finishBeforePreview(id);
+  let ticks = 0;
+  const timer = setInterval(() => ticks++, 50);
+  try {
+    await startPreview(id, repo);
+    expect(ticks).toBeGreaterThanOrEqual(5);
+  } finally {
+    clearInterval(timer);
+    await stopPipeline(id).catch(() => undefined);
+  }
+}, 30_000);
+
 test("a draft recipe is saved for the repo only when the app starts", async () => {
   const draft = join(root, "draft.json");
   writeFileSync(draft, JSON.stringify({ start: "exit 1" }));
