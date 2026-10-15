@@ -59,14 +59,18 @@ export function repoStacks(state: Pick<State, "repos" | "chunks" | "merges">): R
 type Parent = Chunk | string | undefined; // a chunk of the stack, or a branch outside it
 
 // Each chunk's parent: the chunk whose branch is its base, else the base branch itself.
-// Base: the PR's base on GitHub, else the previous branched chunk, else the repo base.
+// Base: the PR's base on GitHub (only in an old stack: every earlier chunk has a PR), else the previous branched chunk, else the repo base.
 // A cycle of retargeted PRs is cut at the repo base.
 function stackParents(chunks: Chunk[], repo: Repo): Map<Chunk, Parent> {
   const byBranch = new Map(chunks.flatMap((c) => (c.branch ? [[c.branch, c] as const] : [])));
   const parents = new Map<Chunk, Parent>();
   let prev = repo.base;
+  // With one PR per repo the top PR targets the base: following it would drop the chain.
+  // A PR base counts only when every branched chunk before it has a PR (an old stack).
+  let followPrs = true;
   for (const c of chunks) {
-    const base = c.prBase ?? prev;
+    const base = (followPrs ? c.prBase : undefined) ?? prev;
+    if (c.branch && !c.pr) followPrs = false;
     const parent = base === undefined ? undefined : byBranch.get(base);
     parents.set(c, parent && parent !== c ? parent : base);
     if (c.branch) prev = c.branch;

@@ -136,7 +136,7 @@ export function PipelineDetail({ p, onBack }: { p: DashboardState; onBack: () =>
 
       <div className="min-h-0 flex-1 overflow-y-auto">
         <div className="flex flex-col gap-3 px-6 pt-5">
-          <h3 className="text-sm font-semibold">Pull request stack</h3>
+          <h3 className="text-sm font-semibold">Pull requests</h3>
           {stack}
         </div>
 

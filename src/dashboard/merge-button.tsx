@@ -73,7 +73,7 @@ export function MergeButton({ id, repo, chunks, base, merge, finished }: {
         <AlertDialogHeader>
           <AlertDialogTitle>{todo.length > 1 ? `Merge ${todo.length} PRs` : `Merge #${bottom}`} into {target}?</AlertDialogTitle>
           <AlertDialogDescription>
-            {todo.length > 1 ? `Combines the stack into #${bottom}, then squash-merges it once its checks pass.` : "Squash-merges the PR once its checks pass."}
+            {todo.length > 1 ? `Combines the stack into #${bottom}, then merges it once its checks pass.` : "Merges the PR once its checks pass."}
           </AlertDialogDescription>
         </AlertDialogHeader>
         <label className="flex items-center gap-2 text-sm">

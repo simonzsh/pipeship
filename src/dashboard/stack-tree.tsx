@@ -34,6 +34,7 @@ function clickable(pick: (() => void) | undefined, isSelected: boolean) {
 }
 
 // Each PR sits under the branch it targets on GitHub: a retargeted PR moves in the tree.
+// A chunk without a PR shows the PR it is part of.
 export function StackTree({ repo, chunks, merge, selected, onSelect, onSelectBase }: {
   repo: Repo;
   chunks: Chunk[];
@@ -71,6 +72,8 @@ export function StackTree({ repo, chunks, merge, selected, onSelect, onSelectBas
         // A chunk without a branch has no diff to show.
         const pick = onSelect && c.branch ? () => onSelect(c.name) : undefined;
         const row = clickable(pick, selected === c.name);
+        // A chunk without a PR belongs to the PR of the next chunk that has one.
+        const partOf = c.pr ? undefined : chunks.slice(chunks.indexOf(c) + 1).find((x) => x.pr)?.pr;
         return (
           <li
             key={c.name}
@@ -110,6 +113,16 @@ export function StackTree({ repo, chunks, merge, selected, onSelect, onSelectBas
                     <GitPullRequest /> {prLabel(c.pr)}
                   </a>
                 </Button>
+              )}
+              {partOf && (
+                <a
+                  href={partOf}
+                  target="_blank"
+                  title={`Part of PR ${prLabel(partOf)}`}
+                  className="text-xs text-muted-foreground hover:underline"
+                  onClick={(e) => e.stopPropagation()}>
+                  in {prLabel(partOf)}
+                </a>
               )}
             </span>
           </li>

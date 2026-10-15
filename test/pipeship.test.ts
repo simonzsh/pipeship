@@ -2128,10 +2128,10 @@ test("diffRange and stackRows follow the PR bases from GitHub", () => {
   const repo = { path: "/r/a", base: "main" };
   // c1 merged and its branch deleted: GitHub retargeted c2 to main. c3 still targets c2. c4 targets a branch outside the stack.
   const chunks = [
-    { name: "c1", repo: "/r/a", branch: "b1", prBase: "main" },
-    { name: "c2", repo: "/r/a", branch: "b2", prBase: "main" },
-    { name: "c3", repo: "/r/a", branch: "b3", prBase: "b2" },
-    { name: "c4", repo: "/r/a", branch: "b4", prBase: "develop" },
+    { name: "c1", repo: "/r/a", branch: "b1", pr: "u", prBase: "main" },
+    { name: "c2", repo: "/r/a", branch: "b2", pr: "u", prBase: "main" },
+    { name: "c3", repo: "/r/a", branch: "b3", pr: "u", prBase: "b2" },
+    { name: "c4", repo: "/r/a", branch: "b4", pr: "u", prBase: "develop" },
     { name: "c5", repo: "/r/a", branch: "b5" }, // no PR yet: on the previous branched chunk
   ];
   const s = { repos: [repo], chunks };
@@ -2147,11 +2147,26 @@ test("diffRange and stackRows follow the PR bases from GitHub", () => {
 
   // Two PRs that target each other: the cycle is cut at the repo base.
   const loop = [
-    { name: "x", repo: "/r/a", branch: "bx", prBase: "by" },
-    { name: "y", repo: "/r/a", branch: "by", prBase: "bx" },
+    { name: "x", repo: "/r/a", branch: "bx", pr: "u", prBase: "by" },
+    { name: "y", repo: "/r/a", branch: "by", pr: "u", prBase: "bx" },
   ];
   expect(stackRows(loop, repo).map((r) => (r.kind === "chunk" ? `${r.chunk.name}:${r.depth}` : r.branch))).toEqual(["main", "x:1", "y:2"]);
   expect(diffRange({ repos: [repo], chunks: loop }, repo)).toEqual({ from: "main", to: "by" });
+});
+
+test("one PR per repo: the tree and the diffs follow the local chunk order", () => {
+  const repo = { path: "/r/a", base: "main" };
+  // Only the top chunk has a PR, and GitHub reports its base as main.
+  const chunks = [
+    { name: "c1", repo: "/r/a", branch: "b1" },
+    { name: "c2", repo: "/r/a", branch: "b2" },
+    { name: "c3", repo: "/r/a", branch: "b3", pr: "https://github.com/o/r/pull/7", prBase: "main" },
+  ];
+  const s = { repos: [repo], chunks };
+  const rows = stackRows(chunks, repo).map((r) => (r.kind === "root" ? r.branch : `${r.chunk.name}@${r.depth}`));
+  expect(rows).toEqual(["main", "c1@1", "c2@2", "c3@3"]);
+  expect(diffRange(s, repo, "c3")).toEqual({ from: "b2", to: "b3" });
+  expect(diffRange(s, repo)).toEqual({ from: "main", to: "b3" });
 });
 
 test("diffRange picks the previous branched chunk, or the base", () => {
