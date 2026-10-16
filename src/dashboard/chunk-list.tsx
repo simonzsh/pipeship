@@ -1,6 +1,7 @@
 import type { KeyboardEvent } from "react";
 import { GitPullRequest } from "lucide-react";
 import type { Chunk, MergeRun, Repo } from "../state.ts";
+import { Button } from "./components/ui/button";
 import { ChunkStatusIcon } from "./status";
 import { cn, prNumber } from "./utils";
 
@@ -9,13 +10,6 @@ const prLabel = (url: string) => {
   const n = prNumber(url);
   return n ? `#${n}` : "PR";
 };
-
-// The chunk status stands for its PR once it has one; any other status is a PR still open.
-const PR_STATE: Record<string, { label: string; className: string }> = {
-  merged: { label: "Merged", className: "text-violet-600 dark:text-violet-400" },
-  closed: { label: "Closed", className: "text-red-600 dark:text-red-400" },
-};
-const PR_OPEN = { label: "Open", className: "text-emerald-600 dark:text-emerald-400" };
 
 // Row props for a clickable row: a button for the mouse, Enter and Space.
 function clickable(pick: (() => void) | undefined, isSelected: boolean) {
@@ -48,27 +42,18 @@ function Rail({ up, down, hollow }: { up: boolean; down: boolean; hollow?: boole
   );
 }
 
-// The PR sits on the top chunk: its number, and its state.
-function PrPill({ chunk }: { chunk: Chunk }) {
-  const state = PR_STATE[chunk.status ?? ""] ?? PR_OPEN;
+// The PR sits on the top chunk: a button with its number. It shows once the PR is open.
+function PrButton({ chunk }: { chunk: Chunk }) {
   return (
-    <a
-      href={chunk.pr}
-      target="_blank"
-      title={`Pull request ${prLabel(chunk.pr!)}`}
-      className="inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-xs transition-colors hover:bg-accent"
-      onClick={(e) => e.stopPropagation()}>
-      <GitPullRequest className="size-3.5" />
-      <span className="font-medium">{prLabel(chunk.pr!)}</span>
-      <span className={cn("flex items-center gap-1", state.className)}>
-        <span className="size-1.5 rounded-full bg-current" />
-        {state.label}
-      </span>
-    </a>
+    <Button asChild variant="ghost" size="sm">
+      <a href={chunk.pr} target="_blank" onClick={(e) => e.stopPropagation()}>
+        <GitPullRequest /> {prLabel(chunk.pr!)}
+      </a>
+    </Button>
   );
 }
 
-// The repo base, then the chunks in order, joined by a rail. The PR pill sits on the chunk that carries the PR.
+// The repo base, then the chunks in order, joined by a rail. The PR button sits on the chunk that carries the PR.
 export function ChunkList({ repo, chunks, merge, selected, onSelect, onSelectBase }: {
   repo: Repo;
   chunks: Chunk[];
@@ -116,7 +101,7 @@ export function ChunkList({ repo, chunks, merge, selected, onSelect, onSelectBas
                 ) : (
                   c.status && <ChunkStatusIcon status={c.status} />
                 )}
-                {c.pr && <PrPill chunk={c} />}
+                {c.pr && <PrButton chunk={c} />}
               </span>
             </div>
           </li>
