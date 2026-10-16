@@ -2,7 +2,7 @@ import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useStat
 import { AlertCircle, ArrowUp, ChevronDown, ChevronRight, ChevronsDownUp, ChevronsUpDown, RefreshCw } from "lucide-react";
 import { Spinner } from "./components/ui/spinner";
 import type { DashboardState } from "../state.ts";
-import { repoName } from "../repos.ts";
+import { holdingPr, repoName } from "../repos.ts";
 import type { DiffErrorBody, DiffFile, DiffHunk, DiffResponse, LineKind } from "../diff.ts";
 import { Badge } from "./components/ui/badge";
 import { Button } from "./components/ui/button";
@@ -323,7 +323,8 @@ export function CodeTab({ p, target, onTarget }: CodeTabProps) {
   const multi = p.repos.length > 1;
 
   const chunk = target.chunk ? p.chunks.find((c) => c.name === target.chunk) : undefined;
-  const pr = chunk?.pr ? prNumber(chunk.pr) : undefined;
+  const held = chunk ? holdingPr(p.chunks.filter((c) => c.repo === chunk.repo), chunk.name) : undefined;
+  const pr = held ? prNumber(held) : undefined;
   const datas = results.flatMap((r) => ("data" in r ? [r.data] : []));
   const additions = datas.reduce((n, d) => n + d.additions, 0);
   const deletions = datas.reduce((n, d) => n + d.deletions, 0);

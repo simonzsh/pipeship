@@ -5,7 +5,7 @@ import { join } from "node:path";
 import {
   addRepo, markRepoMerged, createPipeline, listStates, pipelineDir, pipelineStatus, readState, refreshSessionId, setMode, setStep, updateState, upsertChunk, waitForUser, type State,
 } from "../src/state.ts";
-import { chunksOf, diffRange, groupByPr, openPrChunks, repoName, repoStacks, sharesRepo, stackRefusal, topChunk } from "../src/repos.ts";
+import { chunksOf, diffRange, holdingPr, openPrChunks, repoName, repoStacks, sharesRepo, stackRefusal, topChunk } from "../src/repos.ts";
 import {
   archiveIfAllMerged, archivePipeline, DASHBOARD_PORT, deletePipeline, findRecipe, isAlive, mainService, normalizeRecipe, pickPorts, previewLines, resolveEnv,
   requestPreviewStart, savedRecipePath, startOrder, startPreview, stopPipeline, stopPreview, stopPreviewAndSettle, type Service, unarchivePipeline,
@@ -1889,19 +1889,16 @@ test("parseDiff handles no-newline markers, quoted and spaced paths, truncation,
   expect(() => parseDiff("@@ nonsense\n+++\n\0\ndiff --git\n@@ -x\n \\ \n")).not.toThrow();
 });
 
-test("groupByPr puts each chunk under the PR of the first chunk at or after it", () => {
+test("holdingPr gives a chunk its own PR, else the one of the first later chunk", () => {
   const c = (name: string, pr?: string) => ({ name, ...(pr && { pr }) }) as Chunk;
-  expect(groupByPr([])).toEqual([]);
-  // Before the PRs exist: one group, no head.
-  expect(groupByPr([c("a"), c("b")]).map((g) => [g.head?.name, g.chunks.map((x) => x.name)])).toEqual([[undefined, ["a", "b"]]]);
+  expect(holdingPr([], "a")).toBeUndefined();
+  // Before the PRs exist, and for an unknown chunk.
+  expect(holdingPr([c("a"), c("b")], "a")).toBeUndefined();
+  expect(holdingPr([c("a", "u")], "x")).toBeUndefined();
   // One PR per repo: the top chunk holds every chunk.
-  expect(groupByPr([c("a"), c("b"), c("c", "u3")]).map((g) => [g.head?.name, g.chunks.map((x) => x.name)])).toEqual([["c", ["a", "b", "c"]]]);
+  expect(["a", "b", "c"].map((n) => holdingPr([c("a"), c("b"), c("c", "u3")], n))).toEqual(["u3", "u3", "u3"]);
   // Two PRs, and a chunk added after the last one.
-  expect(groupByPr([c("a"), c("b", "u2"), c("c", "u3"), c("d")]).map((g) => [g.head?.name, g.chunks.map((x) => x.name)])).toEqual([
-    ["b", ["a", "b"]],
-    ["c", ["c"]],
-    [undefined, ["d"]],
-  ]);
+  expect(["a", "b", "c", "d"].map((n) => holdingPr([c("a"), c("b", "u2"), c("c", "u3"), c("d")], n))).toEqual(["u2", "u2", "u3", undefined]);
 });
 
 test("openPrChunks keeps the chunks with a PR not merged, closed ones included", () => {

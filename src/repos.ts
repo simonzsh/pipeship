@@ -88,23 +88,8 @@ export const stackRefusal = (repo: string, open: number) =>
 // "merged" is spelled out: importing MERGED from state.ts would pull node: into the browser.
 export const openPrChunks = (chunks: Chunk[]): Chunk[] => chunks.filter((c) => c.pr && c.status !== "merged");
 
-export interface PrGroup {
-  head?: Chunk; // the chunk that carries the PR; none for chunks not in a PR yet
-  chunks: Chunk[];
-}
-
-// A chunk belongs to the PR of the first chunk at or after it that has one: the PR holds the branches below it.
-// Chunks after the last PR have no PR yet.
-export function groupByPr(chunks: Chunk[]): PrGroup[] {
-  const groups: PrGroup[] = [];
-  let pending: Chunk[] = [];
-  for (const c of chunks) {
-    pending.push(c);
-    if (c.pr) {
-      groups.push({ head: c, chunks: pending });
-      pending = [];
-    }
-  }
-  if (pending.length) groups.push({ chunks: pending });
-  return groups;
+// The PR that holds a chunk: its own, else the one of the first later chunk (the PR sits on the top branch).
+export function holdingPr(chunks: Chunk[], name: string): string | undefined {
+  const i = chunks.findIndex((c) => c.name === name);
+  return i < 0 ? undefined : chunks.slice(i).find((c) => c.pr)?.pr;
 }

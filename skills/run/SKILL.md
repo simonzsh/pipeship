@@ -133,7 +133,7 @@ If the exception in **The checks** applies (CI does not run the full suite on PR
 
 1. Push only the top chunk branch of each repo: it holds the whole feature. The lower chunk branches stay local.
 2. For each repo, open ONE PR: `gh pr create --head <top branch> --base <that repo's base>`. Title from the ticket; body: what the feature does, a link to the ticket, the chunks in stack order each with its commits, the tests that ran, and a note that CI covers the rest.
-3. `pipeship chunk <id> <top chunk> --pr <url>`, for the top chunk only. Every chunk stays `done`: the dashboard groups the chunks under their PR, and sets every chunk of the repo to `merged` once that PR is merged. It also sets `closed` from GitHub.
+3. `pipeship chunk <id> <top chunk> --pr <url>`, for the top chunk only. Every chunk stays `done`: the dashboard shows the PR on that chunk, and sets every chunk of the repo to `merged` once that PR is merged. It also sets `closed` from GitHub.
 
 With several repos, once every PR exists, add a "Related PRs" list with the other repos' PRs to each PR body (`gh pr edit <url> --body-file <file>`).
 
