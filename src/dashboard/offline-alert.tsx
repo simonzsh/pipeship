@@ -16,13 +16,13 @@ export function OfflineAlert({ live }: { live: boolean }) {
   return (
     <div
       role="alert"
-      className="flex animate-pulse items-center gap-2.5 border-t border-destructive/40 bg-destructive/15 px-3 py-2.5 text-sm font-medium text-destructive"
+      className="flex items-center gap-2.5 border-t border-destructive/40 bg-destructive/15 px-3 py-2.5 text-sm font-medium text-destructive"
     >
       <span className="relative flex size-5 shrink-0 items-center justify-center">
         <span className="absolute inline-flex size-full animate-ping rounded-full bg-destructive/40" />
         <TriangleAlert className="relative size-3.5" />
       </span>
-      Attention, dashboard offline
+      Dashboard offline
     </div>
   );
 }
