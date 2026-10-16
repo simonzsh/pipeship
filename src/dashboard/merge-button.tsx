@@ -1,7 +1,7 @@
 import { GitMerge } from "lucide-react";
 import { useState } from "react";
-import { openPrChunks, stackRefusal } from "../repos.ts";
-import { CLOSED, type Chunk, type MergeRun } from "../state.ts";
+import { CLOSED, openPrChunks, stackRefusal } from "../repos.ts";
+import type { Chunk, MergeRun } from "../state.ts";
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription,
   AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger,
@@ -47,36 +47,33 @@ export function MergeButton({ id, repo, chunks, base, merge, finished }: {
   // The server refuses a closed PR and a stack of 2 or more: hide the button when only closed PRs are left,
   // disable it for a stack (a closed PR among 2 or more is a stack too).
   if (!finished || todo.every((c) => c.status === CLOSED)) return null;
-  const stack = todo.length > 1 ? stackRefusal(repo, todo.length) : undefined;
-  const failure = (stack || error || merge?.status === "failed") && (
-    <span className="flex min-w-0 items-center text-xs text-destructive" title={stack ?? error ?? merge?.error}>
-      <span className="max-w-72 truncate">{stack ?? error ?? `Merge stopped: ${merge?.error}`}</span>
+  const refusal = todo.length > 1 ? stackRefusal(repo, todo.length) : undefined;
+  const message = refusal ?? error ?? (merge?.status === "failed" ? `Merge stopped: ${merge.error}` : undefined);
+  const failure = message && (
+    <span className="flex min-w-0 items-center text-xs text-destructive" title={message}>
+      <span className="max-w-72 truncate">{message}</span>
     </span>
   );
-  const bottom = prNumber(todo[0]!.pr!);
-  const target = base ?? "its base branch";
-  const into = base ? `Merge into ${base}` : "Merge";
-  if (stack) {
+  const button = (
+    <Button variant="outline" size="xs" disabled={!!refusal} title={refusal}>
+      <GitMerge className={ICON} /> {base ? `Merge into ${base}` : "Merge"}
+    </Button>
+  );
+  if (refusal) {
     return (
       <>
         {failure}
-        <Button variant="outline" size="xs" disabled title={stack}>
-          <GitMerge className={ICON} /> {into}
-        </Button>
+        {button}
       </>
     );
   }
   return (
     <AlertDialog>
       {failure}
-      <AlertDialogTrigger asChild>
-        <Button variant="outline" size="xs">
-          <GitMerge className={ICON} /> {into}
-        </Button>
-      </AlertDialogTrigger>
+      <AlertDialogTrigger asChild>{button}</AlertDialogTrigger>
       <AlertDialogContent>
         <AlertDialogHeader>
-          <AlertDialogTitle>Merge #{bottom} into {target}?</AlertDialogTitle>
+          <AlertDialogTitle>Merge #{prNumber(todo[0]!.pr!)} into {base ?? "its base branch"}?</AlertDialogTitle>
           <AlertDialogDescription>
             Merges the PR once its checks pass.
           </AlertDialogDescription>

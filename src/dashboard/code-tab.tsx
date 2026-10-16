@@ -2,7 +2,7 @@ import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useStat
 import { AlertCircle, ArrowUp, ChevronDown, ChevronRight, ChevronsDownUp, ChevronsUpDown, FlaskConical, RefreshCw } from "lucide-react";
 import { Spinner } from "./components/ui/spinner";
 import type { DashboardState } from "../state.ts";
-import { holdingPr, repoName } from "../repos.ts";
+import { chunksOf, holdingPr, repoName } from "../repos.ts";
 import type { DiffErrorBody, DiffFile, DiffHunk, DiffResponse, LineKind } from "../diff.ts";
 import { Badge } from "./components/ui/badge";
 import { Button } from "./components/ui/button";
@@ -30,13 +30,12 @@ export interface RefreshKeys {
 function useDiff(id: string, requests: DiffRequest[], keys: RefreshKeys): { results: Result[]; fetching: boolean } {
   const [results, setResults] = useState<Record<string, Result>>({});
   const [fetching, setFetching] = useState(false);
-  const prev = useRef({ ...keys, urlsKey: "" });
+  const lastManual = useRef(keys.manual);
   const urls = requests.map((r) => diffUrl(id, r));
   const urlsKey = urls.join("\n");
   useEffect(() => {
-    const last = prev.current;
-    const force = keys.manual !== last.manual;
-    prev.current = { ...keys, urlsKey };
+    const force = keys.manual !== lastManual.current;
+    lastManual.current = keys.manual;
     const ctl = new AbortController();
     setFetching(true);
     // An old error must not stick: the revalidation below replaces it.
@@ -333,7 +332,7 @@ export function CodeTab({ p, target, onTarget }: CodeTabProps) {
   const multi = p.repos.length > 1;
 
   const chunk = target.chunk ? p.chunks.find((c) => c.name === target.chunk) : undefined;
-  const held = chunk ? holdingPr(p.chunks.filter((c) => c.repo === chunk.repo), chunk.name) : undefined;
+  const held = chunk ? holdingPr(chunksOf(p, chunk.repo), chunk.name) : undefined;
   const pr = held ? prNumber(held) : undefined;
   const datas = results.flatMap((r) => ("data" in r ? [r.data] : []));
   const additions = datas.reduce((n, d) => n + d.additions, 0);

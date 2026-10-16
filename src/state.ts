@@ -1,7 +1,9 @@
 import { closeSync, existsSync, mkdirSync, openSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
-import { assertRepoName, chunksOf, findRepo, repoName } from "./repos.ts";
+import { allMerged, assertRepoName, chunksOf, CLOSED, findRepo, MERGED, repoName } from "./repos.ts";
+
+export { allMerged, CLOSED, MERGED };
 
 export const STEPS = ["explore", "questions", "plan", "implement", "review", "preview"] as const;
 export type StepName = (typeof STEPS)[number];
@@ -24,23 +26,12 @@ export interface Chunk {
   pr?: string;
 }
 
-// Chunk.status stays free text; the merge engine writes this value.
-export const MERGED = "merged";
-
-// Written by the dashboard's PR sync for a PR closed without merge.
-export const CLOSED = "closed";
-
-// True when at least one PR is merged and every other PR is merged or closed. Server and dashboard share it.
-export function allMerged(p: Pick<State, "chunks">): boolean {
-  const prChunks = p.chunks.filter((c) => c.pr && c.status !== CLOSED);
-  return prChunks.length > 0 && prChunks.every((c) => c.status === MERGED);
-}
-
 // One PR per repo: once the repo's PRs are all merged (closed ones aside), its chunks without a PR are merged too.
-// Mutates `s` (call it inside a lock); returns the names it changed.
+// Mutates `s`; returns the names it changed.
 export function markRepoMerged(s: State, repo: string): string[] {
-  if (!allMerged({ chunks: chunksOf(s, repo) })) return [];
-  const changed = chunksOf(s, repo).filter((c) => !c.pr && c.status === "done");
+  const chunks = chunksOf(s, repo);
+  if (!allMerged({ chunks })) return [];
+  const changed = chunks.filter((c) => !c.pr && c.status === "done");
   for (const c of changed) c.status = MERGED;
   return changed.map((c) => c.name);
 }
@@ -217,6 +208,8 @@ function upgrade(raw: Raw): State {
     }
   }
   if (preview) delete preview.worktree;
+  // Applied on every read, so a merged PR's chunks follow it whoever wrote the merge (dashboard, sync, old code).
+  for (const r of raw.repos) markRepoMerged(raw, r.path);
   // The status used to be stored: archived and waiting were facts held only there.
   if (raw.status === "archived" && !raw.archivedAt) raw.archivedAt = raw.updatedAt;
   if (raw.status === "waiting_for_user" && !raw.waiting) raw.waiting = { step: raw.step, ...(raw.waitingFor && { reason: raw.waitingFor }) };
@@ -478,9 +471,6 @@ export function upsertChunk(id: string, chunk: ChunkInput): State {
     }
     const repo = chunk.repo ? lookupRepo(s, chunk.repo).path : existing.repo;
     if (repo !== existing.repo) throw new Error(`chunk "${chunk.name}" belongs to ${repoName(existing.repo)}`);
-    // A feedback PR on a merged repo must be polled again: its chunk leaves merged/closed.
-    const reopened = chunk.pr && chunk.pr !== existing.pr && !chunk.status && (existing.status === MERGED || existing.status === CLOSED);
     Object.assign(existing, chunk, { repo });
-    if (reopened) existing.status = "done";
   });
 }

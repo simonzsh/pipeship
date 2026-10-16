@@ -1,4 +1,5 @@
-import { defaultRunner, parsePrUrl, type Runner } from "./merge.ts";
+import { defaultRunner, errorMessage, parsePrUrl, prState, type Runner } from "./merge.ts";
+import { GH_TIMEOUT_MS } from "./pr-sync.ts";
 import { chunksOf, repoName, topChunk } from "./repos.ts";
 import { readState, upsertChunk, type Chunk, type Repo, type State } from "./state.ts";
 
@@ -46,70 +47,62 @@ async function push(run: Runner, cwd: string, branch: string): Promise<void> {
 // A crash after `gh pr create` leaves an open PR the state does not know: take it over.
 async function createPr(run: Runner, cwd: string, branch: string, args: string[]): Promise<string> {
   const created = await run("gh", ["pr", "create", "--head", branch, ...args], { cwd });
-  const text = `${created.stdout}\n${created.stderr}`;
-  if (created.code === 0 || !/already exists/.test(text)) {
+  const failed = () => new Error(`gh pr create ${branch} failed: ${lastLines(created.stderr || created.stdout)}`);
+  if (created.code === 0) {
     const url = created.stdout.match(PR_URL)?.[0];
-    if (created.code !== 0 || !url) throw new Error(`gh pr create ${branch} failed: ${lastLines(created.stderr || created.stdout)}`);
+    if (!url) throw failed();
     return url;
   }
+  const text = `${created.stdout}\n${created.stderr}`;
+  if (!/already exists/.test(text)) throw failed();
   const known = text.match(PR_URL)?.[0];
   if (known) return known;
   const list = await run("gh", ["pr", "list", "--head", branch, "--state", "open", "--json", "url"], { cwd });
   const url = list.code === 0 ? (JSON.parse(list.stdout) as { url: string }[])[0]?.url : undefined;
-  if (!url) throw new Error(`gh pr create ${branch} failed: ${lastLines(created.stderr)}`);
+  if (!url) throw failed();
   return url;
 }
 
 // Pushes the top chunk branch of each repo and opens its PR, or only pushes when that PR is still open.
 // Returns one line per repo.
 export async function openPrs(id: string, opts: PrOptions = {}, run: Runner = defaultRunner): Promise<string[]> {
-  const out: string[] = [];
-  try {
-    return await openAll(id, opts, run, out);
-  } catch (err) {
-    // The PRs opened before the failure are recorded, but the caller must still see their URLs.
-    const message = err instanceof Error ? err.message : String(err);
-    throw new Error([...out, message].join("\n"));
-  }
-}
-
-async function openAll(id: string, opts: PrOptions, run: Runner, out: string[]): Promise<string[]> {
   const s = readState(id);
+  const out: string[] = [];
   const prs: { url: string; body?: string }[] = [];
-  const gh = (cwd: string, args: string[]) => run("gh", args, { cwd });
-  for (const repo of s.repos) {
-    const name = repoName(repo.path);
-    const top = topChunk(s, repo.path);
-    if (!top?.branch) {
-      out.push(`${name}: no chunk branch, skipped`);
-      continue;
-    }
-    if ((await run("git", ["remote", "get-url", "origin"], { cwd: repo.path })).code !== 0) {
-      out.push(`${name}: no remote, skipped`);
-      continue;
-    }
-    // With lease: a restack after feedback rewrites the branch, but nobody else's push is lost.
-    await push(run, repo.path, top.branch);
-    if (top.pr) {
-      const view = await gh(repo.path, ["pr", "view", top.pr, "--json", "state"]);
-      if (view.code !== 0) throw new Error(`gh pr view ${top.pr} failed: ${lastLines(view.stderr)}`);
-      if ((JSON.parse(view.stdout) as { state: string }).state === "OPEN") {
+  try {
+    for (const repo of s.repos) {
+      const name = repoName(repo.path);
+      const top = topChunk(s, repo.path);
+      if (!top?.branch) {
+        out.push(`${name}: no chunk branch, skipped`);
+        continue;
+      }
+      if ((await run("git", ["remote", "get-url", "origin"], { cwd: repo.path })).code !== 0) {
+        out.push(`${name}: no remote, skipped`);
+        continue;
+      }
+      // With lease: a restack after feedback rewrites the branch, but nobody else's push is lost.
+      await push(run, repo.path, top.branch);
+      if (top.pr && (await prState(run, top.pr, repo.path, GH_TIMEOUT_MS)) === "OPEN") {
         prs.push({ url: top.pr });
         out.push(`${name}: pushed ${top.branch}, PR already open: ${top.pr}`);
         continue;
       }
+      if (!opts.title) throw new Error(`${name}: a new PR needs --title`);
+      if (opts.body === undefined) throw new Error(`${name}: a new PR needs --body-file`);
+      if (!repo.base) throw new Error(`${name} has no base branch`);
+      const body = `${opts.body.trim()}\n\n${await chunksSection(run, s, repo, top)}`;
+      const url = await createPr(run, repo.path, top.branch, ["--base", repo.base, "--title", opts.title, "--body", body]);
+      // Back to done from merged or closed: the sync polls the new PR.
+      upsertChunk(id, { name: top.name, pr: url, status: "done" });
+      prs.push({ url, body });
+      out.push(`${name}: opened ${url}`);
     }
-    if (!opts.title) throw new Error(`${name}: a new PR needs --title`);
-    if (opts.body === undefined) throw new Error(`${name}: a new PR needs --body-file`);
-    if (!repo.base) throw new Error(`${name} has no base branch`);
-    const body = `${opts.body.trim()}\n\n${await chunksSection(run, s, repo, top)}`;
-    const url = await createPr(run, repo.path, top.branch, ["--base", repo.base, "--title", opts.title, "--body", body]);
-    // A new URL on a merged or closed chunk sets it back to done (see upsertChunk).
-    upsertChunk(id, { name: top.name, pr: url });
-    prs.push({ url, body });
-    out.push(`${name}: opened ${url}`);
+    if (prs.length >= 2 && prs.some((p) => p.body !== undefined)) await linkPrs(s.repos[0]!.path, prs, run);
+  } catch (err) {
+    // The PRs opened before the failure are recorded, but the caller must still see their URLs.
+    throw new Error([...out, errorMessage(err)].join("\n"));
   }
-  if (prs.length >= 2 && prs.some((p) => p.body !== undefined)) await linkPrs(s.repos[0]!.path, prs, run);
   return out;
 }
 

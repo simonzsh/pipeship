@@ -5,7 +5,7 @@ import { join } from "node:path";
 import {
   addRepo, markRepoMerged, createPipeline, listStates, pipelineDir, pipelineStatus, readState, refreshSessionId, setMode, setStep, updateState, upsertChunk, waitForUser, type State,
 } from "../src/state.ts";
-import { chunksOf, diffRange, holdingPr, openPrChunks, repoName, repoStacks, sharesRepo, stackRefusal, topChunk } from "../src/repos.ts";
+import { chunksOf, diffRange, holdingPr, openPrChunks, repoName, repoChunks, sharesRepo, stackRefusal, topChunk } from "../src/repos.ts";
 import {
   archiveIfAllMerged, archivePipeline, DASHBOARD_PORT, deletePipeline, findRecipe, isAlive, killGroup, mainService, normalizeRecipe, pickPorts, previewLines, processStart, resolveEnv,
   requestPreviewStart, savedRecipePath, startOrder, startPreview, stopPipeline, stopPreview, stopPreviewAndSettle, type Service, unarchivePipeline, waitReady,
@@ -14,7 +14,7 @@ import { diffTotals, parseDiff } from "../src/diff.ts";
 import { baseRef, DiffError, gitDiff, headRef, pipelineDiff, resetFetchCache } from "../src/diff-git.ts";
 import { DEFAULT_PORT, readDashboardPid, requestDashboardUpdate, serve, spawnDashboard } from "../src/server.ts";
 import {
-  classifyPr, defaultRunner, DEFAULT_LIMITS, failStaleMerges, isMergeRunning, mergeStack, MergeError, resolveMergeRepo, startMerge, type MergeDeps, type PrView, type Runner, type RunResult,
+  classifyPr, defaultRunner, DEFAULT_LIMITS, failStaleMerges, isMergeRunning, mergeRepo, MergeError, resolveMergeRepo, startMerge, type MergeDeps, type PrView, type Runner, type RunResult,
 } from "../src/merge.ts";
 import { startPrSync, syncPrStatuses } from "../src/pr-sync.ts";
 import { openPrs } from "../src/pr.ts";
@@ -1082,12 +1082,14 @@ function fakeGh(stack: ReturnType<typeof makeStack>, count: number) {
   return { prs, calls, deps, gate, refuse, gitCalls };
 }
 
+// Clears the PRs of chunks c1..cn.
+const noPrs = (s: ReturnType<typeof makeStack>, n: number) => {
+  for (let i = 1; i <= n; i++) upsertChunk(s.id, { name: `c${i}`, pr: undefined });
+  return s;
+};
+
 // One PR per repo: only the top chunk keeps its PR.
-function makeFeature(n: number, commits = 1, name = "repo") {
-  const stack = makeStack(n, commits, name);
-  for (let i = 1; i < n; i++) upsertChunk(stack.id, { name: `c${i}`, pr: undefined });
-  return stack;
-}
+const makeFeature = (n: number) => noPrs(makeStack(n), n - 1);
 
 // The top PR targets main: its commits hold the whole feature.
 function featureGh(stack: ReturnType<typeof makeStack>, n: number) {
@@ -1137,11 +1139,6 @@ function prGh() {
   };
   return { calls, states, bodies, created, listed, run };
 }
-
-const noPrs = (s: ReturnType<typeof makeStack>, n: number) => {
-  for (let i = 1; i <= n; i++) upsertChunk(s.id, { name: `c${i}`, pr: undefined });
-  return s;
-};
 
 test("pr: one repo pushes the top branch, opens one PR on the base and records it on the top chunk", async () => {
   const stack = noPrs(makeStack(2), 2);
@@ -1313,7 +1310,7 @@ test("base: one PR is merged into main with a merge commit, a single gh call and
   const stack = makeStack(1);
   const gh = fakeGh(stack, 1);
   const before = sh(stack.origin, "rev-parse", "c1");
-  await mergeStack(stack.id, gh.deps);
+  await mergeRepo(stack.id, gh.deps);
   const s = readState(stack.id);
   expect(gh.calls).toEqual(["merge 1 --merge"]);
   noWrites(gh);
@@ -1330,14 +1327,14 @@ const remoteBranches = (origin: string) => sh(origin, "branch", "--format=%(refn
 test("base: with deleteBranches, the branch of the PR goes, the base stays", async () => {
   const stack = makeFeature(2);
   const gh = featureGh(stack, 2);
-  await mergeStack(stack.id, gh.deps, undefined, true);
+  await mergeRepo(stack.id, gh.deps, undefined, true);
   expect(readState(stack.id).merges?.[stack.clone]).toMatchObject({ status: "done", message: "merged #2 into main" });
   expect(remoteBranches(stack.origin)).toEqual(["c1", "main"]);
 });
 
 test("base: without deleteBranches, the remote branches stay", async () => {
   const stack = makeStack(1);
-  await mergeStack(stack.id, fakeGh(stack, 1).deps);
+  await mergeRepo(stack.id, fakeGh(stack, 1).deps);
   expect(remoteBranches(stack.origin)).toEqual(["c1", "main"]);
 });
 
@@ -1347,13 +1344,13 @@ test("base: a branch already deleted is no error, any other failure only shows i
   // c2 vanishes just before the cleanup, like a branch GitHub deleted.
   const ghRun = gh.deps.run!;
   gh.deps.run = (c, a, o) => (a[0] === "push" && a[2] === "--delete" && a[3] === "c2" ? (sh(stack.origin, "branch", "-D", "c2"), ghRun(c, a, o)) : ghRun(c, a, o));
-  await mergeStack(stack.id, gh.deps, undefined, true);
+  await mergeRepo(stack.id, gh.deps, undefined, true);
   expect(readState(stack.id).merges?.[stack.clone]?.message).toBe("merged #2 into main");
   const other = makeStack(1);
   const fake = fakeGh(other, 1);
   const run = fake.deps.run!;
   const deps = { ...fake.deps, run: (c: string, a: string[], o: { cwd: string }) => (a[0] === "push" ? Promise.resolve({ code: 1, stdout: "", stderr: "denied\n" }) : run(c, a, o)) };
-  await mergeStack(other.id, deps, undefined, true);
+  await mergeRepo(other.id, deps, undefined, true);
   expect(readState(other.id).merges?.[other.clone]).toMatchObject({ status: "done", message: "merged #1 into main; could not delete c1" });
 });
 
@@ -1365,10 +1362,10 @@ test("startMerge: deleteBranches must be a boolean", () => {
 test("merge engine: finishing the last PR archives a done pipeline, not a running one", async () => {
   const stack = makeStack(1);
   finishSteps(stack.id);
-  await mergeStack(stack.id, fakeGh(stack, 1).deps);
+  await mergeRepo(stack.id, fakeGh(stack, 1).deps);
   expect(readState(stack.id).status).toBe("archived");
   const busy = makeStack(1);
-  await mergeStack(busy.id, fakeGh(busy, 1).deps);
+  await mergeRepo(busy.id, fakeGh(busy, 1).deps);
   expect(readState(busy.id).status).toBe("running");
 });
 
@@ -1376,14 +1373,14 @@ test("base: a failing check stops the merge, and a new run merges once it passes
   const stack = makeStack(1);
   const gh = fakeGh(stack, 1);
   gh.prs[1]!.checks = [{ name: "lint", status: "COMPLETED", conclusion: "FAILURE" }];
-  await mergeStack(stack.id, gh.deps);
+  await mergeRepo(stack.id, gh.deps);
   expect(readState(stack.id).merges?.[stack.clone]).toMatchObject({ status: "failed", current: "c1" });
   expect(readState(stack.id).merges?.[stack.clone]?.error).toContain("lint");
   expect(gh.calls).toEqual([]);
   expect(sh(stack.origin, "rev-list", "--count", "main")).toBe("1");
 
   gh.prs[1]!.checks = [];
-  await mergeStack(stack.id, gh.deps);
+  await mergeRepo(stack.id, gh.deps);
   expect(readState(stack.id).merges?.[stack.clone]?.status).toBe("done");
   expect(gh.calls).toEqual(["merge 1 --merge"]);
   noWrites(gh);
@@ -1393,7 +1390,7 @@ test("base: checks that stay pending stop the merge after 15 min", async () => {
   const stack = makeStack(1);
   const gh = fakeGh(stack, 1);
   gh.prs[1]!.checks = [{ name: "ci", status: "IN_PROGRESS" }];
-  await mergeStack(stack.id, gh.deps);
+  await mergeRepo(stack.id, gh.deps);
   expect(readState(stack.id).merges?.[stack.clone]?.error).toBe("checks still running on #1 after 15 min");
   expect(gh.calls).toEqual([]);
 });
@@ -1403,7 +1400,7 @@ test("base: a PR that targets another branch than the pipeline base merges into 
   const gh = fakeGh(stack, 1);
   gh.prs[1]!.base = "develop";
   sh(stack.origin, "branch", "develop", "main");
-  await mergeStack(stack.id, gh.deps);
+  await mergeRepo(stack.id, gh.deps);
   expect(readState(stack.id).merges?.[stack.clone]).toMatchObject({ status: "done", message: "merged #1 into develop" });
   expect(gh.calls).toEqual(["merge 1 --merge"]);
 });
@@ -1412,13 +1409,13 @@ test("merge: waits until GitHub computes mergeable, and gives up after 2 min", a
   const stack = makeStack(1);
   const gh = fakeGh(stack, 1);
   gh.prs[1]!.view = (n) => (n <= 2 ? { mergeable: "UNKNOWN" } : {});
-  await mergeStack(stack.id, gh.deps);
+  await mergeRepo(stack.id, gh.deps);
   expect(readState(stack.id).merges?.[stack.clone]?.status).toBe("done");
 
   const stuck = makeStack(1);
   const ghStuck = fakeGh(stuck, 1);
   ghStuck.prs[1]!.mergeable = "UNKNOWN";
-  await mergeStack(stuck.id, ghStuck.deps);
+  await mergeRepo(stuck.id, ghStuck.deps);
   expect(readState(stuck.id).merges?.[stuck.clone]?.error).toContain("after 2 min");
   expect(ghStuck.calls).toEqual([]);
 });
@@ -1529,7 +1526,7 @@ test("merge: every poll of a long wait refreshes updatedAt", async () => {
       s.merges![stack.clone]!.updatedAt = "2000-01-01T00:00:00.000Z";
     });
   };
-  await mergeStack(stack.id, { ...gh.deps, sleep });
+  await mergeRepo(stack.id, { ...gh.deps, sleep });
   expect(seen).toHaveLength(4);
   expect(Math.min(...seen)).toBeGreaterThan(Date.now() - 60_000);
 });
@@ -1540,7 +1537,7 @@ test("merge: another merge failure does not fall back to --squash", async () => 
   const run = gh.deps.run!;
   gh.deps.run = async (cmd, args, opts) =>
     args[1] === "merge" ? { code: 1, stdout: "", stderr: "GraphQL: base branch was modified\n" } : run(cmd, args, opts);
-  await mergeStack(stack.id, gh.deps);
+  await mergeRepo(stack.id, gh.deps);
   expect(readState(stack.id).merges?.[stack.clone]).toMatchObject({ status: "failed", error: "gh pr merge #2 failed: GraphQL: base branch was modified" });
 });
 
@@ -1556,7 +1553,7 @@ test("merge: a failed check, a draft, a conflict or changes requested still bloc
     const stack = makeFeature(2);
     const gh = featureGh(stack, 2);
     set(gh.prs[2]!);
-    await mergeStack(stack.id, gh.deps);
+    await mergeRepo(stack.id, gh.deps);
     expect(readState(stack.id).merges?.[stack.clone]).toMatchObject({ status: "failed", error });
     expect(gh.calls).toEqual([]);
   }
@@ -1566,14 +1563,14 @@ test("merge: still waits while mergeable is UNKNOWN, and gives up after 2 min", 
   const stack = makeFeature(2);
   const gh = featureGh(stack, 2);
   gh.prs[2]!.view = (n) => (n <= 3 ? { mergeable: "UNKNOWN" } : {});
-  await mergeStack(stack.id, gh.deps);
+  await mergeRepo(stack.id, gh.deps);
   expect(readState(stack.id).merges?.[stack.clone]?.status).toBe("done");
   expect(gh.prs[2]!.views).toBeGreaterThanOrEqual(4);
 
   const stuck = makeFeature(2);
   const ghStuck = featureGh(stuck, 2);
   ghStuck.prs[2]!.mergeable = "UNKNOWN";
-  await mergeStack(stuck.id, ghStuck.deps);
+  await mergeRepo(stuck.id, ghStuck.deps);
   expect(readState(stuck.id).merges?.[stuck.clone]?.error).toContain("after 2 min");
   expect(ghStuck.calls).toEqual([]);
 });
@@ -1588,7 +1585,7 @@ test("merge: a repo with 2 open PRs is refused with a 409 and a failed run, and 
   } catch (err) {
     expect([(err as MergeError).status, (err as MergeError).message]).toEqual([409, text]);
   }
-  await mergeStack(stack.id, gh.deps);
+  await mergeRepo(stack.id, gh.deps);
   expect(readState(stack.id).merges?.[stack.clone]).toMatchObject({ status: "failed", error: text });
   expect(gh.calls).toEqual([]);
 });
@@ -1611,7 +1608,7 @@ test("the merge route rejects a mode, and a run merges one open PR", async () =>
 test("one PR per repo: the top PR is merged with a merge commit and every chunk becomes merged", async () => {
   const stack = makeFeature(3);
   const gh = featureGh(stack, 3);
-  await mergeStack(stack.id, gh.deps, undefined, true);
+  await mergeRepo(stack.id, gh.deps, undefined, true);
   expect(readState(stack.id).merges?.[stack.clone]).toMatchObject({ status: "done", message: "merged #3 into main" });
   expect(gh.calls).toEqual(["merge 3 --merge"]);
   expect(chunkStatuses(stack.id)).toEqual(["merged", "merged", "merged"]);
@@ -1622,7 +1619,7 @@ test("one PR per repo: the top PR is merged with a merge commit and every chunk 
 test("one PR per repo: deletePipeline removes the local branches of every chunk", async () => {
   const stack = makeFeature(2);
   finishSteps(stack.id);
-  await mergeStack(stack.id, featureGh(stack, 2).deps);
+  await mergeRepo(stack.id, featureGh(stack, 2).deps);
   stack.worktrees.forEach((wt) => sh(stack.clone, "worktree", "remove", "--force", wt));
   await deletePipeline(stack.id);
   const branches = sh(stack.clone, "branch", "--format=%(refname:short)").split("\n");
@@ -1641,7 +1638,7 @@ test("merge: the final merge does not fall back to squash when merge commits are
   const stack = makeFeature(2);
   const gh = featureGh(stack, 2);
   gh.refuse.final = true;
-  await mergeStack(stack.id, gh.deps);
+  await mergeRepo(stack.id, gh.deps);
   const run = readState(stack.id).merges?.[stack.clone];
   expect(run?.status).toBe("failed");
   expect(run?.error).toBe('merge commits are not allowed on o/r: enable "Allow merge commits" in the GitHub settings, or merge #2 by hand');
@@ -1855,7 +1852,7 @@ test("repo helpers", () => {
   expect(topChunk(state, "/x/none")).toBeUndefined();
   expect(sharesRepo(state, { repos: [{ path: "/x/b" }] })).toBe(true);
   expect(sharesRepo(state, { repos: [{ path: "/y/b" }] })).toBe(false);
-  const stacks = repoStacks(state);
+  const stacks = repoChunks(state);
   expect(stacks.map((x) => [x.name, x.chunks.length, x.merge !== undefined])).toEqual([["a", 3, false], ["b", 1, true]]);
 });
 
@@ -2966,43 +2963,34 @@ syncTest("pr sync: a PR merged elsewhere marks every chunk of its repo merged", 
   const logs: string[] = [];
   await syncPrStatuses({ run: syncGh({ [prUrl(160)]: { state: "MERGED" } }).run, log: (l) => logs.push(l) });
   expect(chunkStatuses(id)).toEqual(["merged", "merged", "merged"]);
-  expect(logs.filter((l) => l.includes("->"))).toEqual([`pr sync: ${id}/c3 -> merged`, `pr sync: ${id}/c1 -> merged`, `pr sync: ${id}/c2 -> merged`]);
+  expect(logs.filter((l) => l.includes("->"))).toEqual([`pr sync: ${id}/c3 -> merged`]);
   expect(readState(id).status).toBe("archived");
 });
 
-syncTest("pr sync: lower chunks left done after the PR chunk merged catch up", async () => {
-  const id = syncPipeline("sync catch up", [undefined, undefined, 162]);
-  finishSteps(id);
+syncTest("pr sync: a pipeline with no PR left to poll is not read under the lock nor sent to gh", async () => {
+  const id = syncPipeline("sync nothing to poll", [undefined, undefined, 162]);
   upsertChunk(id, { name: "c3", status: "merged" });
   const logs: string[] = [];
   const gh = syncGh({});
   await syncPrStatuses({ run: gh.run, log: (l) => logs.push(l) });
   expect(gh.calls).toEqual([]);
-  expect(chunkStatuses(id)).toEqual(["merged", "merged", "merged"]);
-  expect(logs).toEqual([`pr sync: ${id}/c1 -> merged`, `pr sync: ${id}/c2 -> merged`]);
-  expect(readState(id).status).toBe("archived");
+  expect(logs).toEqual([]);
 });
 
-syncTest("pr sync: a repo with a merge running keeps its lower chunks", async () => {
-  const id = syncPipeline("sync catch up busy", [undefined, 163]);
+syncTest("state: chunks without a PR follow the merged PR of their repo on every read", async () => {
+  const id = syncPipeline("merged on read", [undefined, 163]);
+  expect(chunkStatuses(id)).toEqual(["done", "done"]);
   upsertChunk(id, { name: "c2", status: "merged" });
-  updateState(id, (s) => {
-    s.merges = { [repo]: { status: "running", repo, startedAt: "t", updatedAt: "t" } };
-  });
-  await syncPrStatuses({ run: syncGh({}).run, log: () => {} });
-  expect(chunkStatuses(id)).toEqual(["done", "merged"]);
+  expect(chunkStatuses(id)).toEqual(["merged", "merged"]);
 });
 
-syncTest("upsertChunk: a new PR on a merged or closed chunk sets it back to done", async () => {
-  const id = syncPipeline("upsert reopen", [170]);
+syncTest("upsertChunk: a new PR keeps the status unless one is given", async () => {
+  const id = syncPipeline("upsert pr", [170]);
   upsertChunk(id, { name: "c1", status: "merged" });
   upsertChunk(id, { name: "c1", pr: prUrl(171) });
+  expect(chunkStatuses(id)).toEqual(["merged"]);
+  upsertChunk(id, { name: "c1", pr: prUrl(172), status: "done" });
   expect(chunkStatuses(id)).toEqual(["done"]);
-  upsertChunk(id, { name: "c1", status: "closed" });
-  upsertChunk(id, { name: "c1", pr: prUrl(172), status: "merged" });
-  expect(chunkStatuses(id)).toEqual(["merged"]);
-  upsertChunk(id, { name: "c1", pr: prUrl(172) });
-  expect(chunkStatuses(id)).toEqual(["merged"]);
 });
 
 syncTest("pr sync: an open top PR leaves the chunks without a PR untouched", async () => {

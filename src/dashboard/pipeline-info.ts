@@ -44,7 +44,7 @@ export function displaySteps(p: Pick<State, "steps" | "status" | "waiting">): Di
   });
 }
 
-export { allMerged } from "../state.ts";
+export { allMerged } from "../repos.ts";
 
 export function finished(p: Pick<State, "status">): boolean {
   return p.status === "ready" || p.status === "done" || p.status === "failed" || p.status === "stopped" || p.status === "archived";

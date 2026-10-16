@@ -1,7 +1,7 @@
 import { ArrowLeft, FolderGit2, GitMerge, Zap } from "lucide-react";
 import { useState } from "react";
-import { mergeRunning, repoStacks } from "../repos.ts";
-import type { DashboardState, MergeRun } from "../state.ts";
+import { mergeRunning, repoChunks } from "../repos.ts";
+import type { DashboardState } from "../state.ts";
 import { PipelineActions, StartPreviewButton } from "./action-button";
 import { CodeTab, type DiffTarget } from "./code-tab";
 import { Badge } from "./components/ui/badge";
@@ -21,52 +21,43 @@ import { shortRepo } from "./utils";
 export function PipelineDetail({ p, onBack }: { p: DashboardState; onBack: () => void }) {
   const [target, setTarget] = useState<DiffTarget>({});
   const [tab, setTab] = useState("test");
-  const stacks = repoStacks(p);
+  const repos = repoChunks(p);
   const multi = p.repos.length > 1;
   const merging = mergeRunning(p);
   const done = finished(p);
   // The server knows a dashboard start is in flight; a CLI start only shows as services still without a pid.
   const starting = p.previewStarting || (p.preview?.services?.some((s) => s.pid === undefined) ?? false);
   const repoLabel =
-    p.repos.length === 0 ? "" : multi ? stacks.map((st) => st.name).join(" + ") : shortRepo(p.repos[0]!.path);
+    p.repos.length === 0 ? "" : multi ? repos.map((r) => r.name).join(" + ") : shortRepo(p.repos[0]!.path);
   const showTicket = p.ticket.links.length > 0 || (p.ticket.source && p.ticket.source !== "text");
   const select = (t: DiffTarget) => {
     setTarget(t);
     setTab("code");
   };
-  // The chunks of one repo, or a hint when it has no branch yet.
-  const tree = (repo: DashboardState["repos"][number], chunks: DashboardState["chunks"], merge: MergeRun | undefined) => (
-    <>
-      {chunks.length > 0 ? (
-        <ChunkList repo={repo} chunks={chunks} merge={merge} selected={target.chunk} onSelect={(chunk) => select({ chunk })} onSelectBase={() => select({})} />
-      ) : (
-        <p className="text-xs text-muted-foreground">No branch yet</p>
-      )}
-    </>
-  );
+  const noBranch = <p className="text-xs text-muted-foreground">No branch yet</p>;
   // Same layout for one repo or several: the repo row carries its merge button.
-  const stack =
-    stacks.length === 0 ? (
-      <p className="text-xs text-muted-foreground">No branch yet</p>
-    ) : (
-      stacks.map((st) => (
-        <div key={st.repo.path} className="flex flex-col gap-2">
-          <div className="flex items-center gap-2 text-sm">
-            <FolderGit2 className="size-4 shrink-0 text-muted-foreground" />
-            <span className="font-medium">{st.name}</span>
-            <span className="truncate font-mono text-xs text-muted-foreground" title={st.repo.path}>
-              {shortRepo(st.repo.path)}
-            </span>
-            <div className="ml-auto flex items-center gap-2">
-              <MergeButton
-                id={p.id} repo={st.repo.path} chunks={st.chunks} base={st.repo.base} merge={st.merge} finished={done}
-              />
+  const prs =
+    repos.length === 0
+      ? noBranch
+      : repos.map((r) => (
+          <div key={r.repo.path} className="flex flex-col gap-2">
+            <div className="flex items-center gap-2 text-sm">
+              <FolderGit2 className="size-4 shrink-0 text-muted-foreground" />
+              <span className="font-medium">{r.name}</span>
+              <span className="truncate font-mono text-xs text-muted-foreground" title={r.repo.path}>
+                {shortRepo(r.repo.path)}
+              </span>
+              <div className="ml-auto flex items-center gap-2">
+                <MergeButton id={p.id} repo={r.repo.path} chunks={r.chunks} base={r.repo.base} merge={r.merge} finished={done} />
+              </div>
             </div>
+            {r.chunks.length > 0 ? (
+              <ChunkList repo={r.repo} chunks={r.chunks} merge={r.merge} selected={target.chunk} onSelect={(chunk) => select({ chunk })} onSelectBase={() => select({})} />
+            ) : (
+              noBranch
+            )}
           </div>
-          {tree(st.repo, st.chunks, st.merge)}
-        </div>
-      ))
-    );
+        ));
 
   return (
     <div className="flex h-full min-h-0 flex-col">
@@ -137,7 +128,7 @@ export function PipelineDetail({ p, onBack }: { p: DashboardState; onBack: () =>
       <div className="min-h-0 flex-1 overflow-y-auto">
         <div className="flex flex-col gap-3 px-6 pt-5">
           <h3 className="text-sm font-semibold">Pull requests</h3>
-          {stack}
+          {prs}
         </div>
 
         <Tabs value={tab} onValueChange={setTab} className="py-5">

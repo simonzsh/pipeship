@@ -17,6 +17,18 @@ export function assertRepoName(repos: Repo[], path: string): void {
   if (clash) throw new Error(`repo name "${repoName(path)}" is already used by ${clash.path}`);
 }
 
+// Chunk.status stays free text; the merge engine writes this value.
+export const MERGED = "merged";
+
+// Written by the dashboard's PR sync for a PR closed without merge.
+export const CLOSED = "closed";
+
+// True when at least one PR is merged and every other PR is merged or closed. Server and dashboard share it.
+export function allMerged(p: Pick<State, "chunks">): boolean {
+  const prChunks = p.chunks.filter((c) => c.pr && c.status !== CLOSED);
+  return prChunks.length > 0 && prChunks.every((c) => c.status === MERGED);
+}
+
 export function chunksOf(state: Pick<State, "chunks">, repo: string): Chunk[] {
   return state.chunks.filter((c) => c.repo === repo);
 }
@@ -39,7 +51,7 @@ export function sharesRepo(a: Pick<State, "repos">, b: Pick<State, "repos">): bo
   return a.repos.some((r) => b.repos.some((o) => o.path === r.path));
 }
 
-export interface RepoStack {
+export interface RepoChunks {
   repo: Repo;
   name: string;
   chunks: Chunk[];
@@ -47,7 +59,7 @@ export interface RepoStack {
 }
 
 // Chunks of an unknown repo are left out.
-export function repoStacks(state: Pick<State, "repos" | "chunks" | "merges">): RepoStack[] {
+export function repoChunks(state: Pick<State, "repos" | "chunks" | "merges">): RepoChunks[] {
   return state.repos.map((repo) => ({
     repo,
     name: repoName(repo.path),
@@ -85,8 +97,7 @@ export const stackRefusal = (repo: string, open: number) =>
   `${open} PRs of ${repoName(repo)} are not merged: pipeship merges one PR per repo. Merge this stack on GitHub, or with an older pipeship that combines stacks.`;
 
 // The PRs still to merge. A closed PR counts: the merge refuses it rather than skip it.
-// "merged" is spelled out: importing MERGED from state.ts would pull node: into the browser.
-export const openPrChunks = (chunks: Chunk[]): Chunk[] => chunks.filter((c) => c.pr && c.status !== "merged");
+export const openPrChunks = (chunks: Chunk[]): Chunk[] => chunks.filter((c) => c.pr && c.status !== MERGED);
 
 // The PR that holds a chunk: its own, else the one of the first later chunk (the PR sits on the top branch).
 export function holdingPr(chunks: Chunk[], name: string): string | undefined {

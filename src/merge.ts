@@ -1,6 +1,6 @@
 import { archiveIfAllMerged, isAlive } from "./preview.ts";
 import { chunksOf, openPrChunks, repoName, stackRefusal } from "./repos.ts";
-import { listStates, lookupRepo, markRepoMerged, MERGED, readState, updateState, upsertChunk, type Chunk, type MergeRun, type Repo, type State } from "./state.ts";
+import { listStates, lookupRepo, MERGED, readState, updateState, upsertChunk, type Chunk, type MergeRun, type Repo, type State } from "./state.ts";
 
 export interface RunResult {
   code: number;
@@ -98,6 +98,26 @@ export function classifyPr(v: PrView): Verdict {
 
 export const errorMessage = (err: unknown) => (err instanceof Error ? err.message : String(err));
 
+export type PrState = "OPEN" | "MERGED" | "CLOSED";
+
+// The PR state on GitHub; a set mergedAt wins over `state`. The race also covers a runner that ignores timeoutMs.
+export async function prState(run: Runner, url: string, cwd: string, timeoutMs: number): Promise<PrState> {
+  let timer: Timer | undefined;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new Error(`gh timed out after ${timeoutMs} ms`)), timeoutMs);
+  });
+  try {
+    const res = await Promise.race([run("gh", ["pr", "view", url, "--json", "state,mergedAt"], { cwd, timeoutMs }), timeout]);
+    if (res.code !== 0) throw new Error(res.stderr.trim() || `gh exited with ${res.code}`);
+    const view = JSON.parse(res.stdout) as { state?: string; mergedAt?: string | null };
+    const state = view.mergedAt || view.state === "MERGED" ? "MERGED" : view.state;
+    if (state !== "MERGED" && state !== "OPEN" && state !== "CLOSED") throw new Error(`unexpected PR state ${String(view.state)}`);
+    return state;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 // Pipeline + repo with a merge job in this process.
 const activeKey = (id: string, repo: string) => `${id}\n${repo}`;
 const active = new Set<string>();
@@ -155,7 +175,7 @@ export function startMerge(
   updateState(id, (x) => {
     (x.merges ??= {})[repo.path] = runningMerge(repo.path, new Date().toISOString());
   });
-  const done = mergeStack(id, deps, repo.path, rawDelete === true).finally(() => active.delete(key));
+  const done = mergeRepo(id, deps, repo.path, rawDelete === true).finally(() => active.delete(key));
   return { state: readState(id), done };
 }
 
@@ -173,14 +193,13 @@ export function failStaleMerges(alive: (pid: number) => boolean = isAlive): void
   }
 }
 
-export const firstLine = (text: string) => text.trim().split("\n")[0] ?? "";
+const firstLine = (text: string) => text.trim().split("\n")[0] ?? "";
 
 // What the merge steps share: gh access, state writes and the wait-until-mergeable loop.
 interface Ctx {
   id: string;
   repo: string;
   d: MergeDeps;
-  gh: (args: string[]) => Promise<RunResult>;
   view: (url: string) => Promise<PrView>;
   progress: (c: Chunk, message: string) => void;
   finish: (message: string) => void;
@@ -243,10 +262,10 @@ function makeCtx(id: string, repo: string, d: MergeDeps): Ctx {
     return v;
   };
 
-  return { id, repo, d, gh, view, progress, finish, mergePr, waitReady };
+  return { id, repo, d, view, progress, finish, mergePr, waitReady };
 }
 
-// Deletes the PR's remote branches, never the base. Returns the branches that could not go:
+// Deletes the remote branches of the chunks with a PR, never the base. Returns the branches that could not go:
 // a failure here must not undo a merge that already happened.
 async function deleteBranches(x: Ctx, chunks: Chunk[], keep: string[]): Promise<string[]> {
   const names = [...new Set(chunks.filter((c) => c.pr).map((c) => c.branch).filter((b): b is string => !!b && !keep.includes(b)))];
@@ -261,10 +280,9 @@ async function deleteBranches(x: Ctx, chunks: Chunk[], keep: string[]): Promise<
 
 // Merge the repo's single open PR into its base with a merge commit. No rebase, push or retarget.
 async function mergeIntoBase(x: Ctx, repo: Repo, chunks: Chunk[], remove: boolean): Promise<void> {
-  const prs = chunks.filter((c) => c.pr);
+  // startMerge refused the other cases; the state may have changed since.
   const open = openPrChunks(chunks);
-  if (open.length >= 2) throw new Error(stackRefusal(repo.path, open.length));
-  if (!open.length) throw new Error("no open PR to merge");
+  if (open.length !== 1) throw new Error(open.length ? stackRefusal(repo.path, open.length) : "no open PR to merge");
   const c = open[0]!;
   const n = parsePrUrl(c.pr!).number;
   x.progress(c, `checking #${n}`);
@@ -277,14 +295,12 @@ async function mergeIntoBase(x: Ctx, repo: Repo, chunks: Chunk[], remove: boolea
     const ready = await x.waitReady(c, v);
     await x.mergePr(c, ready.headRefOid, `merged #${n}`);
   }
-  // One PR per repo: the chunks without a PR are merged with it.
-  updateState(x.id, (s) => void markRepoMerged(s, x.repo));
-  const left = remove ? await deleteBranches(x, prs, [base, repo.base ?? base]) : [];
+  const left = remove ? await deleteBranches(x, chunks, [base, repo.base ?? base]) : [];
   x.finish(`merged #${n} into ${base}` + (left.length ? `; could not delete ${left.join(", ")}` : ""));
 }
 
 // Never throws: every failure ends up in state.merges. `repo` is a path or a name.
-export async function mergeStack(
+export async function mergeRepo(
   id: string,
   deps: Partial<MergeDeps> = {},
   repoRef?: string,
