@@ -21,6 +21,8 @@ export function MergeButton({ id, repo, chunks, base, merge, finished }: {
   id: string; repo: string; chunks: Chunk[]; base?: string; merge?: MergeRun; finished: boolean;
 }) {
   const [error, setError] = useState<string>();
+  // A refused "Merge now", tied to its run: it must not hide the reason of a run that ended since.
+  const [forceError, setForceError] = useState<{ run: string; message: string }>();
   // Like GitHub's "delete branch" offer after a merge; checked by default.
   const [deleteBranches, setDeleteBranches] = useState(true);
   // The run's startedAt seen at the click (null: no click). Ends when the stream shows another run, or the POST fails.
@@ -38,22 +40,23 @@ export function MergeButton({ id, repo, chunks, base, merge, finished }: {
     }
   };
   const refusal = todo.length > 1 ? stackRefusal(repo, todo.length) : undefined;
-  const message = refusal ?? error ?? (!running && merge?.status === "failed" ? `Merge stopped: ${merge.error}` : undefined);
-  const failure = message && (
-    <span className="flex min-w-0 items-center text-xs text-destructive" title={message}>
-      <span className="max-w-72 truncate">{message}</span>
-    </span>
-  );
+  const alert = (message: string | undefined) =>
+    message && (
+      <span className="flex min-w-0 items-center text-xs text-destructive" title={message}>
+        <span className="max-w-72 truncate">{message}</span>
+      </span>
+    );
   const force = async () => {
-    setError(undefined);
+    const run = merge!.startedAt;
+    setForceError(undefined);
     const err = await postAction(id, "merge", { repo, force: true });
-    if (err) setError(err);
+    if (err) setForceError({ run, message: err });
   };
   if (running || starting) {
     const pr = todo[0]?.pr;
     return (
       <>
-        {failure}
+        {running && forceError?.run === merge.startedAt && alert(forceError.message)}
         {running && (
           <span className="max-w-72 truncate text-xs text-muted-foreground" title={merge.message}>{merge.message}</span>
         )}
@@ -69,7 +72,7 @@ export function MergeButton({ id, repo, chunks, base, merge, finished }: {
               <AlertDialogHeader>
                 <AlertDialogTitle>Merge #{prNumber(pr)} now?</AlertDialogTitle>
                 <AlertDialogDescription>
-                  Stops waiting for the pending checks and merges with `gh pr merge --admin`. This bypasses the required checks and
+                  Stops waiting for the pending checks and merges with <code>gh pr merge --admin</code>. This bypasses the required checks and
                   branch protection, and needs admin rights on the repo. A failed check still stops the merge.
                 </AlertDialogDescription>
               </AlertDialogHeader>
@@ -89,6 +92,7 @@ export function MergeButton({ id, repo, chunks, base, merge, finished }: {
   // The server refuses a closed PR and a stack of 2 or more: hide the button when only closed PRs are left,
   // disable it for a stack (a closed PR among 2 or more is a stack too).
   if (!finished || todo.every((c) => c.status === CLOSED)) return null;
+  const failure = alert(refusal ?? error ?? (merge?.status === "failed" ? `Merge stopped: ${merge.error}` : undefined));
   const button = (
     <Button variant="outline" size="xs" disabled={!!refusal} title={refusal}>
       <GitMerge className={ICON} /> {base ? `Merge into ${base}` : "Merge"}

@@ -248,7 +248,8 @@ function makeCtx(id: string, repo: string, d: MergeDeps): Ctx {
     const url = c.pr!;
     const { owner, repo: name, number: n } = parsePrUrl(url);
     // No -d: the branches go together, after the merge (see deleteBranches). No squash fallback: the chunk commits must stay.
-    if (admin) progress(c, `merging #${n} now with --admin`);
+    // Also clears waitingChecks, so "Merge now" hides while gh runs.
+    progress(c, admin ? `merging #${n} now with --admin` : `merging #${n}`);
     const r = await gh(["pr", "merge", url, "--merge", ...(admin ? ["--admin"] : []), "--match-head-commit", head]);
     if (r.code !== 0 && /merge commits are not allowed/i.test(r.stderr)) {
       throw new Error(`merge commits are not allowed on ${owner}/${name}: enable "Allow merge commits" in the GitHub settings, or merge #${n} by hand`);
