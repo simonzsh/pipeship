@@ -24,7 +24,7 @@ import { groupByStatus } from "../src/dashboard/groups.ts";
 import { t3ThreadLink } from "../src/dashboard/session.tsx";
 import { buildSearch, parseUrl } from "../src/dashboard/url.ts";
 import { allMerged, displaySteps, finished, formatElapsed, timeAgo, timeAgoShort } from "../src/dashboard/pipeline-info.ts";
-import { isNoiseFile } from "../src/dashboard/noise-files.ts";
+import { isTestFile } from "../src/dashboard/test-files.ts";
 import { diffRequests, diffUrl } from "../src/dashboard/diff-requests.ts";
 import { highlightLines, languageOf } from "../src/dashboard/highlight.tsx";
 import { chunkActivity } from "../src/dashboard/status.tsx";
@@ -3140,15 +3140,15 @@ describe("requestDashboardUpdate", () => {
   });
 });
 
-describe("isNoiseFile", () => {
-  test("matches tests, snapshots, lockfiles and vendored folders", () => {
-    for (const p of ["a.test.ts", "src/a.spec.tsx", "x/b.test.js", "src/__tests__/a.ts", "__mocks__/m.ts", "a.snap", "pkg/foo_test.go", "test_a.py", "x/a_test.py", "test/helper.ts", "tests/a.ts", "spec/a.rb", "node_modules/x/index.js", "vendor/a.go", "dist/a.js", "bun.lock", "web/package-lock.json", "yarn.lock", "pnpm-lock.yaml"]) {
-      expect(isNoiseFile(p)).toBe(true);
+describe("isTestFile", () => {
+  test("matches test files, snapshots and test folders", () => {
+    for (const p of ["a.test.ts", "src/a.spec.tsx", "x/b.test.js", "src/__tests__/a.ts", "__mocks__/m.ts", "a.snap", "pkg/foo_test.go", "test_a.py", "x/a_test.py", "test/helper.ts", "tests/a.ts", "spec/a.rb"]) {
+      expect(isTestFile(p)).toBe(true);
     }
   });
-  test("keeps source files and package.json", () => {
-    for (const p of ["src/a.ts", "package.json", "web/package.json", "node_modules/x/package.json", "src/contest.ts", "src/latest/a.ts", "README.md"]) {
-      expect(isNoiseFile(p)).toBe(false);
+  test("keeps source, lockfiles, package.json and build output", () => {
+    for (const p of ["src/a.ts", "package.json", "web/package.json", "node_modules/x/index.js", "vendor/a.go", "dist/a.js", "bun.lock", "web/package-lock.json", "yarn.lock", "src/contest.ts", "src/latest/a.ts", "README.md"]) {
+      expect(isTestFile(p)).toBe(false);
     }
   });
 });

@@ -8,7 +8,7 @@ import { Badge } from "./components/ui/badge";
 import { Button } from "./components/ui/button";
 import { highlightLines, languageOf } from "./highlight";
 import { diffRequests, diffUrl, type DiffRequest, type DiffTarget } from "./diff-requests";
-import { isNoiseFile } from "./noise-files";
+import { isTestFile } from "./test-files";
 import { prNumber } from "./utils";
 
 export type { DiffTarget };
@@ -252,8 +252,8 @@ const RepoDiff = memo(function RepoDiff({ data, all, tests }: { data: DiffRespon
   useEffect(() => {
     if (tests === doneTests.current) return;
     doneTests.current = tests;
-    const noise = data.files.filter((f) => isNoiseFile(f.path));
-    if (noise.length) setOverrides((o) => ({ ...o, ...Object.fromEntries(noise.map((f) => [f.path, false])) }));
+    const testFiles = data.files.filter((f) => isTestFile(f.path));
+    if (testFiles.length) setOverrides((o) => ({ ...o, ...Object.fromEntries(testFiles.map((f) => [f.path, false])) }));
   }, [tests, data]);
   const defaults = useMemo(() => openByDefault(data.files), [data]);
   const toggle = useCallback((path: string, open: boolean) => setOverrides((o) => ({ ...o, [path]: !open })), []);
@@ -340,7 +340,7 @@ export function CodeTab({ p, target, onTarget }: CodeTabProps) {
   const additions = datas.reduce((n, d) => n + d.additions, 0);
   const deletions = datas.reduce((n, d) => n + d.deletions, 0);
   const allOpen = all?.open ?? true;
-  const hasNoise = datas.some((d) => d.files.some((f) => isNoiseFile(f.path)));
+  const hasTests = datas.some((d) => d.files.some((f) => isTestFile(f.path)));
 
   return (
     <div ref={root} className="flex flex-col gap-4">
@@ -367,8 +367,8 @@ export function CodeTab({ p, target, onTarget }: CodeTabProps) {
               {allOpen ? <ChevronsDownUp /> : <ChevronsUpDown />} {allOpen ? "Collapse all" : "Expand all"}
             </Button>
           )}
-          {hasNoise && (
-            <Button size="sm" variant="outline" onClick={() => setTests((n) => n + 1)} title="Collapse test, lock and vendored files">
+          {hasTests && (
+            <Button size="sm" variant="outline" onClick={() => setTests((n) => n + 1)} title="Collapse test files">
               <FlaskConical /> Collapse tests
             </Button>
           )}
