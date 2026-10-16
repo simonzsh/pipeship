@@ -1,4 +1,4 @@
-import { defaultRunner, parsePrUrl, type Runner } from "./merge.ts";
+import { defaultRunner, firstLine, parsePrUrl, type Runner } from "./merge.ts";
 import { chunksOf, diffRange, repoName, topChunk } from "./repos.ts";
 import { readState, upsertChunk, type Chunk, type Repo, type State } from "./state.ts";
 
@@ -7,7 +7,6 @@ export interface PrOptions {
   body?: string;
 }
 
-const firstLine = (text: string) => text.trim().split("\n")[0] ?? "";
 const RELATED = "## Related PRs";
 
 // One line per chunk up to the top, with its commit subjects: the user reviews commit by commit.

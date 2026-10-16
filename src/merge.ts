@@ -173,7 +173,7 @@ export function failStaleMerges(alive: (pid: number) => boolean = isAlive): void
   }
 }
 
-const firstLine = (text: string) => text.trim().split("\n")[0] ?? "";
+export const firstLine = (text: string) => text.trim().split("\n")[0] ?? "";
 
 // What the merge steps share: gh access, state writes and the wait-until-mergeable loop.
 interface Ctx {
