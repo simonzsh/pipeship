@@ -95,7 +95,7 @@ export function MergeButton({ id, repo, chunks, base, merge, finished }: {
   const failure = alert(refusal ?? error ?? (merge?.status === "failed" ? `Merge stopped: ${merge.error}` : undefined));
   const button = (
     <Button variant="outline" size="xs" disabled={!!refusal} title={refusal}>
-      <GitMerge className={ICON} /> {base ? `Merge into ${base}` : "Merge"}
+      <GitMerge className={ICON} /> Merge
     </Button>
   );
   if (refusal) {
