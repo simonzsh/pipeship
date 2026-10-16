@@ -37,7 +37,7 @@ Type `/pipeship:run` followed by the ticket or the request (`/run` if you use th
 ```
 /pipeship:run ABC-123
 /pipeship:run quick https://github.com/org/repo/issues/42
-/pipeship:run --skip questions,stack "Add a date filter to the orders page"
+/pipeship:run --skip questions,preview "Add a date filter to the orders page"
 ```
 
 You can also ask in plain words: "handle ABC-123 with pipeship".
@@ -68,10 +68,11 @@ Do not use it for a small edit in one file, a config tweak, a question, a review
 
 ### Options
 
-- **Modes**: `full` (default, all 7 steps) and `quick` (one chunk, blocking questions only, explore in the main session, one `sonnet` cleanup pass instead of the full review, no `opus`).
-- **`--skip`** removes steps, e.g. `--skip questions,stack`. You can also say "skip the review" during the run. Steps run in order: `pipeship step` and `pipeship wait` refuse a step whose earlier steps are not done or skipped, so mark a step `skipped` to pass it.
+- **Modes**: `full` (default, all 6 steps) and `quick` (one chunk, blocking questions only, explore in the main session, one `sonnet` cleanup pass instead of the full review, no `opus`).
+- **`--skip`** removes steps, e.g. `--skip questions,preview`. You can also say "skip the review" during the run. Steps run in order: `pipeship step` and `pipeship wait` refuse a step whose earlier steps are not done or skipped, so mark a step `skipped` to pass it.
 - **Several repos**: a ticket can span several repos. Pass `--repo` once per repo, or let the explore step find them. Each repo gets its own PR.
-- **Checks**: subagents run the fast checks (typecheck, lint, format) and only the tests related to the diff, never the full suite. CI runs the full suite on each PR. pipeship runs the full suite locally, once on the top of the stack, only when CI does not run it on PRs or when you ask for it. Never two test suites at once on the machine.
+- **PRs**: the review step ends with `pipeship pr <id>`. For each repo, it pushes the top chunk branch (`--force-with-lease`) and opens one PR on the repo's base, or only pushes when that PR is still open. The body lists the chunks with their commits and, with several repos, the related PRs. A repo with no remote is skipped. After feedback, the agent runs it again: a merged or closed PR gets a new one.
+- **Checks**: subagents run the fast checks (typecheck, lint, format) and only the tests related to the diff, never the full suite. CI runs the full suite on each PR. pipeship runs the full suite locally, once on the top of each repo before it opens the PRs, only when CI does not run it on PRs or when you ask for it. Never two test suites at once on the machine.
 - pipeship starts on its own on a work request: make, fix, build or change something, with or without a ticket (a reference, a URL, a text, or a task decided after a discussion). You do not need to name it. It never starts on a question, an explanation, a plain discussion, a review or a status request.
 
 ## Test environment
@@ -203,6 +204,6 @@ bun run typecheck
 
 GitHub Actions runs both on every pull request and on each push to `main` (`.github/workflows/ci.yml`).
 
-The skill lives in `skills/run/`: `SKILL.md` (rules and steps), `recipe.md` (recipe format, read at step 7) and `prompts/` (one brief per subagent type). Feedback after the end of a pipeline goes through implement and review again.
+The skill lives in `skills/run/`: `SKILL.md` (rules and steps), `recipe.md` (recipe format, read at step 6) and `prompts/` (one brief per subagent type). Feedback after the end of a pipeline goes through implement and review again.
 
 To release, bump `version` in `package.json`, `.claude-plugin/plugin.json` and `.codex-plugin/plugin.json`, then push. Users only get an update when the version changes; a test checks that the three files agree.
