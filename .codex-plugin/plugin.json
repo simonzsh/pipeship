@@ -6,7 +6,7 @@
   "homepage": "https://github.com/simonzsh/pipeship",
   "repository": "https://github.com/simonzsh/pipeship",
   "license": "MIT",
-  "keywords": ["pipeline", "worktree", "stacked-prs", "test-environment"],
+  "keywords": ["pipeline", "worktree", "test-environment"],
   "skills": "./skills/",
   "interface": {
     "displayName": "pipeship",
