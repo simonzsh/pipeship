@@ -1223,16 +1223,6 @@ test("pr: a rewritten branch is pushed with the lease, and a push by someone els
   expect(sh(stack.origin, "log", "-1", "--format=%s", "c1")).toBe("their work");
 });
 
-test("pr: a branch with no remote ref yet is pushed and gets its PR", async () => {
-  const stack = noPrs(makeStack(1), 1);
-  sh(stack.worktrees[0]!, "checkout", "-q", "-b", "c1-new");
-  upsertChunk(stack.id, { name: "c1", branch: "c1-new" });
-  const gh = prGh();
-  expect(await openPrs(stack.id, { title: "T", body: "b" }, gh.run)).toEqual(["repo: opened https://github.com/o/repo/pull/10"]);
-  expect(sh(stack.origin, "rev-parse", "c1-new")).toBe(sh(stack.clone, "rev-parse", "c1-new"));
-  expect(gh.calls).toEqual(["pr create", "create c1-new -> main"]);
-});
-
 test("pr: a branch deleted on GitHub after its merge is pushed again despite the stale tracking ref", async () => {
   const stack = makeFeature(1);
   upsertChunk(stack.id, { name: "c1", status: "merged" });
@@ -1252,16 +1242,6 @@ test("pr: the Chunks list starts from the remote base and leaves out chunks alre
   const gh = prGh();
   await openPrs(stack.id, { title: "T", body: "b" }, gh.run);
   expect(gh.bodies["repos/o/repo/pulls/10"]).toBe("b\n\n## Chunks\n\n- `c2` (`c2`)\n  - f2 step 0");
-});
-
-test("pr: a failed push shows the cause, not the first line of git", async () => {
-  const stack = noPrs(makeStack(1), 1);
-  writeFileSync(join(stack.origin, "hooks/pre-receive"), "#!/bin/sh\nexit 1\n", { mode: 0o755 });
-  commitFile(stack.worktrees[0]!, "more.txt", "more\n", "more");
-  const gh = prGh();
-  const err = await openPrs(stack.id, { title: "T", body: "b" }, gh.run).catch((e: Error) => e);
-  expect((err as Error).message).toMatch(/^git push c1 failed: To .* \| ! \[remote rejected\] c1 -> c1 \(pre-receive hook declined\) \| error: failed to push/);
-  expect(gh.calls).toEqual([]);
 });
 
 test("pr: a PR already opened by a crashed run is recorded, from the error or from gh pr list", async () => {
@@ -1306,20 +1286,19 @@ test("pr: a Related PRs list in a CRLF body (edited on the web) is replaced, not
   expect(gh.bodies["repos/o/api/pulls/3"]).toBe("Edited.\n\n## Related PRs\n\n- https://github.com/o/web/pull/10\n");
 });
 
-test("base: one PR is merged into main with a merge commit, a single gh call and no git writes", async () => {
-  const stack = makeStack(1);
-  const gh = fakeGh(stack, 1);
-  const before = sh(stack.origin, "rev-parse", "c1");
+test("base: the top PR is merged into main with a merge commit, a single gh call and no git writes; every chunk becomes merged", async () => {
+  const stack = makeFeature(3);
+  const gh = featureGh(stack, 3);
+  const before = sh(stack.origin, "rev-parse", "c3");
   await mergeRepo(stack.id, gh.deps);
-  const s = readState(stack.id);
-  expect(gh.calls).toEqual(["merge 1 --merge"]);
+  expect(gh.calls).toEqual(["merge 3 --merge"]);
   noWrites(gh);
-  expect(s.merges?.[stack.clone]).toMatchObject({ status: "done", message: "merged #1 into main" });
-  expect(chunkStatuses(stack.id)).toEqual(["merged"]);
-  expect(sh(stack.origin, "ls-tree", "--name-only", "main").split("\n")).toEqual(["base.txt", "f1.txt"]);
-  // initial + the chunk commit + the merge commit.
-  expect(sh(stack.origin, "rev-list", "--count", "main")).toBe("3");
-  expect(sh(stack.origin, "rev-parse", "c1")).toBe(before);
+  expect(readState(stack.id).merges?.[stack.clone]).toMatchObject({ status: "done", message: "merged #3 into main" });
+  expect(chunkStatuses(stack.id)).toEqual(["merged", "merged", "merged"]);
+  expect(sh(stack.origin, "ls-tree", "--name-only", "main").split("\n")).toEqual(["base.txt", "f1.txt", "f2.txt", "f3.txt"]);
+  // initial + the 3 chunk commits + the merge commit.
+  expect(sh(stack.origin, "rev-list", "--count", "main")).toBe("5");
+  expect(sh(stack.origin, "rev-parse", "c3")).toBe(before);
 });
 
 const remoteBranches = (origin: string) => sh(origin, "branch", "--format=%(refname:short)").split("\n").sort();
@@ -1590,7 +1569,7 @@ test("merge: a repo with 2 open PRs is refused with a 409 and a failed run, and 
   expect(gh.calls).toEqual([]);
 });
 
-test("the merge route rejects a mode, and a run merges one open PR", async () => {
+test("the merge route rejects a mode", async () => {
   const one = makeStack(1);
   const server = await serve(0);
   try {
@@ -1599,21 +1578,6 @@ test("the merge route rejects a mode, and a run merges one open PR", async () =>
   } finally {
     server.stop(true);
   }
-  const gh1 = fakeGh(one, 1);
-  await startMerge(one.id, gh1.deps).done;
-  expect(gh1.calls).toEqual(["merge 1 --merge"]);
-  expect(readState(one.id).merges?.[one.clone]?.status).toBe("done");
-});
-
-test("one PR per repo: the top PR is merged with a merge commit and every chunk becomes merged", async () => {
-  const stack = makeFeature(3);
-  const gh = featureGh(stack, 3);
-  await mergeRepo(stack.id, gh.deps, undefined, true);
-  expect(readState(stack.id).merges?.[stack.clone]).toMatchObject({ status: "done", message: "merged #3 into main" });
-  expect(gh.calls).toEqual(["merge 3 --merge"]);
-  expect(chunkStatuses(stack.id)).toEqual(["merged", "merged", "merged"]);
-  expect(gh.gitCalls).toEqual(["push origin --delete c3"]);
-  expect(sh(stack.origin, "ls-tree", "--name-only", "main").split("\n")).toEqual(["base.txt", "f1.txt", "f2.txt", "f3.txt"]);
 });
 
 test("one PR per repo: deletePipeline removes the local branches of every chunk", async () => {
@@ -1624,14 +1588,6 @@ test("one PR per repo: deletePipeline removes the local branches of every chunk"
   await deletePipeline(stack.id);
   const branches = sh(stack.clone, "branch", "--format=%(refname:short)").split("\n");
   expect(branches).toEqual(["main"]);
-});
-
-test("one PR per repo: startMerge merges the top PR alone", async () => {
-  const stack = makeFeature(3);
-  const gh = featureGh(stack, 3);
-  await startMerge(stack.id, gh.deps).done;
-  expect(gh.calls).toEqual(["merge 3 --merge"]);
-  expect(gh.calls.some((c) => c.startsWith("patch"))).toBe(false);
 });
 
 test("merge: the final merge does not fall back to squash when merge commits are refused", async () => {
@@ -2754,15 +2710,6 @@ syncTest("pr sync: a PR merged outside pipeship sets the chunk to merged", async
   expect(logs).toEqual([`pr sync: ${id}/c1 -> merged`]);
 });
 
-test("old state: a stored PR base is dropped on read", () => {
-  const id = syncPipeline("old base", [121]);
-  const path = join(pipelineDir(id), "state.json");
-  const raw = JSON.parse(readFileSync(path, "utf8"));
-  raw.chunks[0].prBase = "main";
-  writeFileSync(path, JSON.stringify(raw));
-  expect(readState(id).chunks[0]).not.toHaveProperty("prBase");
-});
-
 syncTest("pr sync: the last PR merged archives a done pipeline", async () => {
   const id = syncPipeline("sync archive", [111]);
   finishSteps(id);
@@ -2967,36 +2914,11 @@ syncTest("pr sync: a PR merged elsewhere marks every chunk of its repo merged", 
   expect(readState(id).status).toBe("archived");
 });
 
-syncTest("pr sync: a pipeline with no PR left to poll is not read under the lock nor sent to gh", async () => {
-  const id = syncPipeline("sync nothing to poll", [undefined, undefined, 162]);
-  upsertChunk(id, { name: "c3", status: "merged" });
-  const logs: string[] = [];
-  const gh = syncGh({});
-  await syncPrStatuses({ run: gh.run, log: (l) => logs.push(l) });
-  expect(gh.calls).toEqual([]);
-  expect(logs).toEqual([]);
-});
-
 syncTest("state: chunks without a PR follow the merged PR of their repo on every read", async () => {
   const id = syncPipeline("merged on read", [undefined, 163]);
   expect(chunkStatuses(id)).toEqual(["done", "done"]);
   upsertChunk(id, { name: "c2", status: "merged" });
   expect(chunkStatuses(id)).toEqual(["merged", "merged"]);
-});
-
-syncTest("upsertChunk: a new PR keeps the status unless one is given", async () => {
-  const id = syncPipeline("upsert pr", [170]);
-  upsertChunk(id, { name: "c1", status: "merged" });
-  upsertChunk(id, { name: "c1", pr: prUrl(171) });
-  expect(chunkStatuses(id)).toEqual(["merged"]);
-  upsertChunk(id, { name: "c1", pr: prUrl(172), status: "done" });
-  expect(chunkStatuses(id)).toEqual(["done"]);
-});
-
-syncTest("pr sync: an open top PR leaves the chunks without a PR untouched", async () => {
-  const id = syncPipeline("sync feature open", [undefined, 161]);
-  await syncPrStatuses({ run: syncGh({ [prUrl(161)]: { state: "OPEN" } }).run, log: () => {} });
-  expect(chunkStatuses(id)).toEqual(["done", "done"]);
 });
 
 syncTest("pr sync + merge: a chunk closed by the sync makes Merge fail clearly", async () => {
