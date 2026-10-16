@@ -3,7 +3,7 @@ import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import { assertRepoName, chunksOf, findRepo, repoName } from "./repos.ts";
 
-export const STEPS = ["explore", "questions", "plan", "implement", "review", "stack", "preview"] as const;
+export const STEPS = ["explore", "questions", "plan", "implement", "review", "preview"] as const;
 export type StepName = (typeof STEPS)[number];
 export type StepStatus = "pending" | "running" | "done" | "skipped" | "failed";
 export const STATUSES = ["running", "waiting_for_user", "ready", "done", "failed", "stopped", "archived"] as const;

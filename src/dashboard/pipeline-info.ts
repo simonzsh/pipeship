@@ -30,7 +30,7 @@ export function formatElapsed(startedAt: string, now = Date.now()): string {
   return `${Math.floor(seconds / 3600)}h${pad(Math.floor((seconds % 3600) / 60))}`;
 }
 
-// Only the step that waits shows as "waiting": another step may run meanwhile (preview while stack waits).
+// Only the step that waits shows as "waiting": another step may run meanwhile (preview while review waits).
 export function displaySteps(p: Pick<State, "steps" | "status" | "waiting">): DisplayStep[] {
   return p.steps.map((s) => {
     const waiting = s.status === "running" && p.status === "waiting_for_user" && p.waiting?.step === s.name;

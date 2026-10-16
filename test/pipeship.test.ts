@@ -17,6 +17,7 @@ import {
   classifyPr, defaultRunner, DEFAULT_LIMITS, failStaleMerges, isMergeRunning, mergeStack, MergeError, resolveMergeRepo, startMerge, type MergeDeps, type PrView, type Runner,
 } from "../src/merge.ts";
 import { startPrSync, syncPrStatuses } from "../src/pr-sync.ts";
+import { openPrs } from "../src/pr.ts";
 import { spawn, spawnSync } from "node:child_process";
 import { Database } from "bun:sqlite";
 import { detectSession, findT3Thread, type ReadProc } from "../src/session.ts";
@@ -43,7 +44,7 @@ beforeEach(() => {
 
 
 // The status is derived: tests set the facts it comes from.
-const ALL_STEPS = ["explore", "questions", "plan", "implement", "review", "stack", "preview"] as const;
+const ALL_STEPS = ["explore", "questions", "plan", "implement", "review", "preview"] as const;
 const finishBeforePreview = (id: string) => ALL_STEPS.slice(0, -1).forEach((name) => setStep(id, name, "done"));
 const doneBefore = (id: string, step: (typeof ALL_STEPS)[number]) => ALL_STEPS.slice(0, ALL_STEPS.indexOf(step)).forEach((name) => setStep(id, name, "done"));
 const finishSteps = (id: string) => ALL_STEPS.forEach((name) => setStep(id, name, "done"));
@@ -55,8 +56,8 @@ test("quick mode and --skip mark steps as skipped", () => {
   const quick = createPipeline({ repos: [{ path: repo }], title: "Add date filter", source: "text", mode: "quick" });
   expect(quick.steps.find((s) => s.name === "plan")!.status).toBe("skipped");
 
-  const custom = createPipeline({ repos: [{ path: repo }], title: "x", source: "linear", links: [{ ref: "ABC-1" }], skip: ["questions", "stack"] });
-  expect(custom.steps.filter((s) => s.status === "skipped").map((s) => s.name)).toEqual(["questions", "stack"]);
+  const custom = createPipeline({ repos: [{ path: repo }], title: "x", source: "linear", links: [{ ref: "ABC-1" }], skip: ["questions", "review"] });
+  expect(custom.steps.filter((s) => s.status === "skipped").map((s) => s.name)).toEqual(["questions", "review"]);
 });
 
 test("ids are unique for the same ticket", () => {
@@ -80,21 +81,21 @@ test("steps and chunks update the state", () => {
 
 test("the pipeline is done once every step is done or skipped, and ready when a preview runs", () => {
   const { id } = createPipeline({ repos: [{ path: repo }], title: "t", source: "text", skip: ["preview"] });
-  doneBefore(id, "stack");
+  doneBefore(id, "review");
   expect(readState(id).status).toBe("running");
-  setStep(id, "stack", "done");
+  setStep(id, "review", "done");
   expect(readState(id).status).toBe("done");
 
   const withPreview = createPipeline({ repos: [{ path: repo }], title: "p", source: "text", skip: ["preview"] }).id;
   updateState(withPreview, (s) => {
     s.preview = { url: "http://localhost:1", port: 1, pid: 1, log: "x", repo, worktree: repo } as never;
   });
-  for (const name of ["explore", "questions", "plan", "implement", "review", "stack"] as const) setStep(withPreview, name, "done");
+  for (const name of ["explore", "questions", "plan", "implement", "review"] as const) setStep(withPreview, name, "done");
   expect(readState(withPreview).status).toBe("ready");
 });
 
 test("a step reopened on a ready or done pipeline sets it back to running", () => {
-  const all = ["explore", "questions", "plan", "implement", "review", "stack", "preview"] as const;
+  const all = ["explore", "questions", "plan", "implement", "review", "preview"] as const;
   const id = createPipeline({ repos: [{ path: repo }], title: "r", source: "text" }).id;
   updateState(id, (s) => {
     s.preview = { url: "http://localhost:1", port: 1, pid: 1, log: "x", repo, worktree: repo } as never;
@@ -131,7 +132,7 @@ test("a failed step run again and done lets the pipeline go back to running, the
   setStep(id, "review", "failed");
   expect(readState(id).status).toBe("failed");
   expect(setStep(id, "review", "running").status).toBe("running");
-  for (const name of ["explore", "questions", "implement", "review", "stack", "preview"] as const) setStep(id, name, "done");
+  for (const name of ["explore", "questions", "implement", "review", "preview"] as const) setStep(id, name, "done");
   expect(readState(id).status).toBe("done");
 });
 
@@ -270,7 +271,7 @@ test("skipped satisfies the gate, also in quick mode", () => {
 test("pending and skipped are allowed out of order", () => {
   const { id } = createPipeline({ repos: [{ path: repo }], title: "g", source: "text" });
   setStep(id, "review", "skipped");
-  setStep(id, "stack", "pending");
+  setStep(id, "preview", "pending");
   expect(stepStatuses(id)[4]).toBe("skipped");
   expect(() => setStep(id, "preview", "running")).toThrow("explore is pending");
 });
@@ -1019,6 +1020,104 @@ const noWrites = (gh: ReturnType<typeof fakeGh>) => {
   // The merge must never rebase, push, fetch or retarget.
   expect(gh.gitCalls).toEqual([]);
 };
+
+// `pipeship pr`: real git and a local bare remote, behind a fake gh that records its calls.
+function prGh() {
+  const calls: string[] = [];
+  const states: Record<string, string> = {}; // PR url -> state shown by `gh pr view`
+  const bodies: Record<string, string> = {}; // REST path -> PR body
+  let next = 10;
+  const run: Runner = async (cmd, args, opts) => {
+    if (cmd !== "gh") return defaultRunner(cmd, args, opts);
+    calls.push(args.slice(0, args[1] === "-X" ? 3 : 2).join(" "));
+    const ok = (stdout = "") => ({ code: 0, stdout, stderr: "" });
+    if (args[0] === "pr" && args[1] === "view") return ok(JSON.stringify({ state: states[args[2]!] ?? "OPEN" }));
+    if (args[0] === "pr" && args[1] === "create") {
+      const url = `https://github.com/o/${repoName(opts.cwd)}/pull/${next++}`;
+      const at = (flag: string) => args[args.indexOf(flag) + 1]!;
+      calls.push(`create ${at("--head")} -> ${at("--base")}`);
+      bodies[`repos/o/${repoName(opts.cwd)}/pulls/${url.split("/").pop()}`] = at("--body");
+      return ok(`Creating pull request\n${url}\n`);
+    }
+    if (args[0] === "api" && args[1] === "-X") {
+      bodies[args[3]!] = args[5]!.slice("body=".length);
+      return ok();
+    }
+    if (args[0] === "api") return ok(bodies[args[1]!] ?? "");
+    return { code: 1, stdout: "", stderr: `unexpected gh ${args.join(" ")}\n` };
+  };
+  return { calls, states, bodies, run };
+}
+
+const noPrs = (s: ReturnType<typeof makeStack>, n: number) => {
+  for (let i = 1; i <= n; i++) upsertChunk(s.id, { name: `c${i}`, pr: undefined });
+  return s;
+};
+
+test("pr: one repo pushes the top branch, opens one PR on the base and records it on the top chunk", async () => {
+  const stack = noPrs(makeStack(2), 2);
+  commitFile(stack.worktrees[1]!, "more.txt", "more\n", "more work");
+  const gh = prGh();
+  const out = await openPrs(stack.id, { title: "Feature", body: "What it does.\n" }, gh.run);
+  expect(out).toEqual(["repo: opened https://github.com/o/repo/pull/10"]);
+  expect(sh(stack.origin, "rev-parse", "c2")).toBe(sh(stack.clone, "rev-parse", "c2"));
+  expect(gh.calls).toEqual(["pr create", "create c2 -> main"]);
+  expect(readState(stack.id).chunks.map((c) => c.pr)).toEqual([undefined, "https://github.com/o/repo/pull/10"]);
+  expect(gh.bodies["repos/o/repo/pulls/10"]).toBe("What it does.\n\n## Chunks\n\n- `c1` (`c1`)\n  - f1 step 0\n- `c2` (`c2`)\n  - f2 step 0\n  - more work");
+});
+
+test("pr: an open PR is only pushed, without a title", async () => {
+  const stack = makeFeature(2);
+  commitFile(stack.worktrees[1]!, "fix.txt", "fix\n", "fix");
+  const gh = prGh();
+  expect(await openPrs(stack.id, {}, gh.run)).toEqual(["repo: pushed c2, PR already open: https://github.com/o/r/pull/2"]);
+  expect(gh.calls).toEqual(["pr view"]);
+  expect(sh(stack.origin, "rev-parse", "c2")).toBe(sh(stack.clone, "rev-parse", "c2"));
+});
+
+test("pr: a merged or closed top PR gets a new PR, and the chunk is polled again", async () => {
+  for (const [status, state] of [["merged", "MERGED"], ["closed", "CLOSED"]] as const) {
+    const stack = makeFeature(1);
+    upsertChunk(stack.id, { name: "c1", status });
+    const gh = prGh();
+    gh.states["https://github.com/o/r/pull/1"] = state;
+    expect(await openPrs(stack.id, { title: "Again", body: "b" }, gh.run)).toEqual(["repo: opened https://github.com/o/repo/pull/10"]);
+    expect(gh.calls).toEqual(["pr view", "pr create", "create c1 -> main"]);
+    expect(readState(stack.id).chunks[0]).toMatchObject({ pr: "https://github.com/o/repo/pull/10", status: "done" });
+  }
+});
+
+test("pr: two repos get two PRs linked by a Related PRs list through the REST API", async () => {
+  const api = noPrs(makeStack(1, 1, "api"), 1);
+  const web = noPrs(makeStack(1, 1, "web"), 1);
+  const { id } = createPipeline({ repos: [{ path: api.clone, base: "main" }, { path: web.clone, base: "main" }], title: "two" });
+  upsertChunk(id, { name: "a1", repo: api.clone, branch: "c1", worktree: api.worktrees[0], status: "done" });
+  upsertChunk(id, { name: "w1", repo: web.clone, branch: "c1", worktree: web.worktrees[0], status: "done" });
+  const gh = prGh();
+  const out = await openPrs(id, { title: "Two", body: "b" }, gh.run);
+  expect(out).toEqual(["api: opened https://github.com/o/api/pull/10", "web: opened https://github.com/o/web/pull/11"]);
+  expect(gh.calls.filter((c) => c.startsWith("api"))).toEqual(["api -X PATCH", "api -X PATCH"]);
+  expect(gh.calls.some((c) => c.startsWith("pr edit"))).toBe(false);
+  expect(gh.bodies["repos/o/api/pulls/10"]).toEndWith("\n\n## Related PRs\n\n- https://github.com/o/web/pull/11\n");
+  expect(gh.bodies["repos/o/web/pulls/11"]).toEndWith("\n\n## Related PRs\n\n- https://github.com/o/api/pull/10\n");
+
+  // The web PR is merged: a new one opens, and the open api PR gets its list replaced, not doubled.
+  gh.states["https://github.com/o/web/pull/11"] = "MERGED";
+  gh.calls.length = 0;
+  await openPrs(id, { title: "Two", body: "b" }, gh.run);
+  expect(gh.calls).toEqual(["pr view", "pr view", "pr create", "create c1 -> main", "api repos/o/api/pulls/10", "api -X PATCH", "api -X PATCH"]);
+  expect(gh.bodies["repos/o/api/pulls/10"]!.split("## Related PRs")).toHaveLength(2);
+  expect(gh.bodies["repos/o/api/pulls/10"]).toEndWith("\n\n## Related PRs\n\n- https://github.com/o/web/pull/12\n");
+});
+
+test("pr: a repo with no remote is skipped with a message", async () => {
+  const stack = noPrs(makeStack(1), 1);
+  sh(stack.clone, "remote", "remove", "origin");
+  const gh = prGh();
+  expect(await openPrs(stack.id, { title: "T", body: "b" }, gh.run)).toEqual(["repo: no remote, skipped"]);
+  expect(gh.calls).toEqual([]);
+  expect(readState(stack.id).chunks[0]!.pr).toBeUndefined();
+});
 
 test("base: one PR is merged into main with a merge commit, a single gh call and no git writes", async () => {
   const stack = makeStack(1);
@@ -2116,8 +2215,8 @@ test("displaySteps shows a running step as waiting while the user is needed", ()
 });
 
 test("displaySteps keeps a step that runs while another waits as running", () => {
-  const steps = [{ name: "stack" as const, status: "running" as const }, { name: "preview" as const, status: "running" as const }];
-  const out = displaySteps({ steps, status: "waiting_for_user", waiting: { step: "stack", reason: "Push?" } });
+  const steps = [{ name: "review" as const, status: "running" as const }, { name: "preview" as const, status: "running" as const }];
+  const out = displaySteps({ steps, status: "waiting_for_user", waiting: { step: "review", reason: "Push?" } });
   expect(out.map((s) => [s.status, s.note])).toEqual([["waiting", "Push?"], ["running", undefined]]);
 });
 
@@ -2183,19 +2282,19 @@ test("diffRequests: whole stack skips repos without branches, a chunk targets it
 
 test("wait marks its step running and shows the question until the step moves on", () => {
   const { id } = createPipeline({ repos: [{ path: repo }], title: "t", source: "text" });
-  doneBefore(id, "stack");
-  waitForUser(id, "stack", "Push the branches and open the PRs?");
+  doneBefore(id, "review");
+  waitForUser(id, "review", "Open the PRs?");
   let state = readState(id);
   expect(state.status).toBe("waiting_for_user");
-  expect(state.step).toBe("stack");
-  expect(state.steps.find((s) => s.name === "stack")!.status).toBe("running");
-  expect(state.waiting).toEqual({ step: "stack", reason: "Push the branches and open the PRs?" });
+  expect(state.step).toBe("review");
+  expect(state.steps.find((s) => s.name === "review")!.status).toBe("running");
+  expect(state.waiting).toEqual({ step: "review", reason: "Open the PRs?" });
 
-  setStep(id, "stack", "done");
+  setStep(id, "review", "done");
   state = readState(id);
   expect(state.status).toBe("running");
   expect(state.waiting).toBeUndefined();
-  expect(() => waitForUser(id, "stack")).toThrow("nothing to wait on");
+  expect(() => waitForUser(id, "review")).toThrow("nothing to wait on");
 });
 
 test("formatElapsed shows seconds, minutes and hours", () => {
