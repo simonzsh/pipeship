@@ -37,23 +37,58 @@ export function MergeButton({ id, repo, chunks, base, merge, finished }: {
       setClickedAt(null);
     }
   };
-  if (running || starting) {
-    return (
-      <Button variant="outline" size="xs" disabled title={merge?.message}>
-        <LogoLoader className="size-4 text-violet-600 dark:text-violet-400" label="Merging" /> Merging…
-      </Button>
-    );
-  }
-  // The server refuses a closed PR and a stack of 2 or more: hide the button when only closed PRs are left,
-  // disable it for a stack (a closed PR among 2 or more is a stack too).
-  if (!finished || todo.every((c) => c.status === CLOSED)) return null;
   const refusal = todo.length > 1 ? stackRefusal(repo, todo.length) : undefined;
-  const message = refusal ?? error ?? (merge?.status === "failed" ? `Merge stopped: ${merge.error}` : undefined);
+  const message = refusal ?? error ?? (!running && merge?.status === "failed" ? `Merge stopped: ${merge.error}` : undefined);
   const failure = message && (
     <span className="flex min-w-0 items-center text-xs text-destructive" title={message}>
       <span className="max-w-72 truncate">{message}</span>
     </span>
   );
+  const force = async () => {
+    setError(undefined);
+    const err = await postAction(id, "merge", { repo, force: true });
+    if (err) setError(err);
+  };
+  if (running || starting) {
+    const pr = todo[0]?.pr;
+    return (
+      <>
+        {failure}
+        {running && (
+          <span className="max-w-72 truncate text-xs text-muted-foreground" title={merge.message}>{merge.message}</span>
+        )}
+        {running && pr && (
+          <a href={`${pr}/checks`} target="_blank" rel="noreferrer" className="text-xs text-muted-foreground underline hover:text-foreground">Checks</a>
+        )}
+        {running && pr && merge.waitingChecks && !merge.force && (
+          <AlertDialog>
+            <AlertDialogTrigger asChild>
+              <Button variant="outline" size="xs"><GitMerge className={ICON} /> Merge now</Button>
+            </AlertDialogTrigger>
+            <AlertDialogContent>
+              <AlertDialogHeader>
+                <AlertDialogTitle>Merge #{prNumber(pr)} now?</AlertDialogTitle>
+                <AlertDialogDescription>
+                  Stops waiting for the pending checks and merges with `gh pr merge --admin`. This bypasses the required checks and
+                  branch protection, and needs admin rights on the repo. A failed check still stops the merge.
+                </AlertDialogDescription>
+              </AlertDialogHeader>
+              <AlertDialogFooter>
+                <AlertDialogCancel>Cancel</AlertDialogCancel>
+                <AlertDialogAction variant="default" onClick={force} className={CONFIRM}>Merge now</AlertDialogAction>
+              </AlertDialogFooter>
+            </AlertDialogContent>
+          </AlertDialog>
+        )}
+        <Button variant="outline" size="xs" disabled>
+          <LogoLoader className="size-4 text-violet-600 dark:text-violet-400" label="Merging" /> Merging…
+        </Button>
+      </>
+    );
+  }
+  // The server refuses a closed PR and a stack of 2 or more: hide the button when only closed PRs are left,
+  // disable it for a stack (a closed PR among 2 or more is a stack too).
+  if (!finished || todo.every((c) => c.status === CLOSED)) return null;
   const button = (
     <Button variant="outline" size="xs" disabled={!!refusal} title={refusal}>
       <GitMerge className={ICON} /> {base ? `Merge into ${base}` : "Merge"}
