@@ -14,7 +14,7 @@ import { diffTotals, parseDiff } from "../src/diff.ts";
 import { baseRef, DiffError, gitDiff, headRef, pipelineDiff, resetFetchCache } from "../src/diff-git.ts";
 import { DEFAULT_PORT, requestDashboardUpdate, serve } from "../src/server.ts";
 import {
-  classifyPr, defaultRunner, DEFAULT_LIMITS, failStaleMerges, isMergeRunning, mergeStack, MergeError, resolveMergeRepo, startMerge, type MergeDeps, type PrView, type Runner,
+  classifyPr, defaultRunner, DEFAULT_LIMITS, failStaleMerges, isMergeRunning, mergeStack, MergeError, resolveMergeRepo, startMerge, type MergeDeps, type PrView, type Runner, type RunResult,
 } from "../src/merge.ts";
 import { startPrSync, syncPrStatuses } from "../src/pr-sync.ts";
 import { openPrs } from "../src/pr.ts";
@@ -58,6 +58,14 @@ test("quick mode and --skip mark steps as skipped", () => {
 
   const custom = createPipeline({ repos: [{ path: repo }], title: "x", source: "linear", links: [{ ref: "ABC-1" }], skip: ["questions", "review"] });
   expect(custom.steps.filter((s) => s.status === "skipped").map((s) => s.name)).toEqual(["questions", "review"]);
+});
+
+test("--skip refuses a name that is not a step, and names the valid ones", () => {
+  const before = listStates().length;
+  expect(() => createPipeline({ repos: [{ path: repo }], title: "x", skip: ["questions", "stack" as never] })).toThrow(
+    "unknown step in --skip: stack (expected explore, questions, plan, implement, review, preview)",
+  );
+  expect(listStates()).toHaveLength(before);
 });
 
 test("ids are unique for the same ticket", () => {
@@ -1026,12 +1034,19 @@ function prGh() {
   const calls: string[] = [];
   const states: Record<string, string> = {}; // PR url -> state shown by `gh pr view`
   const bodies: Record<string, string> = {}; // REST path -> PR body
+  const created: Record<string, RunResult> = {}; // repo name -> forced `gh pr create` result
+  const listed: Record<string, string> = {}; // branch -> URL of its open PR for `gh pr list`
   let next = 10;
   const run: Runner = async (cmd, args, opts) => {
     if (cmd !== "gh") return defaultRunner(cmd, args, opts);
     calls.push(args.slice(0, args[1] === "-X" ? 3 : 2).join(" "));
     const ok = (stdout = "") => ({ code: 0, stdout, stderr: "" });
     if (args[0] === "pr" && args[1] === "view") return ok(JSON.stringify({ state: states[args[2]!] ?? "OPEN" }));
+    if (args[0] === "pr" && args[1] === "list") {
+      const url = listed[args[args.indexOf("--head") + 1]!];
+      return ok(JSON.stringify(url ? [{ url }] : []));
+    }
+    if (args[0] === "pr" && args[1] === "create" && created[repoName(opts.cwd)]) return created[repoName(opts.cwd)]!;
     if (args[0] === "pr" && args[1] === "create") {
       const url = `https://github.com/o/${repoName(opts.cwd)}/pull/${next++}`;
       const at = (flag: string) => args[args.indexOf(flag) + 1]!;
@@ -1046,7 +1061,7 @@ function prGh() {
     if (args[0] === "api") return ok(bodies[args[1]!] ?? "");
     return { code: 1, stdout: "", stderr: `unexpected gh ${args.join(" ")}\n` };
   };
-  return { calls, states, bodies, run };
+  return { calls, states, bodies, created, listed, run };
 }
 
 const noPrs = (s: ReturnType<typeof makeStack>, n: number) => {
@@ -1117,6 +1132,107 @@ test("pr: a repo with no remote is skipped with a message", async () => {
   expect(await openPrs(stack.id, { title: "T", body: "b" }, gh.run)).toEqual(["repo: no remote, skipped"]);
   expect(gh.calls).toEqual([]);
   expect(readState(stack.id).chunks[0]!.pr).toBeUndefined();
+});
+
+test("pr: a rewritten branch is pushed with the lease, and a push by someone else is refused with its cause", async () => {
+  const stack = makeFeature(1);
+  sh(stack.worktrees[0]!, "commit", "-q", "--amend", "-m", "f1 amended");
+  const gh = prGh();
+  expect(await openPrs(stack.id, {}, gh.run)).toEqual(["repo: pushed c1, PR already open: https://github.com/o/r/pull/1"]);
+  expect(sh(stack.origin, "log", "-1", "--format=%s", "c1")).toBe("f1 amended");
+
+  // Someone else pushes c1: our tracking ref is now stale, so the lease refuses to overwrite it.
+  const other = join(stack.dir, "other");
+  sh(stack.dir, "clone", "-q", "-b", "c1", stack.origin, other);
+  commitFile(other, "theirs.txt", "theirs\n", "their work");
+  sh(other, "push", "-q", "origin", "c1");
+  sh(stack.worktrees[0]!, "commit", "-q", "--amend", "-m", "f1 again");
+  const err = await openPrs(stack.id, {}, gh.run).catch((e: Error) => e);
+  expect((err as Error).message).toMatch(/^git push c1 failed: .*\[rejected\].*stale info.*failed to push some refs/);
+  expect(sh(stack.origin, "log", "-1", "--format=%s", "c1")).toBe("their work");
+});
+
+test("pr: a branch with no remote ref yet is pushed and gets its PR", async () => {
+  const stack = noPrs(makeStack(1), 1);
+  sh(stack.worktrees[0]!, "checkout", "-q", "-b", "c1-new");
+  upsertChunk(stack.id, { name: "c1", branch: "c1-new" });
+  const gh = prGh();
+  expect(await openPrs(stack.id, { title: "T", body: "b" }, gh.run)).toEqual(["repo: opened https://github.com/o/repo/pull/10"]);
+  expect(sh(stack.origin, "rev-parse", "c1-new")).toBe(sh(stack.clone, "rev-parse", "c1-new"));
+  expect(gh.calls).toEqual(["pr create", "create c1-new -> main"]);
+});
+
+test("pr: a branch deleted on GitHub after its merge is pushed again despite the stale tracking ref", async () => {
+  const stack = makeFeature(1);
+  upsertChunk(stack.id, { name: "c1", status: "merged" });
+  sh(stack.origin, "branch", "-q", "-D", "c1"); // GitHub deletes the head branch of a merged PR
+  expect(sh(stack.clone, "rev-parse", "origin/c1")).toBe(sh(stack.clone, "rev-parse", "c1"));
+  const gh = prGh();
+  gh.states["https://github.com/o/r/pull/1"] = "MERGED";
+  expect(await openPrs(stack.id, { title: "T", body: "b" }, gh.run)).toEqual(["repo: opened https://github.com/o/repo/pull/10"]);
+  expect(sh(stack.origin, "rev-parse", "c1")).toBe(sh(stack.clone, "rev-parse", "c1"));
+});
+
+test("pr: the Chunks list starts from the remote base and leaves out chunks already merged there", async () => {
+  const stack = noPrs(makeStack(2), 2);
+  const other = join(stack.dir, "other");
+  sh(stack.dir, "clone", "-q", stack.origin, other);
+  sh(other, "push", "-q", "origin", "origin/c1:main"); // c1 merged on GitHub: the local main is behind
+  const gh = prGh();
+  await openPrs(stack.id, { title: "T", body: "b" }, gh.run);
+  expect(gh.bodies["repos/o/repo/pulls/10"]).toBe("b\n\n## Chunks\n\n- `c2` (`c2`)\n  - f2 step 0");
+});
+
+test("pr: a failed push shows the cause, not the first line of git", async () => {
+  const stack = noPrs(makeStack(1), 1);
+  writeFileSync(join(stack.origin, "hooks/pre-receive"), "#!/bin/sh\nexit 1\n", { mode: 0o755 });
+  commitFile(stack.worktrees[0]!, "more.txt", "more\n", "more");
+  const gh = prGh();
+  const err = await openPrs(stack.id, { title: "T", body: "b" }, gh.run).catch((e: Error) => e);
+  expect((err as Error).message).toMatch(/^git push c1 failed: To .* \| ! \[remote rejected\] c1 -> c1 \(pre-receive hook declined\) \| error: failed to push/);
+  expect(gh.calls).toEqual([]);
+});
+
+test("pr: a PR already opened by a crashed run is recorded, from the error or from gh pr list", async () => {
+  for (const withUrl of [true, false]) {
+    const stack = noPrs(makeStack(1), 1);
+    const gh = prGh();
+    const url = "https://github.com/o/repo/pull/7";
+    gh.created.repo = { code: 1, stdout: "", stderr: `a pull request for branch "c1" into branch "main" already exists:\n${withUrl ? url : ""}\n` };
+    if (!withUrl) gh.listed.c1 = url;
+    expect(await openPrs(stack.id, { title: "T", body: "b" }, gh.run)).toEqual([`repo: opened ${url}`]);
+    expect(gh.calls).toEqual(withUrl ? ["pr create"] : ["pr create", "pr list"]);
+    expect(readState(stack.id).chunks[0]!.pr).toBe(url);
+  }
+});
+
+test("pr: a failed gh pr create in the second repo keeps the first PR and prints its URL", async () => {
+  const api = noPrs(makeStack(1, 1, "api"), 1);
+  const web = noPrs(makeStack(1, 1, "web"), 1);
+  const { id } = createPipeline({ repos: [{ path: api.clone, base: "main" }, { path: web.clone, base: "main" }], title: "two" });
+  upsertChunk(id, { name: "a1", repo: api.clone, branch: "c1", worktree: api.worktrees[0], status: "done" });
+  upsertChunk(id, { name: "w1", repo: web.clone, branch: "c1", worktree: web.worktrees[0], status: "done" });
+  const gh = prGh();
+  gh.created.web = { code: 1, stdout: "", stderr: "Warning: 1 uncommitted change\n\nGraphQL: Head sha can't be blank (createPullRequest)\n" };
+  const err = await openPrs(id, { title: "Two", body: "b" }, gh.run).catch((e: Error) => e);
+  expect((err as Error).message).toBe(
+    "api: opened https://github.com/o/api/pull/10\ngh pr create c1 failed: Warning: 1 uncommitted change | GraphQL: Head sha can't be blank (createPullRequest)",
+  );
+  expect(readState(id).chunks.map((c) => c.pr)).toEqual(["https://github.com/o/api/pull/10", undefined]);
+  expect(gh.calls.some((c) => c.startsWith("api"))).toBe(false);
+});
+
+test("pr: a Related PRs list in a CRLF body (edited on the web) is replaced, not doubled", async () => {
+  const api = noPrs(makeStack(1, 1, "api"), 1);
+  const web = noPrs(makeStack(1, 1, "web"), 1);
+  const { id } = createPipeline({ repos: [{ path: api.clone, base: "main" }, { path: web.clone, base: "main" }], title: "two" });
+  upsertChunk(id, { name: "a1", repo: api.clone, branch: "c1", worktree: api.worktrees[0], status: "done", pr: "https://github.com/o/api/pull/3" });
+  upsertChunk(id, { name: "w1", repo: web.clone, branch: "c1", worktree: web.worktrees[0], status: "merged", pr: "https://github.com/o/web/pull/4" });
+  const gh = prGh();
+  gh.states["https://github.com/o/web/pull/4"] = "MERGED";
+  gh.bodies["repos/o/api/pulls/3"] = "Edited.\r\n\r\n## Related PRs\r\n\r\n- https://github.com/o/web/pull/4\r\n";
+  await openPrs(id, { title: "Two", body: "b" }, gh.run);
+  expect(gh.bodies["repos/o/api/pulls/3"]).toBe("Edited.\n\n## Related PRs\n\n- https://github.com/o/web/pull/10\n");
 });
 
 test("base: one PR is merged into main with a merge commit, a single gh call and no git writes", async () => {
@@ -2216,8 +2332,8 @@ test("displaySteps shows a running step as waiting while the user is needed", ()
 
 test("displaySteps keeps a step that runs while another waits as running", () => {
   const steps = [{ name: "review" as const, status: "running" as const }, { name: "preview" as const, status: "running" as const }];
-  const out = displaySteps({ steps, status: "waiting_for_user", waiting: { step: "review", reason: "Push?" } });
-  expect(out.map((s) => [s.status, s.note])).toEqual([["waiting", "Push?"], ["running", undefined]]);
+  const out = displaySteps({ steps, status: "waiting_for_user", waiting: { step: "review", reason: "Keep the old name?" } });
+  expect(out.map((s) => [s.status, s.note])).toEqual([["waiting", "Keep the old name?"], ["running", undefined]]);
 });
 
 test("allMerged and finished", () => {
@@ -2283,12 +2399,12 @@ test("diffRequests: whole stack skips repos without branches, a chunk targets it
 test("wait marks its step running and shows the question until the step moves on", () => {
   const { id } = createPipeline({ repos: [{ path: repo }], title: "t", source: "text" });
   doneBefore(id, "review");
-  waitForUser(id, "review", "Open the PRs?");
+  waitForUser(id, "review", "Keep the old name?");
   let state = readState(id);
   expect(state.status).toBe("waiting_for_user");
   expect(state.step).toBe("review");
   expect(state.steps.find((s) => s.name === "review")!.status).toBe("running");
-  expect(state.waiting).toEqual({ step: "review", reason: "Open the PRs?" });
+  expect(state.waiting).toEqual({ step: "review", reason: "Keep the old name?" });
 
   setStep(id, "review", "done");
   state = readState(id);

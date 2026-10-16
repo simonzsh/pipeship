@@ -167,6 +167,8 @@ export function createPipeline(opts: {
   for (let n = 2; existsSync(pipelineDir(id)); n++) id = `${base}-${n}`;
 
   const mode = opts.mode ?? "full";
+  const unknown = (opts.skip ?? []).filter((n) => !STEPS.includes(n));
+  if (unknown.length) throw new Error(`unknown step in --skip: ${unknown.join(", ")} (expected ${STEPS.join(", ")})`);
   const skipped = new Set([...(mode === "quick" ? QUICK_SKIPS : []), ...(opts.skip ?? [])]);
   const state: State = {
     id,
