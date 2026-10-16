@@ -1,11 +1,11 @@
 #!/usr/bin/env bun
-import { existsSync, readFileSync, rmSync } from "node:fs";
+import { rmSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { parseArgs } from "node:util";
 import { archivePipeline, deletePipeline, findRecipe, git, isAlive, killGroup, loadRecipe, previewLines, startPreview, stopPipeline, unarchivePipeline } from "./preview.ts";
 import { repoName } from "./repos.ts";
 import { detectSession, findT3Thread } from "./session.ts";
-import { DEFAULT_PORT, isDashboardUp, requestDashboardUpdate, serve, spawnDashboard } from "./server.ts";
+import { DEFAULT_PORT, isDashboardUp, requestDashboardUpdate, readDashboardPid, serve, spawnDashboard } from "./server.ts";
 import { getUpdateInfo, updateInPlace } from "./update.ts";
 import {
   STEPS, addRepo, createPipeline, home, listStates, pipelineDir, readState, refreshSessionId, setMode, setStep, updateState, upsertChunk,
@@ -83,11 +83,11 @@ async function startDashboard(): Promise<string> {
 }
 
 async function stopDashboard(): Promise<string> {
-  const pidFile = join(home(), "dashboard.pid");
-  if (!existsSync(pidFile)) return "dashboard not running";
-  const pid = Number(readFileSync(pidFile, "utf8"));
-  if (isAlive(pid)) await killGroup(pid);
-  rmSync(pidFile);
+  const recorded = readDashboardPid();
+  if (!recorded) return "dashboard not running";
+  const { pid, startedAt } = recorded;
+  if (isAlive(pid, startedAt)) await killGroup(pid, startedAt);
+  rmSync(join(home(), "dashboard.pid"));
   return `dashboard stopped (pid ${pid})`;
 }
 
