@@ -13,7 +13,7 @@ export interface ServiceRecipe {
   portEnv?: string;
   readyPath?: string;
   ready?: "http" | "tcp"; // "tcp": ready as soon as the port accepts a connection (databases, queues)
-  env?: Record<string, string>; // values may hold ${<service>.port}
+  env?: Record<string, string>; // values may hold ${<service>.port} and ${pipeline.id}
   fixedPort?: number;
   repo?: string; // repo NAME (repoName of a pipeline repo)
   install?: string; // run in this service's worktree, before any service starts
@@ -53,6 +53,7 @@ export const DASHBOARD_PORT = 4400;
 const PORT_SCAN = 1000;
 const READY_TIMEOUT_MS = 180_000; // per service
 const PORT_REF = /\$\{([A-Za-z0-9_-]+)\.port\}/g;
+const PIPELINE_REF = /\$\{pipeline\.id\}/g;
 
 export function savedRecipePath(repos: string[]): string {
   if (repos.length === 1) {
@@ -209,10 +210,10 @@ export async function pickPorts(
   return ports;
 }
 
-export function resolveEnv(env: Record<string, string>, ports: Record<string, number>): Record<string, string> {
+export function resolveEnv(env: Record<string, string>, ports: Record<string, number>, pipelineId: string): Record<string, string> {
   const out: Record<string, string> = {};
   for (const [key, value] of Object.entries(env)) {
-    out[key] = value.replace(PORT_REF, (_, name: string) => {
+    out[key] = value.replace(PIPELINE_REF, pipelineId).replace(PORT_REF, (_, name: string) => {
       if (ports[name] === undefined) throw new Error(`env "${key}" refers to unknown service "${name}"`);
       return String(ports[name]);
     });
@@ -229,9 +230,13 @@ export function mainService<T extends { kind: string }>(services: T[]): T {
   return services.find((s) => s.kind === "front") ?? services[0]!;
 }
 
+// Legacy states (no services) have only preview.pid, without a start time.
+function previewProcs(preview: Preview): { pid: number | undefined; startedAt?: string }[] {
+  return preview.services?.length ? preview.services.map((s) => ({ pid: s.pid, startedAt: s.startedAt })) : [{ pid: preview.pid }];
+}
+
 export function previewAlive(preview: Preview): boolean {
-  const pids = preview.services?.length ? preview.services.map((s) => s.pid) : [preview.pid];
-  return pids.some((pid) => pid !== undefined && isAlive(pid));
+  return previewProcs(preview).some((p) => p.pid !== undefined && isAlive(p.pid, p.startedAt));
 }
 
 // Ports are planned before install, so a pipeline can hold ports while no process runs yet.
@@ -256,18 +261,41 @@ export function previewLines(preview: Preview): string[] {
   return [preview.url, ...(services.length > 1 ? services.map((s) => `${label(s)}: ${s.url}`) : [])];
 }
 
-export function isAlive(pid: number): boolean {
+// Linux: start in ticks since boot from /proc, which a wall-clock jump does not shift (ps lstart does).
+// Elsewhere: ps lstart, with a fixed locale and zone so the dashboard and the CLI agree.
+export function processStart(pid: number): string | undefined {
+  if (process.platform === "linux") {
+    try {
+      const stat = readFileSync(`/proc/${pid}/stat`, "utf8");
+      // Field 22; the command name (field 2) may hold spaces, so count after its closing paren.
+      return stat.slice(stat.lastIndexOf(")") + 2).split(" ")[19] || undefined;
+    } catch {
+      return undefined;
+    }
+  }
+  const res = spawnSync("ps", ["-o", "lstart=", "-p", String(pid)], {
+    encoding: "utf8",
+    env: { ...process.env, LC_ALL: "C", TZ: "UTC" },
+  });
+  return res.stdout?.trim() || undefined;
+}
+
+// With a recorded start time, a different one means the pid was recycled: the process is gone.
+export function isAlive(pid: number, startedAt?: string): boolean {
   try {
     process.kill(pid, 0);
-    return true;
   } catch {
     return false;
   }
+  if (startedAt === undefined) return true;
+  const now = processStart(pid);
+  return now === undefined || now === startedAt;
 }
 
 // The server runs in its own process group: killing the group also stops
 // the workers that dev servers spawn (Next.js, Vite...).
-export async function killGroup(pid: number): Promise<void> {
+export async function killGroup(pid: number, startedAt?: string): Promise<void> {
+  if (startedAt !== undefined && !isAlive(pid, startedAt)) return;
   const send = (signal: NodeJS.Signals) => {
     try {
       process.kill(-pid, signal);
@@ -294,22 +322,33 @@ function tcpOpen(port: number): Promise<boolean> {
   });
 }
 
-async function waitReady(svc: Service, port: number, pid: number, log: string): Promise<void> {
+export async function waitReady(
+  svc: Pick<Service, "name" | "ready" | "readyPath">,
+  port: number,
+  pid: number,
+  log: string,
+  timeoutMs = READY_TIMEOUT_MS,
+): Promise<void> {
   const { name } = svc;
-  const deadline = Date.now() + READY_TIMEOUT_MS;
+  const deadline = Date.now() + timeoutMs;
+  let last: number | undefined;
   while (Date.now() < deadline) {
     if (!isAlive(pid)) throw new Error(`service "${name}" exited before it was ready. Log tail:\n${tail(log)}`);
     try {
       if (svc.ready === "tcp") {
         if (await tcpOpen(port)) return;
       } else {
-        await fetch(`http://localhost:${port}${svc.readyPath}`, { redirect: "manual", signal: AbortSignal.timeout(5000) });
-        return;
+        const res = await fetch(`http://localhost:${port}${svc.readyPath}`, { redirect: "manual", signal: AbortSignal.timeout(5000) });
+        if (res.status < 500) return;
+        // A 5xx is a server that runs but fails (a compile error page): keep waiting.
+        last = res.status;
+        await res.body?.cancel();
       }
     } catch {}
     await Bun.sleep(1000);
   }
-  throw new Error(`service "${name}" not ready after ${READY_TIMEOUT_MS / 1000}s. Log tail:\n${tail(log)}`);
+  const status = last === undefined ? "" : ` (last status ${last})`;
+  throw new Error(`service "${name}" not ready after ${timeoutMs / 1000}s${status}. Log tail:\n${tail(log)}`);
 }
 
 type Homes = Map<string, { repo: string; worktree: string }>;
@@ -429,7 +468,7 @@ export async function startPreview(id: string, worktree?: string, draft?: string
   const abort = async (err: Error): Promise<never> => {
     const errors: string[] = [];
     for (const svc of [...started].reverse()) {
-      await killGroup(svc.pid!).catch((e: Error) => errors.push(e.message));
+      await killGroup(svc.pid!, svc.startedAt).catch((e: Error) => errors.push(e.message));
     }
     updateState(id, (s) => {
       s.preview = undefined;
@@ -454,12 +493,14 @@ export async function startPreview(id: string, worktree?: string, draft?: string
           stdio: ["ignore", fd, fd],
           env: {
             ...process.env,
-            ...resolveEnv(svc.env, ports),
+            ...resolveEnv(svc.env, ports, id),
             ...(svc.portEnv ? { [svc.portEnv]: String(plan.port) } : {}),
           },
         });
         child.unref();
         plan.pid = child.pid!;
+        const at = processStart(plan.pid);
+        if (at) plan.startedAt = at;
       } finally {
         closeSync(fd);
       }
@@ -496,12 +537,11 @@ export async function stopPreview(id: string): Promise<void> {
   const killed = new Set<number>();
   const killAll = async (preview: Preview | undefined) => {
     if (!preview) return;
-    const pids = preview.services?.length ? [...preview.services].reverse().map((s) => s.pid) : [preview.pid];
-    for (const pid of pids) {
-      if (pid === undefined || killed.has(pid) || !isAlive(pid)) continue;
+    for (const { pid, startedAt } of previewProcs(preview).reverse()) {
+      if (pid === undefined || killed.has(pid) || !isAlive(pid, startedAt)) continue;
       killed.add(pid);
       try {
-        await killGroup(pid);
+        await killGroup(pid, startedAt);
       } catch (err) {
         errors.push((err as Error).message);
       }
