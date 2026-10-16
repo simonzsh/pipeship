@@ -76,6 +76,7 @@ export function reminderText(states: State[], paths: { skill: string; helper: st
     "- one subagent per heavy step; keep the main session for decisions;",
     "- `pipeship get <id>` before each step (stopRequested, skipped steps);",
     "- `pipeship step <id> <step> running` when a step starts, `done` when it ends;",
+    "- the review step ends with `pipeship pr <id>`: it pushes and opens the PRs; run it again after feedback;",
     "- one test suite at a time on the machine, targeted tests only.",
     "A stopped pipeline goes on only if the user asks.",
   ].join("\n");

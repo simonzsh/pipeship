@@ -17,6 +17,18 @@ export function assertRepoName(repos: Repo[], path: string): void {
   if (clash) throw new Error(`repo name "${repoName(path)}" is already used by ${clash.path}`);
 }
 
+// Chunk.status stays free text; the merge engine writes this value.
+export const MERGED = "merged";
+
+// Written by the dashboard's PR sync for a PR closed without merge.
+export const CLOSED = "closed";
+
+// True when at least one PR is merged and every other PR is merged or closed. Server and dashboard share it.
+export function allMerged(p: Pick<State, "chunks">): boolean {
+  const prChunks = p.chunks.filter((c) => c.pr && c.status !== CLOSED);
+  return prChunks.length > 0 && prChunks.every((c) => c.status === MERGED);
+}
+
 export function chunksOf(state: Pick<State, "chunks">, repo: string): Chunk[] {
   return state.chunks.filter((c) => c.repo === repo);
 }
@@ -39,7 +51,7 @@ export function sharesRepo(a: Pick<State, "repos">, b: Pick<State, "repos">): bo
   return a.repos.some((r) => b.repos.some((o) => o.path === r.path));
 }
 
-export interface RepoStack {
+export interface RepoChunks {
   repo: Repo;
   name: string;
   chunks: Chunk[];
@@ -47,7 +59,7 @@ export interface RepoStack {
 }
 
 // Chunks of an unknown repo are left out.
-export function repoStacks(state: Pick<State, "repos" | "chunks" | "merges">): RepoStack[] {
+export function repoChunks(state: Pick<State, "repos" | "chunks" | "merges">): RepoChunks[] {
   return state.repos.map((repo) => ({
     repo,
     name: repoName(repo.path),
@@ -56,65 +68,12 @@ export function repoStacks(state: Pick<State, "repos" | "chunks" | "merges">): R
   }));
 }
 
-type Parent = Chunk | string | undefined; // a chunk of the stack, or a branch outside it
-
-// Each chunk's parent: the chunk whose branch is its base, else the base branch itself.
-// Base: the PR's base on GitHub, else the previous branched chunk, else the repo base.
-// A cycle of retargeted PRs is cut at the repo base.
-function stackParents(chunks: Chunk[], repo: Repo): Map<Chunk, Parent> {
-  const byBranch = new Map(chunks.flatMap((c) => (c.branch ? [[c.branch, c] as const] : [])));
-  const parents = new Map<Chunk, Parent>();
-  let prev = repo.base;
-  for (const c of chunks) {
-    const base = c.prBase ?? prev;
-    const parent = base === undefined ? undefined : byBranch.get(base);
-    parents.set(c, parent && parent !== c ? parent : base);
-    if (c.branch) prev = c.branch;
-  }
-  for (const c of chunks) {
-    const seen = new Set<Chunk>();
-    for (let p = parents.get(c); typeof p === "object" && !seen.has(p); p = parents.get(p)) {
-      if (p === c) {
-        parents.set(c, repo.base);
-        break;
-      }
-      seen.add(p);
-    }
-  }
-  return parents;
-}
-
-export type StackRow = { kind: "root"; branch: string } | { kind: "chunk"; chunk: Chunk; depth: number; rise: number };
-
-// Tree rows for the stack panel, siblings in state order. rise = rows from the parent's row down to this one.
-// Roots: the repo base first, then any other branch a PR targets outside the stack.
-export function stackRows(chunks: Chunk[], repo: Repo): StackRow[] {
-  const parents = stackParents(chunks, repo);
-  const children = new Map<Parent, Chunk[]>();
-  for (const c of chunks) children.set(parents.get(c), [...(children.get(parents.get(c)) ?? []), c]);
-  const rows: StackRow[] = [];
-  const place = (parent: Parent, depth: number) => {
-    const at = rows.length - 1;
-    for (const c of children.get(parent) ?? []) {
-      rows.push({ kind: "chunk", chunk: c, depth, rise: rows.length - at });
-      place(c, depth + 1);
-    }
-  };
-  const roots = [...children.keys()].filter((p) => typeof p !== "object");
-  roots.sort((a, b) => Number(b === repo.base) - Number(a === repo.base));
-  for (const root of roots) {
-    if (root !== undefined) rows.push({ kind: "root", branch: root });
-    place(root, root === undefined ? 0 : 1);
-  }
-  return rows;
-}
-
 export type DiffRange =
   | { from: string; to: string }
   | { error: string; code: "not_found" | "no_branch" | "no_base" };
 
-// chunk undefined = whole stack: <root of the last branched chunk>...<its branch>.
-// chunk = name: <its parent's branch>...<chunk.branch>.
+// chunk undefined = whole repo: <repo base>...<last branched chunk>.
+// chunk = name: <previous branched chunk's branch, else the repo base>...<chunk.branch>.
 export function diffRange(state: Pick<State, "repos" | "chunks">, repo: Repo, chunk?: string): DiffRange {
   const chunks = chunksOf(state, repo.path);
   const name = repoName(repo.path);
@@ -127,10 +86,21 @@ export function diffRange(state: Pick<State, "repos" | "chunks">, repo: Repo, ch
     if (!target) return { error: `unknown chunk: ${chunk}`, code: "not_found" };
     if (!target.branch) return { error: `chunk ${chunk} has no branch yet`, code: "no_branch" };
   }
-  const parents = stackParents(chunks, repo);
-  let p = parents.get(target);
-  if (chunk === undefined) while (typeof p === "object") p = parents.get(p);
-  const from = typeof p === "object" ? p.branch : p;
+  const before = chunk === undefined ? undefined : chunks.slice(0, chunks.indexOf(target)).findLast((c) => c.branch);
+  const from = before?.branch ?? repo.base;
   if (!from) return { error: `${name} has no base branch`, code: "no_base" };
   return { from, to: target.branch! };
+}
+
+// A stack of PRs from an older pipeship is not merged here.
+export const stackRefusal = (repo: string, open: number) =>
+  `${open} PRs of ${repoName(repo)} are not merged: pipeship merges one PR per repo. Merge this stack on GitHub, or with an older pipeship that combines stacks.`;
+
+// The PRs still to merge. A closed PR counts: the merge refuses it rather than skip it.
+export const openPrChunks = (chunks: Chunk[]): Chunk[] => chunks.filter((c) => c.pr && c.status !== MERGED);
+
+// The PR that holds a chunk: its own, else the one of the first later chunk (the PR sits on the top branch).
+export function holdingPr(chunks: Chunk[], name: string): string | undefined {
+  const i = chunks.findIndex((c) => c.name === name);
+  return i < 0 ? undefined : chunks.slice(i).find((c) => c.pr)?.pr;
 }

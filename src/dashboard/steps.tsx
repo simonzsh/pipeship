@@ -46,7 +46,7 @@ export function Steps({ steps, compact }: { steps: DisplayStep[]; compact?: bool
   // A link is green up to the furthest step reached, so skipped steps do not break the line.
   const reached = steps.findLastIndex((s) => s.status !== "pending" && s.status !== "skipped");
   return (
-    <div className="grid grid-cols-7 items-start">
+    <div className="grid grid-cols-6 items-start">
       {steps.map((step, i) => (
         <div key={step.name} className="relative flex flex-col items-center gap-1.5" title={`${step.name}: ${step.status}`}>
           {i < steps.length - 1 && (

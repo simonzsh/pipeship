@@ -1,6 +1,7 @@
 import { GitMerge } from "lucide-react";
 import { useState } from "react";
-import { CLOSED, type Chunk, type MergeRun } from "../state.ts";
+import { CLOSED, openPrChunks, stackRefusal } from "../repos.ts";
+import type { Chunk, MergeRun } from "../state.ts";
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription,
   AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger,
@@ -24,9 +25,7 @@ export function MergeButton({ id, repo, chunks, base, merge, finished }: {
   const [deleteBranches, setDeleteBranches] = useState(true);
   // The run's startedAt seen at the click (null: no click). Ends when the stream shows another run, or the POST fails.
   const [clickedAt, setClickedAt] = useState<string | undefined | null>(null);
-  const todo = chunks.filter((c) => c.pr && c.status !== "merged");
-  // The server refuses a stack with a closed PR: hide the button when nothing open is left, disable it otherwise.
-  const closed = todo.find((c) => c.status === CLOSED);
+  const todo = openPrChunks(chunks);
   const running = merge?.status === "running";
   const starting = clickedAt !== null && merge?.startedAt === clickedAt;
   const run = async () => {
@@ -45,40 +44,43 @@ export function MergeButton({ id, repo, chunks, base, merge, finished }: {
       </Button>
     );
   }
+  // The server refuses a closed PR and a stack of 2 or more: hide the button when only closed PRs are left,
+  // disable it for a stack (a closed PR among 2 or more is a stack too).
   if (!finished || todo.every((c) => c.status === CLOSED)) return null;
-  const failure = (error || merge?.status === "failed") && (
-    <span className="flex min-w-0 items-center text-xs text-destructive" title={error ?? merge?.error}>
-      <span className="max-w-72 truncate">{error ?? `Merge stopped: ${merge?.error}`}</span>
+  const refusal = todo.length > 1 ? stackRefusal(repo, todo.length) : undefined;
+  const message = refusal ?? error ?? (merge?.status === "failed" ? `Merge stopped: ${merge.error}` : undefined);
+  const failure = message && (
+    <span className="flex min-w-0 items-center text-xs text-destructive" title={message}>
+      <span className="max-w-72 truncate">{message}</span>
     </span>
   );
-  const bottom = prNumber(todo[0]!.pr!);
-  const target = base ?? "its base branch";
-  const into = base ? `Merge into ${base}` : "Merge";
-  if (closed) {
+  const button = (
+    <Button variant="outline" size="xs" disabled={!!refusal} title={refusal}>
+      <GitMerge className={ICON} /> {base ? `Merge into ${base}` : "Merge"}
+    </Button>
+  );
+  if (refusal) {
     return (
-      <Button variant="outline" size="xs" disabled>
-        <GitMerge className={ICON} /> {into}
-      </Button>
+      <>
+        {failure}
+        {button}
+      </>
     );
   }
   return (
     <AlertDialog>
       {failure}
-      <AlertDialogTrigger asChild>
-        <Button variant="outline" size="xs">
-          <GitMerge className={ICON} /> {into}
-        </Button>
-      </AlertDialogTrigger>
+      <AlertDialogTrigger asChild>{button}</AlertDialogTrigger>
       <AlertDialogContent>
         <AlertDialogHeader>
-          <AlertDialogTitle>{todo.length > 1 ? `Merge ${todo.length} PRs` : `Merge #${bottom}`} into {target}?</AlertDialogTitle>
+          <AlertDialogTitle>Merge #{prNumber(todo[0]!.pr!)} into {base ?? "its base branch"}?</AlertDialogTitle>
           <AlertDialogDescription>
-            {todo.length > 1 ? `Combines the stack into #${bottom}, then squash-merges it once its checks pass.` : "Squash-merges the PR once its checks pass."}
+            Merges the PR once its checks pass.
           </AlertDialogDescription>
         </AlertDialogHeader>
         <label className="flex items-center gap-2 text-sm">
           <Checkbox checked={deleteBranches} onCheckedChange={(v) => setDeleteBranches(v === true)} />
-          Delete the remote branches after the merge
+          Delete the PR's remote branch after the merge
         </label>
         <AlertDialogFooter>
           <AlertDialogCancel>Cancel</AlertDialogCancel>

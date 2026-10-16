@@ -3,9 +3,9 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync, existsSync, readFileSync
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
-  addRepo, createPipeline, listStates, pipelineDir, pipelineStatus, readState, refreshSessionId, setMode, setStep, updateState, upsertChunk, waitForUser, type State,
+  addRepo, markRepoMerged, createPipeline, listStates, pipelineDir, pipelineStatus, readState, refreshSessionId, setMode, setStep, updateState, upsertChunk, waitForUser, type State,
 } from "../src/state.ts";
-import { chunksOf, diffRange, repoName, repoStacks, sharesRepo, stackRows, topChunk } from "../src/repos.ts";
+import { chunksOf, diffRange, holdingPr, openPrChunks, repoName, repoChunks, sharesRepo, stackRefusal, topChunk } from "../src/repos.ts";
 import {
   archiveIfAllMerged, archivePipeline, DASHBOARD_PORT, deletePipeline, findRecipe, isAlive, killGroup, mainService, normalizeRecipe, pickPorts, previewLines, processStart, resolveEnv,
   requestPreviewStart, savedRecipePath, startOrder, startPreview, stopPipeline, stopPreview, stopPreviewAndSettle, type Service, unarchivePipeline, waitReady,
@@ -14,9 +14,10 @@ import { diffTotals, parseDiff } from "../src/diff.ts";
 import { baseRef, DiffError, gitDiff, headRef, pipelineDiff, resetFetchCache } from "../src/diff-git.ts";
 import { DEFAULT_PORT, readDashboardPid, requestDashboardUpdate, serve, spawnDashboard } from "../src/server.ts";
 import {
-  classifyPr, defaultRunner, DEFAULT_LIMITS, failStaleMerges, isMergeRunning, mergeStack, MergeError, resolveMergeRepo, startMerge, type MergeDeps, type PrView, type Runner,
+  classifyPr, defaultRunner, DEFAULT_LIMITS, failStaleMerges, isMergeRunning, mergeRepo, MergeError, resolveMergeRepo, startMerge, type MergeDeps, type PrView, type Runner, type RunResult,
 } from "../src/merge.ts";
 import { startPrSync, syncPrStatuses } from "../src/pr-sync.ts";
+import { openPrs } from "../src/pr.ts";
 import { spawn, spawnSync } from "node:child_process";
 import { Database } from "bun:sqlite";
 import { detectSession, findT3Thread, type ReadProc } from "../src/session.ts";
@@ -29,7 +30,7 @@ import { diffRequests, diffUrl } from "../src/dashboard/diff-requests.ts";
 import { highlightLines, languageOf } from "../src/dashboard/highlight.tsx";
 import { chunkActivity } from "../src/dashboard/status.tsx";
 import { compareVersions, currentVersion, getUpdateInfo, detectHarness, installUpdate, readCodexInstalled, resetUpdateCache, UpdateError, updateInPlace } from "../src/update.ts";
-import type { Harness, MergeRun } from "../src/state.ts";
+import type { Chunk, Harness, MergeRun } from "../src/state.ts";
 import { shouldReload } from "../src/dashboard/update-info.ts";
 
 const root = mkdtempSync(join(tmpdir(), "pipeship-test-"));
@@ -44,7 +45,7 @@ beforeEach(() => {
 
 
 // The status is derived: tests set the facts it comes from.
-const ALL_STEPS = ["explore", "questions", "plan", "implement", "review", "stack", "preview"] as const;
+const ALL_STEPS = ["explore", "questions", "plan", "implement", "review", "preview"] as const;
 const finishBeforePreview = (id: string) => ALL_STEPS.slice(0, -1).forEach((name) => setStep(id, name, "done"));
 const doneBefore = (id: string, step: (typeof ALL_STEPS)[number]) => ALL_STEPS.slice(0, ALL_STEPS.indexOf(step)).forEach((name) => setStep(id, name, "done"));
 const finishSteps = (id: string) => ALL_STEPS.forEach((name) => setStep(id, name, "done"));
@@ -56,8 +57,16 @@ test("quick mode and --skip mark steps as skipped", () => {
   const quick = createPipeline({ repos: [{ path: repo }], title: "Add date filter", source: "text", mode: "quick" });
   expect(quick.steps.find((s) => s.name === "plan")!.status).toBe("skipped");
 
-  const custom = createPipeline({ repos: [{ path: repo }], title: "x", source: "linear", links: [{ ref: "ABC-1" }], skip: ["questions", "stack"] });
-  expect(custom.steps.filter((s) => s.status === "skipped").map((s) => s.name)).toEqual(["questions", "stack"]);
+  const custom = createPipeline({ repos: [{ path: repo }], title: "x", source: "linear", links: [{ ref: "ABC-1" }], skip: ["questions", "review"] });
+  expect(custom.steps.filter((s) => s.status === "skipped").map((s) => s.name)).toEqual(["questions", "review"]);
+});
+
+test("--skip refuses a name that is not a step, and names the valid ones", () => {
+  const before = listStates().length;
+  expect(() => createPipeline({ repos: [{ path: repo }], title: "x", skip: ["questions", "stack" as never] })).toThrow(
+    "unknown step in --skip: stack (expected explore, questions, plan, implement, review, preview)",
+  );
+  expect(listStates()).toHaveLength(before);
 });
 
 test("ids are unique for the same ticket", () => {
@@ -81,21 +90,21 @@ test("steps and chunks update the state", () => {
 
 test("the pipeline is done once every step is done or skipped, and ready when a preview runs", () => {
   const { id } = createPipeline({ repos: [{ path: repo }], title: "t", source: "text", skip: ["preview"] });
-  doneBefore(id, "stack");
+  doneBefore(id, "review");
   expect(readState(id).status).toBe("running");
-  setStep(id, "stack", "done");
+  setStep(id, "review", "done");
   expect(readState(id).status).toBe("done");
 
   const withPreview = createPipeline({ repos: [{ path: repo }], title: "p", source: "text", skip: ["preview"] }).id;
   updateState(withPreview, (s) => {
     s.preview = { url: "http://localhost:1", port: 1, pid: 1, log: "x", repo, worktree: repo } as never;
   });
-  for (const name of ["explore", "questions", "plan", "implement", "review", "stack"] as const) setStep(withPreview, name, "done");
+  for (const name of ["explore", "questions", "plan", "implement", "review"] as const) setStep(withPreview, name, "done");
   expect(readState(withPreview).status).toBe("ready");
 });
 
 test("a step reopened on a ready or done pipeline sets it back to running", () => {
-  const all = ["explore", "questions", "plan", "implement", "review", "stack", "preview"] as const;
+  const all = ["explore", "questions", "plan", "implement", "review", "preview"] as const;
   const id = createPipeline({ repos: [{ path: repo }], title: "r", source: "text" }).id;
   updateState(id, (s) => {
     s.preview = { url: "http://localhost:1", port: 1, pid: 1, log: "x", repo, worktree: repo } as never;
@@ -132,7 +141,7 @@ test("a failed step run again and done lets the pipeline go back to running, the
   setStep(id, "review", "failed");
   expect(readState(id).status).toBe("failed");
   expect(setStep(id, "review", "running").status).toBe("running");
-  for (const name of ["explore", "questions", "implement", "review", "stack", "preview"] as const) setStep(id, name, "done");
+  for (const name of ["explore", "questions", "implement", "review", "preview"] as const) setStep(id, name, "done");
   expect(readState(id).status).toBe("done");
 });
 
@@ -271,7 +280,7 @@ test("skipped satisfies the gate, also in quick mode", () => {
 test("pending and skipped are allowed out of order", () => {
   const { id } = createPipeline({ repos: [{ path: repo }], title: "g", source: "text" });
   setStep(id, "review", "skipped");
-  setStep(id, "stack", "pending");
+  setStep(id, "preview", "pending");
   expect(stepStatuses(id)[4]).toBe("skipped");
   expect(() => setStep(id, "preview", "running")).toThrow("explore is pending");
 });
@@ -1011,27 +1020,23 @@ interface FakePr {
   view?: (count: number) => Partial<PrView>; // per-view override; count starts at 1
   viewFails?: boolean;
   views: number;
-  body: string;
-  bodyFails?: boolean;
 }
 
 function fakeGh(stack: ReturnType<typeof makeStack>, count: number) {
   const prs: Record<number, FakePr> = {};
   for (let i = 1; i <= count; i++) {
-    prs[i] = { state: "OPEN", base: i === 1 ? "main" : `c${i - 1}`, head: `c${i}`, checks: [], mergeable: "MERGEABLE", reviewDecision: "", isDraft: false, views: 0, body: `PR ${i}` };
+    prs[i] = { state: "OPEN", base: i === 1 ? "main" : `c${i - 1}`, head: `c${i}`, checks: [], mergeable: "MERGEABLE", reviewDecision: "", isDraft: false, views: 0 };
   }
   const calls: string[] = [];
-  const squash: Record<number, string> = {};
   const scratch = join(stack.dir, "scratch");
   sh(stack.dir, "clone", "-q", stack.origin, scratch);
   const originSha = (ref: string) => sh(stack.origin, "rev-parse", ref);
   const ok = (stdout = ""): { code: number; stdout: string; stderr: string } => ({ code: 0, stdout, stderr: "" });
   const gate: { wait?: Promise<void> } = {};
-  const refuse = { merge: false };
+  const refuse = { final: false };
   const gitCalls: string[] = [];
 
   const gh: Runner = async (_cmd, args) => {
-    if (args[0] === "pr" && args[1] === "view" && args[4] === "body") return ok(JSON.stringify({ body: prs[Number(args[2]!.split("/").pop())]!.body }));
     if (args[0] === "pr" && args[1] === "view") {
       await gate.wait;
       const n = Number(args[2]!.split("/").pop());
@@ -1045,37 +1050,17 @@ function fakeGh(stack: ReturnType<typeof makeStack>, count: number) {
       };
       return ok(JSON.stringify(view));
     }
-    if (args[0] === "api") {
-      const n = Number(args[3]!.split("/").pop());
-      if (args[5]!.startsWith("body=")) {
-        calls.push(`patch ${n} body`);
-        if (prs[n]!.bodyFails) return { code: 1, stdout: "", stderr: "HTTP 500\n" };
-        prs[n]!.body = args[5]!.slice(5);
-        return ok("{}");
-      }
-      const base = args[5]!.replace("base=", "");
-      calls.push(`patch ${n} ${base}`);
-      prs[n]!.base = base;
-      return ok("{}");
-    }
     if (args[0] === "pr" && args[1] === "merge") {
       const n = Number(args[2]!.split("/").pop());
-      const kind = args.includes("--merge") ? "merge" : "squash";
-      calls.push(kind === "merge" ? `merge ${n} --merge` : `merge ${n}`);
+      calls.push(`merge ${n} ${args.includes("--merge") ? "--merge" : "--squash"}`);
       const pr = prs[n]!;
       const want = args[args.indexOf("--match-head-commit") + 1];
       if (want !== originSha(pr.head)) return { code: 1, stdout: "", stderr: "head commit mismatch\n" };
-      if (kind === "merge" && refuse.merge) return { code: 1, stdout: "", stderr: "Merge commits are not allowed on this repository.\n" };
+      if (refuse.final) return { code: 1, stdout: "", stderr: "Merge commits are not allowed on this repository.\n" };
       sh(scratch, "fetch", "-q", "origin");
       sh(scratch, "checkout", "-q", "-B", pr.base, `origin/${pr.base}`);
-      if (kind === "merge") {
-        sh(scratch, "merge", "--no-ff", "-q", "-m", `merge #${n}`, `origin/${pr.head}`);
-      } else {
-        sh(scratch, "merge", "--squash", `origin/${pr.head}`);
-        sh(scratch, "commit", "-q", "-m", `squash #${n}`);
-      }
+      sh(scratch, "merge", "--no-ff", "-q", "-m", `merge #${n}`, `origin/${pr.head}`);
       sh(scratch, "push", "-q", "origin", pr.base);
-      squash[n] = originSha(pr.base);
       pr.state = "MERGED";
       return ok();
     }
@@ -1094,61 +1079,257 @@ function fakeGh(stack: ReturnType<typeof makeStack>, count: number) {
     now: () => clock,
     limits: DEFAULT_LIMITS,
   };
-  return { prs, calls, squash, deps, gate, refuse, gitCalls };
+  return { prs, calls, deps, gate, refuse, gitCalls };
+}
+
+// Clears the PRs of chunks c1..cn.
+const noPrs = (s: ReturnType<typeof makeStack>, n: number) => {
+  for (let i = 1; i <= n; i++) upsertChunk(s.id, { name: `c${i}`, pr: undefined });
+  return s;
+};
+
+// One PR per repo: only the top chunk keeps its PR.
+const makeFeature = (n: number) => noPrs(makeStack(n), n - 1);
+
+// The top PR targets main: its commits hold the whole feature.
+function featureGh(stack: ReturnType<typeof makeStack>, n: number) {
+  const gh = fakeGh(stack, n);
+  gh.prs[n]!.base = "main";
+  return gh;
 }
 
 const chunkStatuses = (id: string) => readState(id).chunks.map((c) => c.status);
 
 const noWrites = (gh: ReturnType<typeof fakeGh>) => {
-  // base mode must never rebase, push, fetch or retarget.
+  // The merge must never rebase, push, fetch or retarget.
   expect(gh.gitCalls).toEqual([]);
-  expect(gh.calls.filter((c) => c.startsWith("patch") && !c.endsWith(" body"))).toEqual([]);
 };
 
-test("base: one PR is squash-merged into main with a single gh call and no git writes", async () => {
-  const stack = makeStack(1);
-  const gh = fakeGh(stack, 1);
-  const before = sh(stack.origin, "rev-parse", "c1");
-  await mergeStack(stack.id, gh.deps);
-  const s = readState(stack.id);
-  expect(gh.calls).toEqual(["merge 1"]);
+// `pipeship pr`: real git and a local bare remote, behind a fake gh that records its calls.
+function prGh() {
+  const calls: string[] = [];
+  const states: Record<string, string> = {}; // PR url -> state shown by `gh pr view`
+  const bodies: Record<string, string> = {}; // REST path -> PR body
+  const created: Record<string, RunResult> = {}; // repo name -> forced `gh pr create` result
+  const listed: Record<string, string> = {}; // branch -> URL of its open PR for `gh pr list`
+  let next = 10;
+  const run: Runner = async (cmd, args, opts) => {
+    if (cmd !== "gh") return defaultRunner(cmd, args, opts);
+    calls.push(args.slice(0, args[1] === "-X" ? 3 : 2).join(" "));
+    const ok = (stdout = "") => ({ code: 0, stdout, stderr: "" });
+    if (args[0] === "pr" && args[1] === "view") return ok(JSON.stringify({ state: states[args[2]!] ?? "OPEN" }));
+    if (args[0] === "pr" && args[1] === "list") {
+      const url = listed[args[args.indexOf("--head") + 1]!];
+      return ok(JSON.stringify(url ? [{ url }] : []));
+    }
+    if (args[0] === "pr" && args[1] === "create" && created[repoName(opts.cwd)]) return created[repoName(opts.cwd)]!;
+    if (args[0] === "pr" && args[1] === "create") {
+      const url = `https://github.com/o/${repoName(opts.cwd)}/pull/${next++}`;
+      const at = (flag: string) => args[args.indexOf(flag) + 1]!;
+      calls.push(`create ${at("--head")} -> ${at("--base")}`);
+      bodies[`repos/o/${repoName(opts.cwd)}/pulls/${url.split("/").pop()}`] = at("--body");
+      return ok(`Creating pull request\n${url}\n`);
+    }
+    if (args[0] === "api" && args[1] === "-X") {
+      bodies[args[3]!] = args[5]!.slice("body=".length);
+      return ok();
+    }
+    if (args[0] === "api") return ok(bodies[args[1]!] ?? "");
+    return { code: 1, stdout: "", stderr: `unexpected gh ${args.join(" ")}\n` };
+  };
+  return { calls, states, bodies, created, listed, run };
+}
+
+test("pr: one repo pushes the top branch, opens one PR on the base and records it on the top chunk", async () => {
+  const stack = noPrs(makeStack(2), 2);
+  commitFile(stack.worktrees[1]!, "more.txt", "more\n", "more work");
+  const gh = prGh();
+  const out = await openPrs(stack.id, { title: "Feature", body: "What it does.\n" }, gh.run);
+  expect(out).toEqual(["repo: opened https://github.com/o/repo/pull/10"]);
+  expect(sh(stack.origin, "rev-parse", "c2")).toBe(sh(stack.clone, "rev-parse", "c2"));
+  expect(gh.calls).toEqual(["pr create", "create c2 -> main"]);
+  expect(readState(stack.id).chunks.map((c) => c.pr)).toEqual([undefined, "https://github.com/o/repo/pull/10"]);
+  expect(gh.bodies["repos/o/repo/pulls/10"]).toBe("What it does.\n\n## Chunks\n\n- `c1` (`c1`)\n  - f1 step 0\n- `c2` (`c2`)\n  - f2 step 0\n  - more work");
+});
+
+test("pr: an open PR is only pushed, without a title", async () => {
+  const stack = makeFeature(2);
+  commitFile(stack.worktrees[1]!, "fix.txt", "fix\n", "fix");
+  const gh = prGh();
+  expect(await openPrs(stack.id, {}, gh.run)).toEqual(["repo: pushed c2, PR already open: https://github.com/o/r/pull/2"]);
+  expect(gh.calls).toEqual(["pr view"]);
+  expect(sh(stack.origin, "rev-parse", "c2")).toBe(sh(stack.clone, "rev-parse", "c2"));
+});
+
+test("pr: a merged or closed top PR gets a new PR, and the chunk is polled again", async () => {
+  for (const [status, state] of [["merged", "MERGED"], ["closed", "CLOSED"]] as const) {
+    const stack = makeFeature(1);
+    upsertChunk(stack.id, { name: "c1", status });
+    const gh = prGh();
+    gh.states["https://github.com/o/r/pull/1"] = state;
+    expect(await openPrs(stack.id, { title: "Again", body: "b" }, gh.run)).toEqual(["repo: opened https://github.com/o/repo/pull/10"]);
+    expect(gh.calls).toEqual(["pr view", "pr create", "create c1 -> main"]);
+    expect(readState(stack.id).chunks[0]).toMatchObject({ pr: "https://github.com/o/repo/pull/10", status: "done" });
+  }
+});
+
+test("pr: two repos get two PRs linked by a Related PRs list through the REST API", async () => {
+  const api = noPrs(makeStack(1, 1, "api"), 1);
+  const web = noPrs(makeStack(1, 1, "web"), 1);
+  const { id } = createPipeline({ repos: [{ path: api.clone, base: "main" }, { path: web.clone, base: "main" }], title: "two" });
+  upsertChunk(id, { name: "a1", repo: api.clone, branch: "c1", worktree: api.worktrees[0], status: "done" });
+  upsertChunk(id, { name: "w1", repo: web.clone, branch: "c1", worktree: web.worktrees[0], status: "done" });
+  const gh = prGh();
+  const out = await openPrs(id, { title: "Two", body: "b" }, gh.run);
+  expect(out).toEqual(["api: opened https://github.com/o/api/pull/10", "web: opened https://github.com/o/web/pull/11"]);
+  expect(gh.calls.filter((c) => c.startsWith("api"))).toEqual(["api -X PATCH", "api -X PATCH"]);
+  expect(gh.calls.some((c) => c.startsWith("pr edit"))).toBe(false);
+  expect(gh.bodies["repos/o/api/pulls/10"]).toEndWith("\n\n## Related PRs\n\n- https://github.com/o/web/pull/11\n");
+  expect(gh.bodies["repos/o/web/pulls/11"]).toEndWith("\n\n## Related PRs\n\n- https://github.com/o/api/pull/10\n");
+
+  // The web PR is merged: a new one opens, and the open api PR gets its list replaced, not doubled.
+  gh.states["https://github.com/o/web/pull/11"] = "MERGED";
+  gh.calls.length = 0;
+  await openPrs(id, { title: "Two", body: "b" }, gh.run);
+  expect(gh.calls).toEqual(["pr view", "pr view", "pr create", "create c1 -> main", "api repos/o/api/pulls/10", "api -X PATCH", "api -X PATCH"]);
+  expect(gh.bodies["repos/o/api/pulls/10"]!.split("## Related PRs")).toHaveLength(2);
+  expect(gh.bodies["repos/o/api/pulls/10"]).toEndWith("\n\n## Related PRs\n\n- https://github.com/o/web/pull/12\n");
+});
+
+test("pr: a repo with no remote is skipped with a message", async () => {
+  const stack = noPrs(makeStack(1), 1);
+  sh(stack.clone, "remote", "remove", "origin");
+  const gh = prGh();
+  expect(await openPrs(stack.id, { title: "T", body: "b" }, gh.run)).toEqual(["repo: no remote, skipped"]);
+  expect(gh.calls).toEqual([]);
+  expect(readState(stack.id).chunks[0]!.pr).toBeUndefined();
+});
+
+test("pr: a rewritten branch is pushed with the lease, and a push by someone else is refused with its cause", async () => {
+  const stack = makeFeature(1);
+  sh(stack.worktrees[0]!, "commit", "-q", "--amend", "-m", "f1 amended");
+  const gh = prGh();
+  expect(await openPrs(stack.id, {}, gh.run)).toEqual(["repo: pushed c1, PR already open: https://github.com/o/r/pull/1"]);
+  expect(sh(stack.origin, "log", "-1", "--format=%s", "c1")).toBe("f1 amended");
+
+  // Someone else pushes c1: our tracking ref is now stale, so the lease refuses to overwrite it.
+  const other = join(stack.dir, "other");
+  sh(stack.dir, "clone", "-q", "-b", "c1", stack.origin, other);
+  commitFile(other, "theirs.txt", "theirs\n", "their work");
+  sh(other, "push", "-q", "origin", "c1");
+  sh(stack.worktrees[0]!, "commit", "-q", "--amend", "-m", "f1 again");
+  const err = await openPrs(stack.id, {}, gh.run).catch((e: Error) => e);
+  expect((err as Error).message).toMatch(/^git push c1 failed: .*\[rejected\].*stale info.*failed to push some refs/);
+  expect(sh(stack.origin, "log", "-1", "--format=%s", "c1")).toBe("their work");
+});
+
+test("pr: a branch deleted on GitHub after its merge is pushed again despite the stale tracking ref", async () => {
+  const stack = makeFeature(1);
+  upsertChunk(stack.id, { name: "c1", status: "merged" });
+  sh(stack.origin, "branch", "-q", "-D", "c1"); // GitHub deletes the head branch of a merged PR
+  expect(sh(stack.clone, "rev-parse", "origin/c1")).toBe(sh(stack.clone, "rev-parse", "c1"));
+  const gh = prGh();
+  gh.states["https://github.com/o/r/pull/1"] = "MERGED";
+  expect(await openPrs(stack.id, { title: "T", body: "b" }, gh.run)).toEqual(["repo: opened https://github.com/o/repo/pull/10"]);
+  expect(sh(stack.origin, "rev-parse", "c1")).toBe(sh(stack.clone, "rev-parse", "c1"));
+});
+
+test("pr: the Chunks list starts from the remote base and leaves out chunks already merged there", async () => {
+  const stack = noPrs(makeStack(2), 2);
+  const other = join(stack.dir, "other");
+  sh(stack.dir, "clone", "-q", stack.origin, other);
+  sh(other, "push", "-q", "origin", "origin/c1:main"); // c1 merged on GitHub: the local main is behind
+  const gh = prGh();
+  await openPrs(stack.id, { title: "T", body: "b" }, gh.run);
+  expect(gh.bodies["repos/o/repo/pulls/10"]).toBe("b\n\n## Chunks\n\n- `c2` (`c2`)\n  - f2 step 0");
+});
+
+test("pr: a PR already opened by a crashed run is recorded, from the error or from gh pr list", async () => {
+  for (const withUrl of [true, false]) {
+    const stack = noPrs(makeStack(1), 1);
+    const gh = prGh();
+    const url = "https://github.com/o/repo/pull/7";
+    gh.created.repo = { code: 1, stdout: "", stderr: `a pull request for branch "c1" into branch "main" already exists:\n${withUrl ? url : ""}\n` };
+    if (!withUrl) gh.listed.c1 = url;
+    expect(await openPrs(stack.id, { title: "T", body: "b" }, gh.run)).toEqual([`repo: opened ${url}`]);
+    expect(gh.calls).toEqual(withUrl ? ["pr create"] : ["pr create", "pr list"]);
+    expect(readState(stack.id).chunks[0]!.pr).toBe(url);
+  }
+});
+
+test("pr: a failed gh pr create in the second repo keeps the first PR and prints its URL", async () => {
+  const api = noPrs(makeStack(1, 1, "api"), 1);
+  const web = noPrs(makeStack(1, 1, "web"), 1);
+  const { id } = createPipeline({ repos: [{ path: api.clone, base: "main" }, { path: web.clone, base: "main" }], title: "two" });
+  upsertChunk(id, { name: "a1", repo: api.clone, branch: "c1", worktree: api.worktrees[0], status: "done" });
+  upsertChunk(id, { name: "w1", repo: web.clone, branch: "c1", worktree: web.worktrees[0], status: "done" });
+  const gh = prGh();
+  gh.created.web = { code: 1, stdout: "", stderr: "Warning: 1 uncommitted change\n\nGraphQL: Head sha can't be blank (createPullRequest)\n" };
+  const err = await openPrs(id, { title: "Two", body: "b" }, gh.run).catch((e: Error) => e);
+  expect((err as Error).message).toBe(
+    "api: opened https://github.com/o/api/pull/10\ngh pr create c1 failed: Warning: 1 uncommitted change | GraphQL: Head sha can't be blank (createPullRequest)",
+  );
+  expect(readState(id).chunks.map((c) => c.pr)).toEqual(["https://github.com/o/api/pull/10", undefined]);
+  expect(gh.calls.some((c) => c.startsWith("api"))).toBe(false);
+});
+
+test("pr: a Related PRs list in a CRLF body (edited on the web) is replaced, not doubled", async () => {
+  const api = noPrs(makeStack(1, 1, "api"), 1);
+  const web = noPrs(makeStack(1, 1, "web"), 1);
+  const { id } = createPipeline({ repos: [{ path: api.clone, base: "main" }, { path: web.clone, base: "main" }], title: "two" });
+  upsertChunk(id, { name: "a1", repo: api.clone, branch: "c1", worktree: api.worktrees[0], status: "done", pr: "https://github.com/o/api/pull/3" });
+  upsertChunk(id, { name: "w1", repo: web.clone, branch: "c1", worktree: web.worktrees[0], status: "merged", pr: "https://github.com/o/web/pull/4" });
+  const gh = prGh();
+  gh.states["https://github.com/o/web/pull/4"] = "MERGED";
+  gh.bodies["repos/o/api/pulls/3"] = "Edited.\r\n\r\n## Related PRs\r\n\r\n- https://github.com/o/web/pull/4\r\n";
+  await openPrs(id, { title: "Two", body: "b" }, gh.run);
+  expect(gh.bodies["repos/o/api/pulls/3"]).toBe("Edited.\n\n## Related PRs\n\n- https://github.com/o/web/pull/10\n");
+});
+
+test("base: the top PR is merged into main with a merge commit, a single gh call and no git writes; every chunk becomes merged", async () => {
+  const stack = makeFeature(3);
+  const gh = featureGh(stack, 3);
+  const before = sh(stack.origin, "rev-parse", "c3");
+  await mergeRepo(stack.id, gh.deps);
+  expect(gh.calls).toEqual(["merge 3 --merge"]);
   noWrites(gh);
-  expect(s.merges?.[stack.clone]).toMatchObject({ status: "done", message: "merged #1 into main" });
-  expect(chunkStatuses(stack.id)).toEqual(["merged"]);
-  expect(sh(stack.origin, "ls-tree", "--name-only", "main").split("\n")).toEqual(["base.txt", "f1.txt"]);
-  expect(sh(stack.origin, "rev-list", "--count", "main")).toBe("2");
-  expect(sh(stack.origin, "rev-parse", "c1")).toBe(before);
+  expect(readState(stack.id).merges?.[stack.clone]).toMatchObject({ status: "done", message: "merged #3 into main" });
+  expect(chunkStatuses(stack.id)).toEqual(["merged", "merged", "merged"]);
+  expect(sh(stack.origin, "ls-tree", "--name-only", "main").split("\n")).toEqual(["base.txt", "f1.txt", "f2.txt", "f3.txt"]);
+  // initial + the 3 chunk commits + the merge commit.
+  expect(sh(stack.origin, "rev-list", "--count", "main")).toBe("5");
+  expect(sh(stack.origin, "rev-parse", "c3")).toBe(before);
 });
 
 const remoteBranches = (origin: string) => sh(origin, "branch", "--format=%(refname:short)").split("\n").sort();
 
-test("base: with deleteBranches, the remote branches of the stack go, the base stays", async () => {
-  const stack = makeStack(2);
-  const gh = fakeGh(stack, 2);
-  await mergeStack(stack.id, gh.deps, undefined, true);
-  expect(readState(stack.id).merges?.[stack.clone]).toMatchObject({ status: "done", message: "merged #1 into main" });
-  expect(remoteBranches(stack.origin)).toEqual(["main"]);
+test("base: with deleteBranches, the branch of the PR goes, the base stays", async () => {
+  const stack = makeFeature(2);
+  const gh = featureGh(stack, 2);
+  await mergeRepo(stack.id, gh.deps, undefined, true);
+  expect(readState(stack.id).merges?.[stack.clone]).toMatchObject({ status: "done", message: "merged #2 into main" });
+  expect(remoteBranches(stack.origin)).toEqual(["c1", "main"]);
 });
 
 test("base: without deleteBranches, the remote branches stay", async () => {
   const stack = makeStack(1);
-  await mergeStack(stack.id, fakeGh(stack, 1).deps);
+  await mergeRepo(stack.id, fakeGh(stack, 1).deps);
   expect(remoteBranches(stack.origin)).toEqual(["c1", "main"]);
 });
 
 test("base: a branch already deleted is no error, any other failure only shows in the message", async () => {
-  const stack = makeStack(2);
-  const gh = fakeGh(stack, 2);
+  const stack = makeFeature(2);
+  const gh = featureGh(stack, 2);
   // c2 vanishes just before the cleanup, like a branch GitHub deleted.
   const ghRun = gh.deps.run!;
   gh.deps.run = (c, a, o) => (a[0] === "push" && a[2] === "--delete" && a[3] === "c2" ? (sh(stack.origin, "branch", "-D", "c2"), ghRun(c, a, o)) : ghRun(c, a, o));
-  await mergeStack(stack.id, gh.deps, undefined, true);
-  expect(readState(stack.id).merges?.[stack.clone]?.message).toBe("merged #1 into main");
+  await mergeRepo(stack.id, gh.deps, undefined, true);
+  expect(readState(stack.id).merges?.[stack.clone]?.message).toBe("merged #2 into main");
   const other = makeStack(1);
   const fake = fakeGh(other, 1);
   const run = fake.deps.run!;
   const deps = { ...fake.deps, run: (c: string, a: string[], o: { cwd: string }) => (a[0] === "push" ? Promise.resolve({ code: 1, stdout: "", stderr: "denied\n" }) : run(c, a, o)) };
-  await mergeStack(other.id, deps, undefined, true);
+  await mergeRepo(other.id, deps, undefined, true);
   expect(readState(other.id).merges?.[other.clone]).toMatchObject({ status: "done", message: "merged #1 into main; could not delete c1" });
 });
 
@@ -1160,10 +1341,10 @@ test("startMerge: deleteBranches must be a boolean", () => {
 test("merge engine: finishing the last PR archives a done pipeline, not a running one", async () => {
   const stack = makeStack(1);
   finishSteps(stack.id);
-  await mergeStack(stack.id, fakeGh(stack, 1).deps);
+  await mergeRepo(stack.id, fakeGh(stack, 1).deps);
   expect(readState(stack.id).status).toBe("archived");
   const busy = makeStack(1);
-  await mergeStack(busy.id, fakeGh(busy, 1).deps);
+  await mergeRepo(busy.id, fakeGh(busy, 1).deps);
   expect(readState(busy.id).status).toBe("running");
 });
 
@@ -1171,16 +1352,16 @@ test("base: a failing check stops the merge, and a new run merges once it passes
   const stack = makeStack(1);
   const gh = fakeGh(stack, 1);
   gh.prs[1]!.checks = [{ name: "lint", status: "COMPLETED", conclusion: "FAILURE" }];
-  await mergeStack(stack.id, gh.deps);
+  await mergeRepo(stack.id, gh.deps);
   expect(readState(stack.id).merges?.[stack.clone]).toMatchObject({ status: "failed", current: "c1" });
   expect(readState(stack.id).merges?.[stack.clone]?.error).toContain("lint");
   expect(gh.calls).toEqual([]);
   expect(sh(stack.origin, "rev-list", "--count", "main")).toBe("1");
 
   gh.prs[1]!.checks = [];
-  await mergeStack(stack.id, gh.deps);
+  await mergeRepo(stack.id, gh.deps);
   expect(readState(stack.id).merges?.[stack.clone]?.status).toBe("done");
-  expect(gh.calls).toEqual(["merge 1"]);
+  expect(gh.calls).toEqual(["merge 1 --merge"]);
   noWrites(gh);
 });
 
@@ -1188,7 +1369,7 @@ test("base: checks that stay pending stop the merge after 15 min", async () => {
   const stack = makeStack(1);
   const gh = fakeGh(stack, 1);
   gh.prs[1]!.checks = [{ name: "ci", status: "IN_PROGRESS" }];
-  await mergeStack(stack.id, gh.deps);
+  await mergeRepo(stack.id, gh.deps);
   expect(readState(stack.id).merges?.[stack.clone]?.error).toBe("checks still running on #1 after 15 min");
   expect(gh.calls).toEqual([]);
 });
@@ -1198,31 +1379,22 @@ test("base: a PR that targets another branch than the pipeline base merges into 
   const gh = fakeGh(stack, 1);
   gh.prs[1]!.base = "develop";
   sh(stack.origin, "branch", "develop", "main");
-  await mergeStack(stack.id, gh.deps);
+  await mergeRepo(stack.id, gh.deps);
   expect(readState(stack.id).merges?.[stack.clone]).toMatchObject({ status: "done", message: "merged #1 into develop" });
-  expect(gh.calls).toEqual(["merge 1"]);
-});
-
-test("a run on two stacked PRs combines, then squashes into main in one go", async () => {
-  const stack = makeStack(2);
-  const gh = fakeGh(stack, 2);
-  await startMerge(stack.id, gh.deps).done;
-  expect(gh.calls).toEqual(["merge 2 --merge", "patch 1 body", "merge 1"]);
-  expect(readState(stack.id).merges?.[stack.clone]).toMatchObject({ status: "done", message: "merged #1 into main" });
-  expect(sh(stack.origin, "ls-tree", "--name-only", "main").split("\n")).toEqual(["base.txt", "f1.txt", "f2.txt"]);
+  expect(gh.calls).toEqual(["merge 1 --merge"]);
 });
 
 test("merge: waits until GitHub computes mergeable, and gives up after 2 min", async () => {
   const stack = makeStack(1);
   const gh = fakeGh(stack, 1);
   gh.prs[1]!.view = (n) => (n <= 2 ? { mergeable: "UNKNOWN" } : {});
-  await mergeStack(stack.id, gh.deps);
+  await mergeRepo(stack.id, gh.deps);
   expect(readState(stack.id).merges?.[stack.clone]?.status).toBe("done");
 
   const stuck = makeStack(1);
   const ghStuck = fakeGh(stuck, 1);
   ghStuck.prs[1]!.mergeable = "UNKNOWN";
-  await mergeStack(stuck.id, ghStuck.deps);
+  await mergeRepo(stuck.id, ghStuck.deps);
   expect(readState(stuck.id).merges?.[stuck.clone]?.error).toContain("after 2 min");
   expect(ghStuck.calls).toEqual([]);
 });
@@ -1294,25 +1466,6 @@ test("classifyPr: failed checks beat pending ones, BLOCKED waits for pending che
   expect(classifyPr(pr({ statusCheckRollup: [{ name: "a", status: "COMPLETED", conclusion: "SKIPPED" }] })).kind).toBe("ready");
 });
 
-test("classifyPr: waitChecks false ignores pending checks and keeps the real blocks", () => {
-  const pr = (over: Partial<PrView>): PrView => ({
-    number: 5, url: "u", state: "OPEN", baseRefName: "main", headRefName: "h", headRefOid: "o", isDraft: false,
-    mergeable: "MERGEABLE", mergeStateStatus: "CLEAN", reviewDecision: "", statusCheckRollup: [], ...over,
-  });
-  const running = { name: "ci", status: "IN_PROGRESS" };
-  const now = { waitChecks: false };
-  expect(classifyPr(pr({ statusCheckRollup: [running] }), now).kind).toBe("ready");
-  expect(classifyPr(pr({ statusCheckRollup: [{ context: "x", state: "PENDING" }] }), now).kind).toBe("ready");
-  // BLOCKED is final here, not transient.
-  expect(classifyPr(pr({ mergeStateStatus: "BLOCKED", statusCheckRollup: [running] }), now)).toEqual({
-    kind: "blocked", reason: "merge blocked by branch protection on #5",
-  });
-  expect(classifyPr(pr({ mergeable: "UNKNOWN" }), now).kind).toBe("wait");
-  expect(classifyPr(pr({ isDraft: true }), now).kind).toBe("blocked");
-  expect(classifyPr(pr({ reviewDecision: "REVIEW_REQUIRED" }), now).kind).toBe("blocked");
-  expect(classifyPr(pr({ statusCheckRollup: [running] })).kind).toBe("wait");
-});
-
 test("merge: a STALE check run is not a failure", () => {
   const v = { number: 1, url: "u", state: "OPEN", baseRefName: "main", headRefName: "h", headRefOid: "o", isDraft: false, mergeable: "MERGEABLE",
     mergeStateStatus: "CLEAN", reviewDecision: "", statusCheckRollup: [{ name: "a", status: "COMPLETED", conclusion: "STALE" }] } as PrView;
@@ -1352,256 +1505,101 @@ test("merge: every poll of a long wait refreshes updatedAt", async () => {
       s.merges![stack.clone]!.updatedAt = "2000-01-01T00:00:00.000Z";
     });
   };
-  await mergeStack(stack.id, { ...gh.deps, sleep });
+  await mergeRepo(stack.id, { ...gh.deps, sleep });
   expect(seen).toHaveLength(4);
   expect(Math.min(...seen)).toBeGreaterThan(Date.now() - 60_000);
 });
 
-// Single flow: the same real git remote; the folds never rebase or force-push, and main gets one squash commit.
-const refs = (stack: ReturnType<typeof makeStack>) =>
-  Object.fromEntries(["main", "c1", "c2", "c3"].map((b) => [b, sh(stack.origin, "rev-parse", b)])) as Record<"main" | "c1" | "c2" | "c3", string>;
-const isAncestor = (stack: ReturnType<typeof makeStack>, a: string, b: string) => {
-  try {
-    sh(stack.origin, "merge-base", "--is-ancestor", a, b);
-    return true;
-  } catch {
-    return false;
-  }
-};
-
-test("merge: three PRs fold top-down into the bottom PR, and main receives one squash commit", async () => {
-  const stack = makeStack(3);
-  const gh = fakeGh(stack, 3);
-  const before = refs(stack);
-  await mergeStack(stack.id, gh.deps);
-  const after = refs(stack);
-  const s = readState(stack.id);
-  expect(gh.calls).toEqual(["merge 3 --merge", "merge 2 --merge", "patch 1 body", "merge 1"]);
-  expect(s.merges?.[stack.clone]).toMatchObject({ status: "done", message: "merged #1 into main" });
-  expect(chunkStatuses(stack.id)).toEqual(["merged", "merged", "merged"]);
-  // main gets one squash commit holding the whole stack; c1..c3 are not rebased or force-pushed.
-  expect(sh(stack.origin, "rev-list", "--count", "main")).toBe("2");
-  expect(sh(stack.origin, "ls-tree", "--name-only", "main").split("\n")).toEqual(["base.txt", "f1.txt", "f2.txt", "f3.txt"]);
-  expect(after.main).not.toBe(before.main);
-  expect(sh(stack.origin, "ls-tree", "--name-only", "c1").split("\n")).toEqual(["base.txt", "f1.txt", "f2.txt", "f3.txt"]);
-  expect(isAncestor(stack, before.c1, after.c1) && isAncestor(stack, before.c2, after.c1) && isAncestor(stack, before.c3, after.c1)).toBe(true);
-  expect(isAncestor(stack, before.c2, after.c2)).toBe(true);
-  expect(after.c3).toBe(before.c3);
-  // Only read-only ls-remote calls (the new tip of the branch below): a rebase or a push would show up here.
-  expect(gh.gitCalls.every((g) => g.startsWith("ls-remote origin"))).toBe(true);
-  expect(gh.prs[1]!.body).toContain("Combines #2, #3");
-  expect(gh.prs[1]!.body).toContain("https://github.com/o/r/pull/2");
-  expect(gh.prs[1]!.body).toContain("https://github.com/o/r/pull/3");
-  expect(gh.prs[1]!.body.startsWith("PR 1")).toBe(true);
-  expect([1, 2, 3].map((n) => gh.prs[n]!.base)).toEqual(["main", "c1", "c2"]);
-});
-
-test("merge: falls back to --squash once when merge commits are refused", async () => {
-  const stack = makeStack(2);
-  const gh = fakeGh(stack, 2);
-  gh.refuse.merge = true;
-  await mergeStack(stack.id, gh.deps);
-  expect(gh.calls).toEqual(["merge 2 --merge", "merge 2", "patch 1 body", "merge 1"]);
-  expect(readState(stack.id).merges?.[stack.clone]?.status).toBe("done");
-  expect(sh(stack.origin, "ls-tree", "--name-only", "c1").split("\n")).toEqual(["base.txt", "f1.txt", "f2.txt"]);
-});
-
 test("merge: another merge failure does not fall back to --squash", async () => {
-  const stack = makeStack(2);
-  const gh = fakeGh(stack, 2);
+  const stack = makeFeature(2);
+  const gh = featureGh(stack, 2);
   const run = gh.deps.run!;
   gh.deps.run = async (cmd, args, opts) =>
     args[1] === "merge" ? { code: 1, stdout: "", stderr: "GraphQL: base branch was modified\n" } : run(cmd, args, opts);
-  await mergeStack(stack.id, gh.deps);
+  await mergeRepo(stack.id, gh.deps);
   expect(readState(stack.id).merges?.[stack.clone]).toMatchObject({ status: "failed", error: "gh pr merge #2 failed: GraphQL: base branch was modified" });
-});
-
-test("merge: waits for GitHub to show the new head of the PR below before merging it", async () => {
-  const stack = makeStack(3);
-  const gh = fakeGh(stack, 3);
-  const oldC2 = sh(stack.origin, "rev-parse", "c2");
-  // Views 1-2 are before the fold of #3; views 3-4 still show the old head; then the new head, with checks pending (combine does not wait for them).
-  gh.prs[2]!.view = (n) =>
-    n <= 4 ? (n <= 2 ? {} : { headRefOid: oldC2 }) : n === 5 ? { statusCheckRollup: [{ name: "ci", status: "IN_PROGRESS" }] } : {};
-  await mergeStack(stack.id, gh.deps);
-  expect(readState(stack.id).merges?.[stack.clone]).toMatchObject({ status: "done", message: "merged #1 into main" });
-  expect(gh.calls).toEqual(["merge 3 --merge", "merge 2 --merge", "patch 1 body", "merge 1"]);
-  expect(gh.prs[2]!.views).toBeGreaterThanOrEqual(5);
-  // The fake gh refuses a merge whose --match-head-commit is not the real tip, so the new sha was used.
-});
-
-test("merge: merges a PR whose checks are pending without polling for them", async () => {
-  const stack = makeStack(3);
-  const gh = fakeGh(stack, 3);
-  gh.prs[3]!.checks = [{ name: "ci", status: "IN_PROGRESS" }];
-  gh.prs[2]!.checks = [{ name: "ci", status: "QUEUED" }];
-  let sleeps = 0;
-  const sleep = gh.deps.sleep!;
-  gh.deps.sleep = async (ms) => (sleeps++, sleep(ms));
-  await mergeStack(stack.id, gh.deps);
-  expect(readState(stack.id).merges?.[stack.clone]).toMatchObject({ status: "done", message: "merged #1 into main" });
-  expect(gh.calls).toEqual(["merge 3 --merge", "merge 2 --merge", "patch 1 body", "merge 1"]);
-  expect(sleeps).toBe(0);
-});
-
-test("merge: does not wait for checks to appear after a fold", async () => {
-  const stack = makeStack(3);
-  const gh = fakeGh(stack, 3);
-  gh.prs[2]!.view = (n) => ({ mergeStateStatus: n >= 1 ? "BLOCKED" : "CLEAN" });
-  await mergeStack(stack.id, gh.deps);
-  expect(readState(stack.id).merges?.[stack.clone]?.error).toBe("merge blocked by branch protection on #2");
-  expect(gh.calls).toEqual(["merge 3 --merge"]);
 });
 
 test("merge: a failed check, a draft, a conflict or changes requested still block", async () => {
   const cases: [(pr: ReturnType<typeof fakeGh>["prs"][number]) => void, string][] = [
     [(pr) => (pr.checks = [{ name: "lint", status: "COMPLETED", conclusion: "FAILURE" }, { name: "ci", status: "IN_PROGRESS" }]), "check failed on #2: lint"],
     [(pr) => (pr.isDraft = true), "#2 is a draft"],
-    [(pr) => (pr.mergeable = "CONFLICTING"), "#2 conflicts with c1"],
+    [(pr) => (pr.mergeable = "CONFLICTING"), "#2 conflicts with main"],
     [(pr) => (pr.reviewDecision = "CHANGES_REQUESTED"), "changes requested on #2"],
     [(pr) => (pr.reviewDecision = "REVIEW_REQUIRED"), "review required on #2"],
   ];
   for (const [set, error] of cases) {
-    const stack = makeStack(2);
-    const gh = fakeGh(stack, 2);
+    const stack = makeFeature(2);
+    const gh = featureGh(stack, 2);
     set(gh.prs[2]!);
-    await mergeStack(stack.id, gh.deps);
+    await mergeRepo(stack.id, gh.deps);
     expect(readState(stack.id).merges?.[stack.clone]).toMatchObject({ status: "failed", error });
     expect(gh.calls).toEqual([]);
   }
 });
 
 test("merge: still waits while mergeable is UNKNOWN, and gives up after 2 min", async () => {
-  const stack = makeStack(2);
-  const gh = fakeGh(stack, 2);
+  const stack = makeFeature(2);
+  const gh = featureGh(stack, 2);
   gh.prs[2]!.view = (n) => (n <= 3 ? { mergeable: "UNKNOWN" } : {});
-  await mergeStack(stack.id, gh.deps);
+  await mergeRepo(stack.id, gh.deps);
   expect(readState(stack.id).merges?.[stack.clone]?.status).toBe("done");
   expect(gh.prs[2]!.views).toBeGreaterThanOrEqual(4);
 
-  const stuck = makeStack(2);
-  const ghStuck = fakeGh(stuck, 2);
+  const stuck = makeFeature(2);
+  const ghStuck = featureGh(stuck, 2);
   ghStuck.prs[2]!.mergeable = "UNKNOWN";
-  await mergeStack(stuck.id, ghStuck.deps);
+  await mergeRepo(stuck.id, ghStuck.deps);
   expect(readState(stuck.id).merges?.[stuck.clone]?.error).toContain("after 2 min");
   expect(ghStuck.calls).toEqual([]);
 });
 
-test("merge: an exact URL match decides what is already listed, and other 'not allowed' errors do not squash", async () => {
+test("merge: a repo with 2 open PRs is refused with a 409 and a failed run, and nothing is merged", async () => {
   const stack = makeStack(2);
   const gh = fakeGh(stack, 2);
-  gh.prs[1]!.body = "see https://github.com/o/r/pull/22";
-  await mergeStack(stack.id, gh.deps);
-  expect(gh.calls).toEqual(["merge 2 --merge", "patch 1 body", "merge 1"]);
-  expect(gh.prs[1]!.body).toContain("- https://github.com/o/r/pull/2\n");
-
-  const other = makeStack(2);
-  const gh2 = fakeGh(other, 2);
-  const run = gh2.deps.run!;
-  let merges = 0;
-  gh2.deps.run = async (cmd, args, opts) =>
-    args[1] === "merge" ? (merges++, { code: 1, stdout: "", stderr: "You are not allowed to merge this pull request\n" }) : run(cmd, args, opts);
-  await mergeStack(other.id, gh2.deps);
-  expect(readState(other.id).merges?.[other.clone]?.status).toBe("failed");
-  expect(merges).toBe(1);
-});
-
-test("merge: one open PR skips the combine, and a PR that targets the wrong branch fails", async () => {
-  const stack = makeStack(1);
-  const ghOne = fakeGh(stack, 1);
-  await startMerge(stack.id, ghOne.deps).done;
-  expect(ghOne.calls).toEqual(["merge 1"]);
-  const bad = makeStack(2);
-  const gh = fakeGh(bad, 2);
-  gh.prs[2]!.base = "main";
-  await mergeStack(bad.id, gh.deps);
-  expect(readState(bad.id).merges?.[bad.clone]?.error).toBe("PR #2 targets main, not c1");
+  const text = stackRefusal(stack.clone, 2);
+  try {
+    startMerge(stack.id, gh.deps);
+    throw new Error("expected a 409");
+  } catch (err) {
+    expect([(err as MergeError).status, (err as MergeError).message]).toEqual([409, text]);
+  }
+  await mergeRepo(stack.id, gh.deps);
+  expect(readState(stack.id).merges?.[stack.clone]).toMatchObject({ status: "failed", error: text });
   expect(gh.calls).toEqual([]);
 });
 
-test("merge: a resume after a failing check on #2 skips #3, which is already merged", async () => {
-  const stack = makeStack(3);
-  const gh = fakeGh(stack, 3);
-  gh.prs[2]!.checks = [{ name: "lint", status: "COMPLETED", conclusion: "FAILURE" }];
-  await mergeStack(stack.id, gh.deps);
-  expect(readState(stack.id).merges?.[stack.clone]).toMatchObject({ status: "failed", current: "c2" });
-  expect(gh.calls).toEqual(["merge 3 --merge"]);
-  expect(chunkStatuses(stack.id)).toEqual(["done", "done", "merged"]);
-
-  gh.prs[2]!.checks = [];
-  const { done } = startMerge(stack.id, gh.deps);
-  await done;
-  expect(gh.calls).toEqual(["merge 3 --merge", "merge 2 --merge", "patch 1 body", "merge 1"]);
-  expect(readState(stack.id).merges?.[stack.clone]).toMatchObject({ status: "done", message: "merged #1 into main" });
-  expect(gh.gitCalls.every((g) => g.startsWith("ls-remote origin"))).toBe(true);
-});
-
-test("merge: a failed description update never blocks the squash", async () => {
-  const stack = makeStack(2);
-  const gh = fakeGh(stack, 2);
-  gh.prs[1]!.bodyFails = true;
-  await mergeStack(stack.id, gh.deps);
-  expect(gh.calls).toEqual(["merge 2 --merge", "patch 1 body", "merge 1"]);
-  expect(chunkStatuses(stack.id).every((st) => st === "merged")).toBe(true);
-  expect(readState(stack.id).merges?.[stack.clone]).toMatchObject({
-    status: "done",
-    message: "merged #1 into main; could not list the combined PRs in #1: HTTP 500",
-  });
-});
-
-test("the merge route rejects a mode, and a run squashes with one or two open PRs", async () => {
+test("the merge route rejects a mode", async () => {
   const one = makeStack(1);
-  const two = makeStack(2);
   const server = await serve(0);
   try {
-    const res = await fetch(`http://localhost:${server.port}/api/pipelines/${two.id}/merge`, { method: "POST", body: JSON.stringify({ mode: "base" }) });
+    const res = await fetch(`http://localhost:${server.port}/api/pipelines/${one.id}/merge`, { method: "POST", body: JSON.stringify({ mode: "base" }) });
     expect([res.status, ((await res.json()) as { error?: string }).error]).toEqual([400, "mode is no longer supported: reload the dashboard"]);
   } finally {
     server.stop(true);
   }
-  const gh1 = fakeGh(one, 1);
-  await startMerge(one.id, gh1.deps).done;
-  expect(gh1.calls).toEqual(["merge 1"]);
-  expect(readState(one.id).merges?.[one.clone]?.status).toBe("done");
-  const gh2 = fakeGh(two, 2);
-  await startMerge(two.id, gh2.deps).done;
-  expect(gh2.calls).toEqual(["merge 2 --merge", "patch 1 body", "merge 1"]);
-  expect(readState(two.id).merges?.[two.clone]?.status).toBe("done");
 });
 
-test("merge: the final squash waits for checks on the combined PR, and a failed check resumes without a second fold", async () => {
-  const stack = makeStack(2);
-  const gh = fakeGh(stack, 2);
-  // The fold ignores pending checks on #2; the squash on #1 waits for them.
-  gh.prs[2]!.checks = [{ name: "ci", status: "IN_PROGRESS" }];
-  let polls = 0;
-  gh.prs[1]!.view = () => (++polls <= 4 ? { statusCheckRollup: [{ name: "ci", status: "IN_PROGRESS" }] } : {});
-  await mergeStack(stack.id, gh.deps);
-  expect(polls).toBeGreaterThan(4);
-  expect(gh.calls).toEqual(["merge 2 --merge", "patch 1 body", "merge 1"]);
-
-  const failing = makeStack(2);
-  const g = fakeGh(failing, 2);
-  g.prs[1]!.checks = [{ name: "lint", status: "COMPLETED", conclusion: "FAILURE" }];
-  await mergeStack(failing.id, g.deps);
-  expect(readState(failing.id).merges?.[failing.clone]).toMatchObject({ status: "failed", current: "c1" });
-  expect(chunkStatuses(failing.id)).toEqual(["done", "merged"]);
-  g.prs[1]!.checks = [];
-  await mergeStack(failing.id, g.deps);
-  expect(g.calls).toEqual(["merge 2 --merge", "patch 1 body", "merge 1"]);
-  expect(readState(failing.id).merges?.[failing.clone]?.status).toBe("done");
+test("one PR per repo: deletePipeline removes the local branches of every chunk", async () => {
+  const stack = makeFeature(2);
+  finishSteps(stack.id);
+  await mergeRepo(stack.id, featureGh(stack, 2).deps);
+  stack.worktrees.forEach((wt) => sh(stack.clone, "worktree", "remove", "--force", wt));
+  await deletePipeline(stack.id);
+  const branches = sh(stack.clone, "branch", "--format=%(refname:short)").split("\n");
+  expect(branches).toEqual(["main"]);
 });
 
-test("merge: after the last fold the squash waits for the new head of the bottom PR", async () => {
-  const stack = makeStack(2);
-  const gh = fakeGh(stack, 2);
-  const oldC1 = sh(stack.origin, "rev-parse", "c1");
-  // View 1 comes before the fold; then GitHub still shows the old head and old checks for a while.
-  gh.prs[1]!.view = (n) => (n === 1 ? {} : n <= 4 ? { headRefOid: oldC1 } : {});
-  await mergeStack(stack.id, gh.deps);
-  expect(readState(stack.id).merges?.[stack.clone]?.status).toBe("done");
-  expect(gh.prs[1]!.views).toBeGreaterThanOrEqual(5);
-  expect(gh.calls).toEqual(["merge 2 --merge", "patch 1 body", "merge 1"]);
+test("merge: the final merge does not fall back to squash when merge commits are refused", async () => {
+  const stack = makeFeature(2);
+  const gh = featureGh(stack, 2);
+  gh.refuse.final = true;
+  await mergeRepo(stack.id, gh.deps);
+  const run = readState(stack.id).merges?.[stack.clone];
+  expect(run?.status).toBe("failed");
+  expect(run?.error).toBe('merge commits are not allowed on o/r: enable "Allow merge commits" in the GitHub settings, or merge #2 by hand');
+  expect(gh.calls).toEqual(["merge 2 --merge"]);
+  expect(chunkStatuses(stack.id)).toEqual(["done", "done"]);
 });
 
 test("the API adds test.md as testGuide without writing it to state.json", async () => {
@@ -1810,7 +1808,7 @@ test("repo helpers", () => {
   expect(topChunk(state, "/x/none")).toBeUndefined();
   expect(sharesRepo(state, { repos: [{ path: "/x/b" }] })).toBe(true);
   expect(sharesRepo(state, { repos: [{ path: "/y/b" }] })).toBe(false);
-  const stacks = repoStacks(state);
+  const stacks = repoChunks(state);
   expect(stacks.map((x) => [x.name, x.chunks.length, x.merge !== undefined])).toEqual([["a", 3, false], ["b", 1, true]]);
 });
 
@@ -1948,8 +1946,8 @@ test("a merge over two repos needs a repo, and merges only that repo's stack", a
   expect(s.merges?.[b.clone]).toMatchObject({ status: "done", repo: b.clone });
   expect(s.merges?.[a.clone]).toMatchObject({ status: "done", repo: a.clone });
   expect(s.chunks.map((c) => c.status)).toEqual(["merged", "merged"]);
-  expect(ghB.calls).toEqual(["merge 1"]);
-  expect(ghA.calls).toEqual(["merge 1"]);
+  expect(ghB.calls).toEqual(["merge 1 --merge"]);
+  expect(ghA.calls).toEqual(["merge 1 --merge"]);
 });
 
 test("failStaleMerges fails each stale run and keeps a live one", () => {
@@ -2133,34 +2131,39 @@ test("parseDiff handles no-newline markers, quoted and spaced paths, truncation,
   expect(() => parseDiff("@@ nonsense\n+++\n\0\ndiff --git\n@@ -x\n \\ \n")).not.toThrow();
 });
 
-test("diffRange and stackRows follow the PR bases from GitHub", () => {
-  const repo = { path: "/r/a", base: "main" };
-  // c1 merged and its branch deleted: GitHub retargeted c2 to main. c3 still targets c2. c4 targets a branch outside the stack.
+test("holdingPr gives a chunk its own PR, else the one of the first later chunk", () => {
+  const c = (name: string, pr?: string) => ({ name, ...(pr && { pr }) }) as Chunk;
+  expect(holdingPr([], "a")).toBeUndefined();
+  // Before the PRs exist, and for an unknown chunk.
+  expect(holdingPr([c("a"), c("b")], "a")).toBeUndefined();
+  expect(holdingPr([c("a", "u")], "x")).toBeUndefined();
+  // One PR per repo: the top chunk holds every chunk.
+  expect(["a", "b", "c"].map((n) => holdingPr([c("a"), c("b"), c("c", "u3")], n))).toEqual(["u3", "u3", "u3"]);
+  // Two PRs, and a chunk added after the last one.
+  expect(["a", "b", "c", "d"].map((n) => holdingPr([c("a"), c("b", "u2"), c("c", "u3"), c("d")], n))).toEqual(["u2", "u2", "u3", undefined]);
+});
+
+test("openPrChunks keeps the chunks with a PR not merged, closed ones included", () => {
   const chunks = [
-    { name: "c1", repo: "/r/a", branch: "b1", prBase: "main" },
-    { name: "c2", repo: "/r/a", branch: "b2", prBase: "main" },
-    { name: "c3", repo: "/r/a", branch: "b3", prBase: "b2" },
-    { name: "c4", repo: "/r/a", branch: "b4", prBase: "develop" },
-    { name: "c5", repo: "/r/a", branch: "b5" }, // no PR yet: on the previous branched chunk
+    { name: "a", repo: "r" },
+    { name: "b", repo: "r", pr: "u1", status: "merged" },
+    { name: "c", repo: "r", pr: "u2", status: "closed" },
+    { name: "d", repo: "r", pr: "u3", status: "done" },
+  ];
+  expect(openPrChunks(chunks).map((c) => c.name)).toEqual(["c", "d"]);
+});
+
+test("diffRange follows the local chunk order, with one PR on the top chunk only", () => {
+  const repo = { path: "/r/a", base: "main" };
+  const chunks = [
+    { name: "c1", repo: "/r/a", branch: "b1" },
+    { name: "c2", repo: "/r/a", branch: "b2" },
+    { name: "c3", repo: "/r/a", branch: "b3", pr: "https://github.com/o/r/pull/7" },
   ];
   const s = { repos: [repo], chunks };
-  expect(diffRange(s, repo, "c2")).toEqual({ from: "main", to: "b2" });
+  expect(diffRange(s, repo, "c1")).toEqual({ from: "main", to: "b1" });
   expect(diffRange(s, repo, "c3")).toEqual({ from: "b2", to: "b3" });
-  expect(diffRange(s, repo, "c5")).toEqual({ from: "b4", to: "b5" });
-  // Whole stack: from the root of the top chunk's chain.
-  expect(diffRange(s, repo)).toEqual({ from: "develop", to: "b5" });
-  expect(diffRange({ repos: [repo], chunks: chunks.slice(0, 3) }, repo)).toEqual({ from: "main", to: "b3" });
-
-  const rows = stackRows(chunks, repo).map((r) => (r.kind === "root" ? r.branch : `${"  ".repeat(r.depth)}${r.chunk.name}@${r.rise}`));
-  expect(rows).toEqual(["main", "  c1@1", "  c2@2", "    c3@1", "develop", "  c4@1", "    c5@1"]);
-
-  // Two PRs that target each other: the cycle is cut at the repo base.
-  const loop = [
-    { name: "x", repo: "/r/a", branch: "bx", prBase: "by" },
-    { name: "y", repo: "/r/a", branch: "by", prBase: "bx" },
-  ];
-  expect(stackRows(loop, repo).map((r) => (r.kind === "chunk" ? `${r.chunk.name}:${r.depth}` : r.branch))).toEqual(["main", "x:1", "y:2"]);
-  expect(diffRange({ repos: [repo], chunks: loop }, repo)).toEqual({ from: "main", to: "by" });
+  expect(diffRange(s, repo)).toEqual({ from: "main", to: "b3" });
 });
 
 test("diffRange picks the previous branched chunk, or the base", () => {
@@ -2355,9 +2358,9 @@ test("displaySteps shows a running step as waiting while the user is needed", ()
 });
 
 test("displaySteps keeps a step that runs while another waits as running", () => {
-  const steps = [{ name: "stack" as const, status: "running" as const }, { name: "preview" as const, status: "running" as const }];
-  const out = displaySteps({ steps, status: "waiting_for_user", waiting: { step: "stack", reason: "Push?" } });
-  expect(out.map((s) => [s.status, s.note])).toEqual([["waiting", "Push?"], ["running", undefined]]);
+  const steps = [{ name: "review" as const, status: "running" as const }, { name: "preview" as const, status: "running" as const }];
+  const out = displaySteps({ steps, status: "waiting_for_user", waiting: { step: "review", reason: "Keep the old name?" } });
+  expect(out.map((s) => [s.status, s.note])).toEqual([["waiting", "Keep the old name?"], ["running", undefined]]);
 });
 
 test("allMerged and finished", () => {
@@ -2366,6 +2369,15 @@ test("allMerged and finished", () => {
   expect(allMerged({ chunks: [{ name: "a", pr: "u", status: "merged" }, { name: "b", pr: "v", status: "done" }] as never })).toBe(false);
   expect(allMerged({ chunks: [{ name: "a", pr: "u", status: "merged" }, { name: "b", pr: "v", status: "closed" }] as never })).toBe(true);
   expect(allMerged({ chunks: [{ name: "a", pr: "u", status: "closed" }] as never })).toBe(false);
+  const feature = (...c: object[]) => ({ chunks: c, merged: [] as string[] }) as never as State;
+  const f = feature({ name: "a", repo: "r", status: "done" }, { name: "b", repo: "r", status: "done" }, { name: "c", repo: "r", pr: "u", status: "merged" }, { name: "d", repo: "o" }, { name: "e", repo: "r", status: "coding" });
+  expect(markRepoMerged(f, "r")).toEqual(["a", "b"]);
+  expect(f.chunks.map((c) => c.status)).toEqual(["merged", "merged", "merged", undefined, "coding"]);
+  const open = feature({ name: "a", repo: "r", status: "done" }, { name: "c", repo: "r", pr: "u", status: "done" });
+  expect(markRepoMerged(open, "r")).toEqual([]);
+  const closed = feature({ name: "a", repo: "r", status: "done" }, { name: "c", repo: "r", pr: "u", status: "closed" });
+  expect(markRepoMerged(closed, "r")).toEqual([]);
+  expect(closed.chunks.map((c) => c.status)).toEqual(["done", "closed"]);
   expect(finished({ status: "ready" })).toBe(true);
   for (const status of ["done", "failed", "stopped", "archived"] as const) expect(finished({ status })).toBe(true);
   expect(finished({ status: "running" })).toBe(false);
@@ -2413,19 +2425,19 @@ test("diffRequests: whole stack skips repos without branches, a chunk targets it
 
 test("wait marks its step running and shows the question until the step moves on", () => {
   const { id } = createPipeline({ repos: [{ path: repo }], title: "t", source: "text" });
-  doneBefore(id, "stack");
-  waitForUser(id, "stack", "Push the branches and open the PRs?");
+  doneBefore(id, "review");
+  waitForUser(id, "review", "Keep the old name?");
   let state = readState(id);
   expect(state.status).toBe("waiting_for_user");
-  expect(state.step).toBe("stack");
-  expect(state.steps.find((s) => s.name === "stack")!.status).toBe("running");
-  expect(state.waiting).toEqual({ step: "stack", reason: "Push the branches and open the PRs?" });
+  expect(state.step).toBe("review");
+  expect(state.steps.find((s) => s.name === "review")!.status).toBe("running");
+  expect(state.waiting).toEqual({ step: "review", reason: "Keep the old name?" });
 
-  setStep(id, "stack", "done");
+  setStep(id, "review", "done");
   state = readState(id);
   expect(state.status).toBe("running");
   expect(state.waiting).toBeUndefined();
-  expect(() => waitForUser(id, "stack")).toThrow("nothing to wait on");
+  expect(() => waitForUser(id, "review")).toThrow("nothing to wait on");
 });
 
 test("formatElapsed shows seconds, minutes and hours", () => {
@@ -2698,22 +2710,6 @@ syncTest("pr sync: a PR merged outside pipeship sets the chunk to merged", async
   expect(logs).toEqual([`pr sync: ${id}/c1 -> merged`]);
 });
 
-syncTest("pr sync: records the PR base and follows a retarget", async () => {
-  const id = syncPipeline("sync base", [121, 122]);
-  const logs: string[] = [];
-  await syncPrStatuses({ run: syncGh({ [prUrl(121)]: { state: "OPEN", baseRefName: "main" }, [prUrl(122)]: { state: "OPEN", baseRefName: "c1" } }).run, log: (l) => logs.push(l) });
-  expect(readState(id).chunks.map((c) => c.prBase)).toEqual(["main", "c1"]);
-  expect(logs).toEqual([`pr sync: ${id}/c1 base main`, `pr sync: ${id}/c2 base c1`]);
-  // c1 merged on GitHub, which retargets c2 to main.
-  logs.length = 0;
-  await syncPrStatuses({ run: syncGh({ [prUrl(121)]: { state: "MERGED", baseRefName: "main" }, [prUrl(122)]: { state: "OPEN", baseRefName: "main" } }).run, log: (l) => logs.push(l) });
-  expect(readState(id).chunks.map((c) => c.prBase)).toEqual(["main", "main"]);
-  expect(logs).toEqual([`pr sync: ${id}/c1 -> merged`, `pr sync: ${id}/c2 base main`]);
-  // A new PR on the chunk drops the old base until the next sync.
-  upsertChunk(id, { name: "c2", pr: prUrl(123) });
-  expect(readState(id).chunks[1]!.prBase).toBeUndefined();
-});
-
 syncTest("pr sync: the last PR merged archives a done pipeline", async () => {
   const id = syncPipeline("sync archive", [111]);
   finishSteps(id);
@@ -2905,19 +2901,35 @@ syncTest("pr sync + merge: a chunk merged by the sync does not break Merge into 
   await startMerge(stack.id, gh.deps).done;
   expect(chunkStatuses(stack.id)).toEqual(["merged", "merged"]);
   expect(readState(stack.id).merges?.[stack.clone]?.status).toBe("done");
-  // The resume relists #2 in the description of #1, then squashes.
-  expect(gh.calls).toEqual(["patch 1 body", "merge 1"]);
+  expect(gh.calls).toEqual(["merge 1 --merge"]);
+});
+
+syncTest("pr sync: a PR merged elsewhere marks every chunk of its repo merged", async () => {
+  const id = syncPipeline("sync feature", [undefined, undefined, 160]);
+  finishSteps(id);
+  const logs: string[] = [];
+  await syncPrStatuses({ run: syncGh({ [prUrl(160)]: { state: "MERGED" } }).run, log: (l) => logs.push(l) });
+  expect(chunkStatuses(id)).toEqual(["merged", "merged", "merged"]);
+  expect(logs.filter((l) => l.includes("->"))).toEqual([`pr sync: ${id}/c3 -> merged`]);
+  expect(readState(id).status).toBe("archived");
+});
+
+syncTest("state: chunks without a PR follow the merged PR of their repo on every read", async () => {
+  const id = syncPipeline("merged on read", [undefined, 163]);
+  expect(chunkStatuses(id)).toEqual(["done", "done"]);
+  upsertChunk(id, { name: "c2", status: "merged" });
+  expect(chunkStatuses(id)).toEqual(["merged", "merged"]);
 });
 
 syncTest("pr sync + merge: a chunk closed by the sync makes Merge fail clearly", async () => {
-  const stack = makeStack(2);
-  const gh = fakeGh(stack, 2);
-  gh.prs[2]!.state = "CLOSED";
+  const stack = makeStack(1);
+  const gh = fakeGh(stack, 1);
+  gh.prs[1]!.state = "CLOSED";
   await syncPrStatuses({ run: gh.deps.run!, log: () => {} });
-  expect(chunkStatuses(stack.id)).toEqual(["done", "closed"]);
+  expect(chunkStatuses(stack.id)).toEqual(["closed"]);
   await startMerge(stack.id, gh.deps).done;
   expect(readState(stack.id).merges?.[stack.clone]?.status).toBe("failed");
-  expect(readState(stack.id).merges?.[stack.clone]?.error).toContain("PR #2 is closed");
+  expect(readState(stack.id).merges?.[stack.clone]?.error).toContain("PR #1 is closed");
 });
 
 const fakeLatest = (version: string | Error) => {

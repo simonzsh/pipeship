@@ -1,6 +1,6 @@
 # Test environment recipe
 
-This is the recipe format used by `pipeship preview`. It is read at step 7, and by the explore brief when it drafts a recipe.
+This is the recipe format used by `pipeship preview`. It is read at step 6, and by the explore brief when it drafts a recipe.
 
 You write the recipe. Read `package.json`, the lock file, the README and the dev scripts to find the package manager, the dev command and how the app picks its port. A `.pipeship.json` at the repo root, if the team shares one, wins over the saved recipe.
 

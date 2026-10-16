@@ -1,6 +1,6 @@
 # pipeship
 
-Feature pipeline for Claude Code and Codex. Give it a ticket, an issue or a work request from any source; it maps the code, asks its questions in one batch, plans, implements chunks in parallel worktrees, cleans up the code, opens stacked PRs, and starts the app so you can test it at a URL. It works with [T3 Code](https://github.com/pingdotgg/t3code): each pipeline links back to its T3 Code thread.
+Feature pipeline for Claude Code and Codex. Give it a ticket, an issue or a work request from any source; it maps the code, asks its questions in one batch, plans, implements chunks in parallel worktrees, cleans up the code, opens one PR per repo, and starts the app so you can test it at a URL. It works with [T3 Code](https://github.com/pingdotgg/t3code): each pipeline links back to its T3 Code thread.
 
 ## Install
 
@@ -37,7 +37,7 @@ Type `/pipeship:run` followed by the ticket or the request (`/run` if you use th
 ```
 /pipeship:run ABC-123
 /pipeship:run quick https://github.com/org/repo/issues/42
-/pipeship:run --skip questions,stack "Add a date filter to the orders page"
+/pipeship:run --skip questions,preview "Add a date filter to the orders page"
 ```
 
 You can also ask in plain words: "handle ABC-123 with pipeship".
@@ -68,10 +68,11 @@ Do not use it for a small edit in one file, a config tweak, a question, a review
 
 ### Options
 
-- **Modes**: `full` (default, all 7 steps) and `quick` (one chunk, blocking questions only, explore in the main session, one `sonnet` cleanup pass instead of the full review, no `opus`).
-- **`--skip`** removes steps, e.g. `--skip questions,stack`. You can also say "skip the review" during the run. Steps run in order: `pipeship step` and `pipeship wait` refuse a step whose earlier steps are not done or skipped, so mark a step `skipped` to pass it.
-- **Several repos**: a ticket can span several repos. Pass `--repo` once per repo, or let the explore step find them. Each repo gets its own stack of PRs.
-- **Checks**: subagents run the fast checks (typecheck, lint, format) and only the tests related to the diff, never the full suite. CI runs the full suite on each PR. pipeship runs the full suite locally, once on the top of the stack, only when CI does not run it on PRs or when you ask for it. Never two test suites at once on the machine.
+- **Modes**: `full` (default, all 6 steps) and `quick` (one chunk, blocking questions only, explore in the main session, one `sonnet` cleanup pass instead of the full review, no `opus`).
+- **`--skip`** removes steps, e.g. `--skip questions,preview`. You can also say "skip the review" during the run. Steps run in order: `pipeship step` and `pipeship wait` refuse a step whose earlier steps are not done or skipped, so mark a step `skipped` to pass it.
+- **Several repos**: a ticket can span several repos. Pass `--repo` once per repo, or let the explore step find them. Each repo gets its own PR.
+- **PRs**: the review step ends with `pipeship pr <id>`. For each repo, it pushes the top chunk branch (`--force-with-lease`) and opens one PR on the repo's base, or only pushes when that PR is still open. The body lists the chunks with their commits and, with several repos, the related PRs. A repo with no remote is skipped. After feedback, the agent runs it again: a merged or closed PR gets a new one.
+- **Checks**: subagents run the fast checks (typecheck, lint, format) and only the tests related to the diff, never the full suite. CI runs the full suite on each PR. pipeship runs the full suite locally, once on the top of each repo before it opens the PRs, only when CI does not run it on PRs or when you ask for it. Never two test suites at once on the machine.
 - pipeship starts on its own on a work request: make, fix, build or change something, with or without a ticket (a reference, a URL, a text, or a task decided after a discussion). You do not need to name it. It never starts on a question, an explanation, a plain discussion, a review or a status request.
 
 ## Test environment
@@ -146,16 +147,16 @@ Each pipeline's header shows the logo of the agent that runs the pipeline (Claud
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/dashboard-dark.png">
-  <img alt="The pipeship dashboard: the pipelines grouped by status on the left; on the right a pipeline over two repos with its steps, one PR stack per repo and the Test tab" src="docs/dashboard-light.png" width="720">
+  <img alt="The pipeship dashboard: the pipelines grouped by status on the left; on the right a pipeline over two repos with its steps, one PR per repo and the Test tab" src="docs/dashboard-light.png" width="720">
 </picture>
 
 ### Actions
 
-The header can request a pipeline stop (the agents stop after their current step; the pipeline shows "Stopped"), stop the test servers ("Stop preview": a ready pipeline becomes done) and start them again ("Start preview" on a done pipeline, with no confirmation; a failure shows in the Test tab). A pipeline is `ready` while its preview runs and `done` when every step is finished and no preview runs. A done, failed or stopped pipeline can be archived ("Archive", with a confirmation): it moves to the collapsed "Archived" group, out of the header count, and cannot be unarchived. A pipeline whose PRs are all merged (by the merge engine or on GitHub) is archived by itself once every repo's merge has ended; it is archived when it is ready, done, failed or stopped, and its preview stops. A finished pipeline can be deleted: its worktrees and files go, and so do the local branches of its merged PRs; the other branches and the PRs stay.
+The header can request a pipeline stop (the agents stop after their current step; the pipeline shows "Stopped"), stop the test servers ("Stop preview": a ready pipeline becomes done) and start them again ("Start preview" on a done pipeline, with no confirmation; a failure shows in the Test tab). A pipeline is `ready` while its preview runs and `done` when every step is finished and no preview runs. A done, failed or stopped pipeline can be archived ("Archive", with a confirmation): it moves to the collapsed "Archived" group, out of the header count, and cannot be unarchived. A pipeline whose PRs are all merged (by the merge engine or on GitHub) is archived by itself once every repo's merge has ended; it is archived when it is ready, done, failed or stopped, and its preview stops. A finished pipeline can be deleted: its worktrees and files go, and so do the local branches of its merged chunks; the other branches and the PRs stay.
 
-The PR stack is always visible, with one row per repo, its path and its merge button. A finished pipeline's PRs merge with one violet "Merge into <base>" button, after a confirmation. The confirmation has a checkbox, checked by default, that deletes the remote branches after the merge (never the base). One run does it all. When 2 or more PRs are open, it merges each into the branch below, from the top, with no rebase or force-push, so one PR is left. Then it waits for the checks on that PR and squash-merges it into the base branch: one commit on the base. The run stops at the first PR that cannot merge, with the reason in the pipeline's detail, and the same button resumes it. One merge runs at a time per repo; the repos of a pipeline can merge at the same time.
+The PR list is always visible, with one row per repo: its path, its chunks and its merge button. The PR of each repo merges with one violet "Merge into <base>" button, after a confirmation. The confirmation has a checkbox, checked by default, that deletes the remote branch of the PR after the merge (never the base). One run does it all. It waits for the checks on the PR and merges it into the base branch with a merge commit (never a squash), so the chunk commits stay in its history. A repo with 2 or more PRs not merged (a stack from an older version) is refused with a message: merge that stack on GitHub, or with an older pipeship. The run stops when the PR cannot merge, or when GitHub refuses merge commits, with the reason in the pipeline's detail, and the same button resumes it. One merge runs at a time per repo; the repos of a pipeline can merge at the same time.
 
-The dashboard also syncs PR statuses with GitHub. At startup, on page load and every 60 seconds, it runs `gh pr view` for each chunk that has a PR and is not merged. It skips pipelines with no such PR, and the repos of a pipeline while they merge. A PR merged elsewhere sets the chunk to `merged`. A PR closed without merge sets it to `closed`, and a reopened PR sets it back to `done`. Without `gh`, or on an error, the state stays as it is and the error goes to `~/.pipeship/dashboard.log`. While any merge runs, the Delete button stays disabled. The merge buttons stay for a closed PR: Merge then fails with "PR #n is closed". The page-load check runs at most once every 15 seconds. In the pipeline list, a violet merge icon shows that all PRs of a pipeline are merged.
+The dashboard also syncs PR statuses with GitHub. At startup, on page load and every 60 seconds, it runs `gh pr view` for each chunk that has a PR and is not merged. It skips pipelines with no such PR, and the repos of a pipeline while they merge. Once the PR of a repo is merged, by the button or on GitHub, every chunk of that repo becomes `merged`. A PR closed without merge sets its chunk to `closed`, and a reopened PR sets it back to `done`. Without `gh`, or on an error, the state stays as it is and the error goes to `~/.pipeship/dashboard.log`. While any merge runs, the Delete button stays disabled. The merge buttons stay for a closed PR: Merge then fails with "PR #n is closed". The page-load check runs at most once every 15 seconds. In the pipeline list, a violet merge icon shows that all PRs of a pipeline are merged.
 
 ### Test tab
 
@@ -165,15 +166,15 @@ The test URLs, one per service, and the agent's `test.md` guide: the page to ope
 
 The code diff, to review the work without leaving the dashboard.
 
-- **Whole stack** by default: `<base>...<top branch>`, one diff per repo. The base is the branch at the bottom of the top PR's chain of bases.
-- **One PR**: click it in the stack for `<PR base>...<branch>`. The breadcrumb ("Whole stack › PR #17") or the base branch row brings you back.
+- **Whole repo** by default: `<base>...<top branch>`, one diff per repo.
+- **One chunk**: click it for `<previous chunk's branch>...<branch>`. The rows are joined by a rail from the base branch to the top chunk, which carries the PR (a button with its number). The breadcrumb ("Whole repo › <chunk>") or the base branch row brings you back.
 - Every file opens as a collapsible block with its line numbers, its +/− counts and syntax highlighting. "Collapse all" and "Expand all" toggle every file; "Refresh" reloads the diff.
 
-The base of each diff is `origin/<base>`, fetched before each diff: a base that moved on the remote does not add its commits to the diff. The other end is the local branch (or `origin/<branch>` when the local one is gone). The PR base comes from GitHub: the dashboard reads it with the PR status, every minute. A retargeted PR (by hand, or by GitHub when the branch below it is deleted) moves in the stack tree and in its diff. Before a chunk has a PR, its base is the previous chunk's branch. When the local branch differs from `origin/<branch>`, a badge says so, for example "2 commits not pushed": the PR on GitHub does not show this work yet. A missing branch shows a message in its repo's section.
+The base of each diff is `origin/<base>`, fetched before each diff: a base that moved on the remote does not add its commits to the diff. The other end is the local branch (or `origin/<branch>` when the local one is gone). When the local branch differs from `origin/<branch>`, a badge says so, for example "2 commits not pushed": the PR on GitHub does not show this work yet. A missing branch shows a message in its repo's section.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/dashboard-code-dark.png">
-  <img alt="The Code tab: the diff of one PR of the stack, with line numbers and syntax highlighting" src="docs/dashboard-code-light.png" width="720">
+  <img alt="The Code tab: the diff of one chunk, with line numbers and syntax highlighting" src="docs/dashboard-code-light.png" width="720">
 </picture>
 
 ### T3 Code
@@ -203,6 +204,6 @@ bun run typecheck
 
 GitHub Actions runs both on every pull request and on each push to `main` (`.github/workflows/ci.yml`).
 
-The skill lives in `skills/run/`: `SKILL.md` (rules and steps), `recipe.md` (recipe format, read at step 7) and `prompts/` (one brief per subagent type). Feedback after the end of a pipeline goes through implement and review again.
+The skill lives in `skills/run/`: `SKILL.md` (rules and steps), `recipe.md` (recipe format, read at step 6) and `prompts/` (one brief per subagent type). Feedback after the end of a pipeline goes through implement and review again.
 
 To release, bump `version` in `package.json`, `.claude-plugin/plugin.json` and `.codex-plugin/plugin.json`, then push. Users only get an update when the version changes; a test checks that the three files agree.

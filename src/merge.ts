@@ -1,5 +1,5 @@
 import { archiveIfAllMerged, isAlive } from "./preview.ts";
-import { chunksOf, repoName } from "./repos.ts";
+import { chunksOf, openPrChunks, repoName, stackRefusal } from "./repos.ts";
 import { listStates, lookupRepo, MERGED, readState, updateState, upsertChunk, type Chunk, type MergeRun, type Repo, type State } from "./state.ts";
 
 export interface RunResult {
@@ -57,7 +57,7 @@ export interface PrView {
 export type Verdict =
   | { kind: "ready" }
   | { kind: "wait"; reason: string; pendingChecks: boolean }
-  | { kind: "blocked"; reason: string; transient?: true }; // transient: may clear once CI starts
+  | { kind: "blocked"; reason: string };
 
 export function parsePrUrl(url: string): { owner: string; repo: string; number: number } {
   const m = url.match(/^https?:\/\/[^/]+\/([^/]+)\/([^/]+)\/pull\/(\d+)/);
@@ -75,8 +75,7 @@ const failed = (c: Check) =>
     : c.status === "COMPLETED" && !["SUCCESS", "NEUTRAL", "SKIPPED", "STALE"].includes(c.conclusion ?? "");
 const pending = (c: Check) => (isContext(c) ? c.state === "PENDING" || c.state === "EXPECTED" : c.status !== "COMPLETED");
 
-// waitChecks false (the folds): pending checks do not hold the merge, and BLOCKED is final. The final squash waits.
-export function classifyPr(v: PrView, { waitChecks = true } = {}): Verdict {
+export function classifyPr(v: PrView): Verdict {
   const n = v.number;
   const checks = v.statusCheckRollup ?? [];
   if (v.isDraft) return { kind: "blocked", reason: `#${n} is a draft` };
@@ -88,16 +87,36 @@ export function classifyPr(v: PrView, { waitChecks = true } = {}): Verdict {
   if (v.reviewDecision === "CHANGES_REQUESTED") return { kind: "blocked", reason: `changes requested on #${n}` };
   if (v.reviewDecision === "REVIEW_REQUIRED") return { kind: "blocked", reason: `review required on #${n}` };
   if (v.mergeable === "UNKNOWN") return { kind: "wait", reason: `waiting for GitHub to check #${n}`, pendingChecks: false };
-  const waiting = waitChecks ? checks.filter(pending) : [];
+  const waiting = checks.filter(pending);
   if (waiting.length) {
     return { kind: "wait", reason: `waiting for checks on #${n} (${waiting.length} pending)`, pendingChecks: true };
   }
   // BLOCKED is normal while required checks run, so it is tested after the pending checks.
-  if (v.mergeStateStatus === "BLOCKED") return { kind: "blocked", reason: `merge blocked by branch protection on #${n}`, ...(waitChecks && { transient: true as const }) };
+  if (v.mergeStateStatus === "BLOCKED") return { kind: "blocked", reason: `merge blocked by branch protection on #${n}` };
   return { kind: "ready" };
 }
 
 export const errorMessage = (err: unknown) => (err instanceof Error ? err.message : String(err));
+
+export type PrState = "OPEN" | "MERGED" | "CLOSED";
+
+// The PR state on GitHub; a set mergedAt wins over `state`. The race also covers a runner that ignores timeoutMs.
+export async function prState(run: Runner, url: string, cwd: string, timeoutMs: number): Promise<PrState> {
+  let timer: Timer | undefined;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new Error(`gh timed out after ${timeoutMs} ms`)), timeoutMs);
+  });
+  try {
+    const res = await Promise.race([run("gh", ["pr", "view", url, "--json", "state,mergedAt"], { cwd, timeoutMs }), timeout]);
+    if (res.code !== 0) throw new Error(res.stderr.trim() || `gh exited with ${res.code}`);
+    const view = JSON.parse(res.stdout) as { state?: string; mergedAt?: string | null };
+    const state = view.mergedAt || view.state === "MERGED" ? "MERGED" : view.state;
+    if (state !== "MERGED" && state !== "OPEN" && state !== "CLOSED") throw new Error(`unexpected PR state ${String(view.state)}`);
+    return state;
+  } finally {
+    clearTimeout(timer);
+  }
+}
 
 // Pipeline + repo with a merge job in this process.
 const activeKey = (id: string, repo: string) => `${id}\n${repo}`;
@@ -113,7 +132,7 @@ function runningMerge(repo: string, startedAt: string): MergeRun {
   return { status: "running", repo, pid: process.pid, message: "starting", startedAt, updatedAt: new Date().toISOString() };
 }
 
-// The repo whose stack to merge: optional with one repo, required with several.
+// The repo to merge: optional with one repo, required with several.
 export function resolveMergeRepo(state: State, raw: unknown): Repo {
   const { repos } = state;
   if (raw === undefined || raw === null) {
@@ -147,15 +166,16 @@ export function startMerge(
   if (active.has(key) || (prev?.status === "running" && !isStale(prev, isAlive))) {
     throw new MergeError("a merge is already running", 409);
   }
-  const open = chunksOf(s, repo.path).filter((c) => c.pr && c.status !== MERGED).length;
+  const open = openPrChunks(chunksOf(s, repo.path)).length;
   if (open === 0) throw new MergeError("no open PR to merge", 400);
+  if (open >= 2) throw new MergeError(stackRefusal(repo.path, open), 409);
   if (rawDelete !== undefined && rawDelete !== null && typeof rawDelete !== "boolean") throw new MergeError("deleteBranches must be a boolean", 400);
 
   active.add(key);
   updateState(id, (x) => {
     (x.merges ??= {})[repo.path] = runningMerge(repo.path, new Date().toISOString());
   });
-  const done = mergeStack(id, deps, repo.path, rawDelete === true).finally(() => active.delete(key));
+  const done = mergeRepo(id, deps, repo.path, rawDelete === true).finally(() => active.delete(key));
   return { state: readState(id), done };
 }
 
@@ -180,12 +200,11 @@ interface Ctx {
   id: string;
   repo: string;
   d: MergeDeps;
-  gh: (args: string[]) => Promise<RunResult>;
   view: (url: string) => Promise<PrView>;
   progress: (c: Chunk, message: string) => void;
   finish: (message: string) => void;
-  mergePr: (c: Chunk, head: string, method: "merge" | "squash", message: string) => Promise<void>;
-  waitReady: (c: Chunk, first: PrView, expectedHead: string, pushed: boolean, reuseFirst: boolean, waitChecks?: boolean) => Promise<PrView>;
+  mergePr: (c: Chunk, head: string, message: string) => Promise<void>;
+  waitReady: (c: Chunk, first: PrView) => Promise<PrView>;
 }
 
 function makeCtx(id: string, repo: string, d: MergeDeps): Ctx {
@@ -206,40 +225,29 @@ function makeCtx(id: string, repo: string, d: MergeDeps): Ctx {
     return JSON.parse(r.stdout) as PrView;
   };
 
-  const mergePr: Ctx["mergePr"] = async (c, head, method, message) => {
+  const mergePr: Ctx["mergePr"] = async (c, head, message) => {
     const url = c.pr!;
-    const n = parsePrUrl(url).number;
-    // No -d: the branches of a stack go together, after the last merge (see deleteBranches).
-    const args = (kind: string) => ["pr", "merge", url, kind, "--match-head-commit", head];
-    let r = await gh(args(method === "merge" ? "--merge" : "--squash"));
-    // Squash is the fallback only when the repo refuses merge commits, not for any other failure.
-    if (method === "merge" && r.code !== 0 && /merge commits are not allowed/i.test(r.stderr)) r = await gh(args("--squash"));
+    const { owner, repo: name, number: n } = parsePrUrl(url);
+    // No -d: the branches go together, after the merge (see deleteBranches). No squash fallback: the chunk commits must stay.
+    const r = await gh(["pr", "merge", url, "--merge", "--match-head-commit", head]);
+    if (r.code !== 0 && /merge commits are not allowed/i.test(r.stderr)) {
+      throw new Error(`merge commits are not allowed on ${owner}/${name}: enable "Allow merge commits" in the GitHub settings, or merge #${n} by hand`);
+    }
     if (r.code !== 0) throw new Error(`gh pr merge #${n} failed: ${firstLine(r.stderr)}`);
     upsertChunk(id, { name: c.name, status: MERGED });
     progress(c, message);
   };
 
-  // Just after a fold, GitHub may show the old head and CI has not queued yet: "no checks" and "blocked"
-  // are not final answers. With waitChecks false, only the new head is awaited.
-  // `first` is reused for the first poll unless the PR changed since it was read (a fold).
-  const waitReady: Ctx["waitReady"] = async (c, first, expectedHead, pushed, reuseFirst, waitChecks = true) => {
+  // `first` is reused for the first poll, then the PR is read again.
+  const waitReady: Ctx["waitReady"] = async (c, first) => {
     const url = c.pr!;
     const n = parsePrUrl(url).number;
     let v = first;
-    const hadChecks = v.statusCheckRollup.length > 0;
     const t0 = d.now();
     let checksSince: number | undefined;
-    for (let reuse = reuseFirst; ; reuse = false) {
+    for (let reuse = true; ; reuse = false) {
       if (!reuse) v = await view(url);
-      let verdict = classifyPr(v, { waitChecks });
-      if (pushed && d.now() - t0 <= d.limits.mergeableMs) {
-        const unseen = v.headRefOid !== expectedHead;
-        const noChecks = waitChecks && hadChecks && v.statusCheckRollup.length === 0;
-        if (unseen || (verdict.kind === "ready" && noChecks) || (verdict.kind === "blocked" && verdict.transient)) {
-          const reason = waitChecks ? `waiting for checks to start on #${n}` : `waiting for GitHub to show the new head of #${n}`;
-          verdict = { kind: "wait", reason, pendingChecks: false };
-        }
-      }
+      const verdict = classifyPr(v);
       if (verdict.kind === "ready") break;
       if (verdict.kind === "blocked") throw new Error(verdict.reason);
       if (verdict.pendingChecks) {
@@ -254,78 +262,13 @@ function makeCtx(id: string, repo: string, d: MergeDeps): Ctx {
     return v;
   };
 
-  return { id, repo, d, gh, view, progress, finish, mergePr, waitReady };
+  return { id, repo, d, view, progress, finish, mergePr, waitReady };
 }
 
-// Appends the folded PRs to the bottom PR's description, once each. The list is cosmetic:
-// a failure returns a warning and never blocks the merge.
-async function listFoldedPrs(x: Ctx, bottom: Chunk, folded: string[]): Promise<string | undefined> {
-  if (!folded.length) return;
-  const bottomUrl = bottom.pr!;
-  const bn = parsePrUrl(bottomUrl);
-  const warn = (why: string) => `could not list the combined PRs in #${bn.number}: ${why}`;
-  try {
-    x.progress(bottom, `updating the description of #${bn.number}`);
-    const got = await x.gh(["pr", "view", bottomUrl, "--json", "body"]);
-    if (got.code !== 0) return warn(firstLine(got.stderr));
-    const body: string = (JSON.parse(got.stdout) as { body?: string }).body ?? "";
-    // Exact match: .../pull/1 must not count as listed because .../pull/12 is.
-    const todo = folded.filter((u) => !new RegExp(`${u.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?!\\d)`).test(body));
-    if (!todo.length) return;
-    const line = `Combines ${todo.map((u) => `#${parsePrUrl(u).number}`).join(", ")} (merged into this branch):\n${todo.map((u) => `- ${u}`).join("\n")}`;
-    const patch = await x.gh(["api", "-X", "PATCH", `repos/${bn.owner}/${bn.repo}/pulls/${bn.number}`, "-f", `body=${body.trimEnd()}\n\n${line}\n`]);
-    if (patch.code !== 0) return warn(firstLine(patch.stderr));
-  } catch (err) {
-    return warn(errorMessage(err));
-  }
-}
-
-// Combine: fold each PR into the branch of the PR below, top first. No rebase, retarget or push:
-// origin and the base branch stay untouched, and the bottom PR collects the whole stack.
-async function combine(x: Ctx, chunks: Chunk[]): Promise<{ tip?: string; warning?: string }> {
-  const views = await Promise.all(chunks.map((c) => x.view(c.pr!)));
-  const closed = views.find((v) => v.state === "CLOSED");
-  if (closed) throw new Error(`PR #${closed.number} is closed`);
-  chunks.forEach((c, i) => views[i]!.state === "MERGED" && upsertChunk(x.id, { name: c.name, status: MERGED }));
-  const bottom = views.findIndex((v) => v.state === "OPEN");
-  if (bottom < 0) throw new Error("no open PR to combine");
-  const top = views.findLastIndex((v) => v.state === "OPEN");
-
-  // Tip of the branch that the last fold went into: GitHub shows it on the next PR only after a delay.
-  let foldTip: string | undefined;
-  for (let i = top; i > bottom; i--) {
-    const c = chunks[i]!;
-    const below = views[i - 1]!;
-    const n = parsePrUrl(c.pr!).number;
-    x.progress(c, `checking #${n}`);
-    // The first step reuses the view read above; later ones follow a fold, so they need a fresh one.
-    const first = i === top ? views[i]! : await x.view(c.pr!);
-    if (first.baseRefName !== below.headRefName) throw new Error(`PR #${n} targets ${first.baseRefName}, not ${below.headRefName}`);
-    const v = await x.waitReady(c, first, foldTip ?? first.headRefOid, foldTip !== undefined, i === top, false);
-
-    await x.mergePr(c, v.headRefOid, "merge", `combined #${n} into ${below.headRefName}`);
-    const tip = await x.d.run("git", ["ls-remote", "origin", `refs/heads/${below.headRefName}`], { cwd: x.repo });
-    foldTip = tip.stdout.split(/\s/)[0];
-    if (tip.code !== 0 || !foldTip) throw new Error(`could not read the new head of ${below.headRefName}: ${firstLine(tip.stderr)}`);
-  }
-
-  // Every PR above the bottom one is merged now, including those from an earlier run.
-  const folded = chunks.slice(bottom + 1).map((c) => c.pr!);
-  return { tip: foldTip, warning: await listFoldedPrs(x, chunks[bottom]!, folded) };
-}
-
-// A previous run may have folded everything and failed on the description: relist (idempotent).
-async function relistFolded(x: Ctx, chunks: Chunk[]): Promise<string | undefined> {
-  const bottom = chunks.findIndex((c) => c.status !== MERGED);
-  if (bottom < 0) return;
-  const folded = chunks.slice(bottom + 1).filter((c) => c.status === MERGED).map((c) => c.pr!);
-  return listFoldedPrs(x, chunks[bottom]!, folded);
-}
-
-// Deletes the stack's remote branches, never the base. Returns the branches that could not go:
+// Deletes the remote branches of the chunks with a PR, never the base. Returns the branches that could not go:
 // a failure here must not undo a merge that already happened.
 async function deleteBranches(x: Ctx, chunks: Chunk[], keep: string[]): Promise<string[]> {
-  const names = [...new Set(chunks.map((c) => c.branch).filter((b): b is string => !!b && !keep.includes(b)))];
+  const names = [...new Set(chunks.filter((c) => c.pr).map((c) => c.branch).filter((b): b is string => !!b && !keep.includes(b)))];
   const left: string[] = [];
   for (const b of names) {
     const r = await x.d.run("git", ["push", "origin", "--delete", b], { cwd: x.repo });
@@ -335,11 +278,11 @@ async function deleteBranches(x: Ctx, chunks: Chunk[], keep: string[]): Promise<
   return left;
 }
 
-// Squash-merge the single PR left into the base branch. No rebase, push or retarget:
-// combine already put the whole stack on this PR's branch. `afterFold` is the new head after a fold.
-async function mergeIntoBase(x: Ctx, repo: Repo, chunks: Chunk[], remove: boolean, afterFold?: string, warning?: string): Promise<void> {
-  const open = chunks.filter((c) => c.status !== MERGED);
-  if (open.length !== 1) throw new Error(open.length ? `${open.length} PRs still open after the combine` : "no open PR to merge");
+// Merge the repo's single open PR into its base with a merge commit. No rebase, push or retarget.
+async function mergeIntoBase(x: Ctx, repo: Repo, chunks: Chunk[], remove: boolean): Promise<void> {
+  // startMerge refused the other cases; the state may have changed since.
+  const open = openPrChunks(chunks);
+  if (open.length !== 1) throw new Error(open.length ? stackRefusal(repo.path, open.length) : "no open PR to merge");
   const c = open[0]!;
   const n = parsePrUrl(c.pr!).number;
   x.progress(c, `checking #${n}`);
@@ -349,16 +292,15 @@ async function mergeIntoBase(x: Ctx, repo: Repo, chunks: Chunk[], remove: boolea
   const base = v.baseRefName;
   if (v.state === "MERGED") upsertChunk(x.id, { name: c.name, status: MERGED });
   else {
-    // Right after a fold GitHub may still show the old head and its old green checks.
-    const ready = afterFold ? await x.waitReady(c, v, afterFold, true, true) : await x.waitReady(c, v, v.headRefOid, false, true);
-    await x.mergePr(c, ready.headRefOid, "squash", `merged #${n}`);
+    const ready = await x.waitReady(c, v);
+    await x.mergePr(c, ready.headRefOid, `merged #${n}`);
   }
   const left = remove ? await deleteBranches(x, chunks, [base, repo.base ?? base]) : [];
-  x.finish(`merged #${n} into ${base}` + (left.length ? `; could not delete ${left.join(", ")}` : "") + (warning ? `; ${warning}` : ""));
+  x.finish(`merged #${n} into ${base}` + (left.length ? `; could not delete ${left.join(", ")}` : ""));
 }
 
 // Never throws: every failure ends up in state.merges. `repo` is a path or a name.
-export async function mergeStack(
+export async function mergeRepo(
   id: string,
   deps: Partial<MergeDeps> = {},
   repoRef?: string,
@@ -382,13 +324,7 @@ export async function mergeStack(
       (x.merges ??= {})[found.path] = runningMerge(found.path, startedAt);
     });
     const x = makeCtx(id, found.path, d);
-    // Re-read after the combine: it records the merged PRs in the state file.
-    const prChunks = () => chunksOf(readState(id), found.path).filter((c) => c.pr);
-    let tip: string | undefined;
-    let warning: string | undefined;
-    if (prChunks().filter((c) => c.status !== MERGED).length > 1) ({ tip, warning } = await combine(x, prChunks()));
-    else warning = await relistFolded(x, prChunks());
-    await mergeIntoBase(x, found, prChunks(), removeBranches, tip, warning);
+    await mergeIntoBase(x, found, chunksOf(readState(id), found.path), removeBranches);
     if (readState(id).merges?.[found.path]?.status === "done") await archiveIfAllMerged(id);
   } catch (err) {
     try {

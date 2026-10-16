@@ -1,7 +1,7 @@
 import type { State } from "../state.ts";
 import { chunksOf } from "../repos.ts";
 
-// chunk undefined = whole stack (one diff per repo with at least one branch).
+// chunk undefined = whole repo (one diff per repo with at least one branch).
 export type DiffTarget = { chunk?: string };
 export interface DiffRequest {
   repo: string;

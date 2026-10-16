@@ -44,7 +44,7 @@ export interface ParseOptions {
 export interface DiffResponse {
   repo: string; // Repo.path
   name: string; // repoName(repo)
-  chunk: string | null; // null = whole stack
+  chunk: string | null; // null = whole repo
   from: string; // branch name as given (base or previous chunk branch)
   to: string;
   range: string; // refs actually used, e.g. "main...feat/api" or "origin/main...feat/api"

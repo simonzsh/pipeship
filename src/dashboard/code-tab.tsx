@@ -2,7 +2,7 @@ import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useStat
 import { AlertCircle, ArrowUp, ChevronDown, ChevronRight, ChevronsDownUp, ChevronsUpDown, FlaskConical, RefreshCw } from "lucide-react";
 import { Spinner } from "./components/ui/spinner";
 import type { DashboardState } from "../state.ts";
-import { repoName } from "../repos.ts";
+import { chunksOf, holdingPr, repoName } from "../repos.ts";
 import type { DiffErrorBody, DiffFile, DiffHunk, DiffResponse, LineKind } from "../diff.ts";
 import { Badge } from "./components/ui/badge";
 import { Button } from "./components/ui/button";
@@ -15,30 +15,27 @@ export type { DiffTarget };
 export interface CodeTabProps {
   p: DashboardState;
   target: DiffTarget;
-  onTarget: (t: DiffTarget) => void; // the "Whole stack" breadcrumb link
+  onTarget: (t: DiffTarget) => void; // the "Whole repo" breadcrumb link
 }
 
 type Result = { loading: true } | { data: DiffResponse } | { error: string };
 
 export interface RefreshKeys {
   manual: number; // Refresh button: forces the server fetch
-  prBase: string; // a chunk's prBase changed: forces too
   soft: string; // branch/status changed: goes through the server cache
 }
 
 // Stale-while-revalidate: each URL keeps its last result and shows it while a refetch runs.
-// Refetch on manual refresh or a branch/status/prBase change, not on every SSE tick.
+// Refetch on manual refresh or a branch/status change, not on every SSE tick.
 function useDiff(id: string, requests: DiffRequest[], keys: RefreshKeys): { results: Result[]; fetching: boolean } {
   const [results, setResults] = useState<Record<string, Result>>({});
   const [fetching, setFetching] = useState(false);
-  const prev = useRef({ ...keys, urlsKey: "" });
+  const lastManual = useRef(keys.manual);
   const urls = requests.map((r) => diffUrl(id, r));
   const urlsKey = urls.join("\n");
   useEffect(() => {
-    // prBase is repo-wide, so it only counts as a change while the target stays the same.
-    const last = prev.current;
-    const force = keys.manual !== last.manual || (keys.prBase !== last.prBase && urlsKey === last.urlsKey);
-    prev.current = { ...keys, urlsKey };
+    const force = keys.manual !== lastManual.current;
+    lastManual.current = keys.manual;
     const ctl = new AbortController();
     setFetching(true);
     // An old error must not stick: the revalidation below replaces it.
@@ -68,7 +65,7 @@ function useDiff(id: string, requests: DiffRequest[], keys: RefreshKeys): { resu
     }
     return () => ctl.abort();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [urlsKey, keys.manual, keys.prBase, keys.soft]);
+  }, [urlsKey, keys.manual, keys.soft]);
   return { results: urls.map((u) => results[u] ?? ({ loading: true } as Result)), fetching };
 }
 
@@ -330,12 +327,13 @@ export function CodeTab({ p, target, onTarget }: CodeTabProps) {
   // A chunk's range starts at the previous chunk, so any chunk of the repo can move it.
   const repos = new Set(requests.map((r) => r.repo));
   const mine = p.chunks.filter((c) => repos.has(c.repo));
-  const keys = { manual, prBase: JSON.stringify(mine.map((c) => c.prBase)), soft: JSON.stringify(mine.map((c) => [c.branch, c.status])) };
+  const keys = { manual, soft: JSON.stringify(mine.map((c) => [c.branch, c.status])) };
   const { results, fetching } = useDiff(p.id, requests, keys);
   const multi = p.repos.length > 1;
 
   const chunk = target.chunk ? p.chunks.find((c) => c.name === target.chunk) : undefined;
-  const pr = chunk?.pr ? prNumber(chunk.pr) : undefined;
+  const held = chunk ? holdingPr(chunksOf(p, chunk.repo), chunk.name) : undefined;
+  const pr = held ? prNumber(held) : undefined;
   const datas = results.flatMap((r) => ("data" in r ? [r.data] : []));
   const additions = datas.reduce((n, d) => n + d.additions, 0);
   const deletions = datas.reduce((n, d) => n + d.deletions, 0);
@@ -345,17 +343,17 @@ export function CodeTab({ p, target, onTarget }: CodeTabProps) {
   return (
     <div ref={root} className="flex flex-col gap-4">
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1 px-6 text-sm">
-        {/* Breadcrumb: "Whole stack" is the way back once a PR is picked. */}
+        {/* Breadcrumb: "Whole repo" is the way back once a chunk is picked. */}
         {chunk ? (
           <span className="flex items-center gap-1.5">
             <button type="button" onClick={() => onTarget({})} className="text-muted-foreground underline-offset-4 hover:text-foreground hover:underline">
-              Whole stack
+              Whole repo
             </button>
             <ChevronRight className="size-3.5 text-muted-foreground" />
             <span className="font-medium">{`${pr ? `PR #${pr} · ` : ""}${chunk.name}`}</span>
           </span>
         ) : (
-          <span className="font-medium">Whole stack</span>
+          <span className="font-medium">Whole repo</span>
         )}
         {!multi && datas[0] && <code className="rounded bg-muted px-1.5 py-0.5 text-xs text-muted-foreground">{datas[0].range}</code>}
         {!multi && datas[0] && <OriginSync data={datas[0]} />}

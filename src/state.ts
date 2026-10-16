@@ -1,9 +1,11 @@
 import { closeSync, existsSync, mkdirSync, openSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
-import { assertRepoName, findRepo, repoName } from "./repos.ts";
+import { allMerged, assertRepoName, chunksOf, CLOSED, findRepo, MERGED, repoName } from "./repos.ts";
 
-export const STEPS = ["explore", "questions", "plan", "implement", "review", "stack", "preview"] as const;
+export { allMerged, CLOSED, MERGED };
+
+export const STEPS = ["explore", "questions", "plan", "implement", "review", "preview"] as const;
 export type StepName = (typeof STEPS)[number];
 export type StepStatus = "pending" | "running" | "done" | "skipped" | "failed";
 export const STATUSES = ["running", "waiting_for_user", "ready", "done", "failed", "stopped", "archived"] as const;
@@ -22,25 +24,22 @@ export interface Chunk {
   branch?: string;
   status?: string;
   pr?: string;
-  prBase?: string; // base branch of the PR on GitHub, written by the PR sync; wins over the stack order
 }
 
-// Chunk.status stays free text; the merge engine writes this value.
-export const MERGED = "merged";
-
-// Written by the dashboard's PR sync for a PR closed without merge.
-export const CLOSED = "closed";
-
-// True when at least one PR is merged and every other PR is merged or closed. Server and dashboard share it.
-export function allMerged(p: Pick<State, "chunks">): boolean {
-  const prChunks = p.chunks.filter((c) => c.pr && c.status !== CLOSED);
-  return prChunks.length > 0 && prChunks.every((c) => c.status === MERGED);
+// One PR per repo: once the repo's PRs are all merged (closed ones aside), its chunks without a PR are merged too.
+// Mutates `s`; returns the names it changed.
+export function markRepoMerged(s: State, repo: string): string[] {
+  const chunks = chunksOf(s, repo);
+  if (!allMerged({ chunks })) return [];
+  const changed = chunks.filter((c) => !c.pr && c.status === "done");
+  for (const c of changed) c.status = MERGED;
+  return changed.map((c) => c.name);
 }
 
 export type MergeStatus = "running" | "done" | "failed";
 export interface MergeRun {
   status: MergeStatus;
-  repo: string; // Repo.path whose stack this run merges
+  repo: string; // Repo.path this run merges
   pid?: number; // process that runs the merge (the dashboard server)
   current?: string; // name of the chunk being merged, or the one that stopped the merge
   message?: string; // progress, e.g. "waiting for checks on #12 (2 pending)"
@@ -160,6 +159,8 @@ export function createPipeline(opts: {
   for (let n = 2; existsSync(pipelineDir(id)); n++) id = `${base}-${n}`;
 
   const mode = opts.mode ?? "full";
+  const unknown = (opts.skip ?? []).filter((n) => !STEPS.includes(n));
+  if (unknown.length) throw new Error(`unknown step in --skip: ${unknown.join(", ")} (expected ${STEPS.join(", ")})`);
   const skipped = new Set([...(mode === "quick" ? QUICK_SKIPS : []), ...(opts.skip ?? [])]);
   const state: State = {
     id,
@@ -192,6 +193,8 @@ type Raw = State & { merge?: MergeRun & { mode?: unknown }; repo?: string; base?
 function upgrade(raw: Raw): State {
   // Files from before multi-repo hold `repo` and `base` at the top level.
   if (!raw.repos) raw.repos = raw.repo ? [{ path: raw.repo, ...(raw.base && { base: raw.base }) }] : [];
+  // The PR base is no longer stored: the dashboard follows the chunk order.
+  for (const c of raw.chunks) delete (c as { prBase?: string }).prBase;
   delete raw.repo;
   delete raw.base;
   const only = raw.repos.length === 1 ? raw.repos[0]!.path : undefined;
@@ -205,6 +208,8 @@ function upgrade(raw: Raw): State {
     }
   }
   if (preview) delete preview.worktree;
+  // Applied on every read, so a merged PR's chunks follow it whoever wrote the merge (dashboard, sync, old code).
+  for (const r of raw.repos) markRepoMerged(raw, r.path);
   // The status used to be stored: archived and waiting were facts held only there.
   if (raw.status === "archived" && !raw.archivedAt) raw.archivedAt = raw.updatedAt;
   if (raw.status === "waiting_for_user" && !raw.waiting) raw.waiting = { step: raw.step, ...(raw.waitingFor && { reason: raw.waitingFor }) };
@@ -466,8 +471,6 @@ export function upsertChunk(id: string, chunk: ChunkInput): State {
     }
     const repo = chunk.repo ? lookupRepo(s, chunk.repo).path : existing.repo;
     if (repo !== existing.repo) throw new Error(`chunk "${chunk.name}" belongs to ${repoName(existing.repo)}`);
-    // A new PR has its own base: the sync reads it again.
-    if (chunk.pr && chunk.pr !== existing.pr) delete existing.prBase;
     Object.assign(existing, chunk, { repo });
   });
 }

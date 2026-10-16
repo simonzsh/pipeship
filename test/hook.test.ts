@@ -84,7 +84,7 @@ describe("reminder", () => {
     expect(text).toContain("pipelines/abc-1");
     expect(text).toContain(paths.skill);
     expect(text).toContain(paths.helper);
-    for (const rule of ["one subagent per heavy step", "pipeship get <id>", "pipeship step <id> <step> running", "one test suite at a time"]) {
+    for (const rule of ["one subagent per heavy step", "pipeship get <id>", "pipeship step <id> <step> running", "pipeship pr <id>", "one test suite at a time"]) {
       expect(text).toContain(rule);
     }
   });
