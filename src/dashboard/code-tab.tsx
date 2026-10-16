@@ -1,5 +1,5 @@
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from "react";
-import { AlertCircle, ArrowUp, ChevronDown, ChevronRight, ChevronsDownUp, ChevronsUpDown, RefreshCw } from "lucide-react";
+import { AlertCircle, ArrowUp, ChevronDown, ChevronRight, ChevronsDownUp, ChevronsUpDown, FlaskConical, RefreshCw } from "lucide-react";
 import { Spinner } from "./components/ui/spinner";
 import type { DashboardState } from "../state.ts";
 import { repoName } from "../repos.ts";
@@ -8,6 +8,7 @@ import { Badge } from "./components/ui/badge";
 import { Button } from "./components/ui/button";
 import { highlightLines, languageOf } from "./highlight";
 import { diffRequests, diffUrl, type DiffRequest, type DiffTarget } from "./diff-requests";
+import { isNoiseFile } from "./noise-files";
 import { prNumber } from "./utils";
 
 export type { DiffTarget };
@@ -241,11 +242,19 @@ function openByDefault(files: DiffFile[]): Set<string> {
 }
 
 // memo: each pipeline change on the SSE stream re-renders CodeTab; the diff must not re-render with it.
-const RepoDiff = memo(function RepoDiff({ data, all }: { data: DiffResponse; all: All }) {
+const RepoDiff = memo(function RepoDiff({ data, all, tests }: { data: DiffResponse; all: All; tests: number }) {
   const [overrides, setOverrides] = useState<Record<string, boolean>>({});
   useEffect(() => {
     if (all) setOverrides(Object.fromEntries(data.files.map((f) => [f.path, all.open])));
   }, [all, data]);
+  // Each "Collapse tests" click bumps `tests`; apply it once, so a refetch does not re-close files the user opened.
+  const doneTests = useRef(0);
+  useEffect(() => {
+    if (tests === doneTests.current) return;
+    doneTests.current = tests;
+    const noise = data.files.filter((f) => isNoiseFile(f.path));
+    if (noise.length) setOverrides((o) => ({ ...o, ...Object.fromEntries(noise.map((f) => [f.path, false])) }));
+  }, [tests, data]);
   const defaults = useMemo(() => openByDefault(data.files), [data]);
   const toggle = useCallback((path: string, open: boolean) => setOverrides((o) => ({ ...o, [path]: !open })), []);
 
@@ -316,6 +325,7 @@ export function CodeTab({ p, target, onTarget }: CodeTabProps) {
   const root = useRef<HTMLDivElement>(null);
   const [manual, setManual] = useState(0);
   const [all, setAll] = useState<All>(null);
+  const [tests, setTests] = useState(0);
   const requests = useMemo(() => diffRequests(p, target), [p, target]);
   // A chunk's range starts at the previous chunk, so any chunk of the repo can move it.
   const repos = new Set(requests.map((r) => r.repo));
@@ -330,6 +340,7 @@ export function CodeTab({ p, target, onTarget }: CodeTabProps) {
   const additions = datas.reduce((n, d) => n + d.additions, 0);
   const deletions = datas.reduce((n, d) => n + d.deletions, 0);
   const allOpen = all?.open ?? true;
+  const hasNoise = datas.some((d) => d.files.some((f) => isNoiseFile(f.path)));
 
   return (
     <div ref={root} className="flex flex-col gap-4">
@@ -354,6 +365,11 @@ export function CodeTab({ p, target, onTarget }: CodeTabProps) {
           {datas.length > 0 && (
             <Button size="sm" variant="outline" onClick={() => setAll({ open: !allOpen })}>
               {allOpen ? <ChevronsDownUp /> : <ChevronsUpDown />} {allOpen ? "Collapse all" : "Expand all"}
+            </Button>
+          )}
+          {hasNoise && (
+            <Button size="sm" variant="outline" onClick={() => setTests((n) => n + 1)} title="Collapse test, lock and vendored files">
+              <FlaskConical /> Collapse tests
             </Button>
           )}
           <Button size="sm" variant="outline" onClick={() => setManual((n) => n + 1)} disabled={fetching}>
@@ -384,7 +400,7 @@ export function CodeTab({ p, target, onTarget }: CodeTabProps) {
                 <AlertCircle className="size-4 shrink-0" /> {r.error}
               </p>
             ) : (
-              <RepoDiff data={r.data} all={all} />
+              <RepoDiff data={r.data} all={all} tests={tests} />
             )}
           </div>
         );
