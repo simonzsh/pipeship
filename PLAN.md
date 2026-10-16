@@ -14,7 +14,7 @@ Pipeline de features autonome et environnements de test.
 ## 2. L'objectif
 
 - Je donne un ticket ou une issue, quelle que soit sa source (voir « Source du ticket »).
-- Un pipeline d'agents cartographie le code, me pose ses questions, planifie, implémente en parallèle, nettoie le code et crée une stack de PR.
+- Un pipeline d'agents cartographie le code, me pose ses questions, planifie, implémente en parallèle, nettoie le code et ouvre une PR par repo.
 - À la fin, je reçois une URL. L'application tourne déjà sur cette URL. Je teste directement.
 - Un dashboard local montre tous les pipelines, leur étape, leurs PR et leur environnement de test.
 
@@ -22,7 +22,7 @@ Pipeline de features autonome et environnements de test.
 - Les agents gèrent la qualité du code : simplification, doublons, code mort, conventions.
 - Je valide le comportement dans l'environnement de test. Je ne relis plus chaque ligne.
 
-## 3. Le pipeline (7 étapes)
+## 3. Le pipeline (6 étapes)
 
 ### Lancement
 - Je lance le pipeline de deux façons :
@@ -41,9 +41,9 @@ Pipeline de features autonome et environnements de test.
 - Exemples : `/pipeship ABC-123`, `/pipeship https://notion.so/…`, `/pipeship "ajouter un filtre par date"`.
 
 ### Modes et étapes réglables
-- **`full`** (par défaut) : les 7 étapes.
+- **`full`** (par défaut) : les 6 étapes.
 - **`quick`** : cartographie courte, questions bloquantes seulement, implémentation dans un seul worktree, lint/typecheck/tests, une passe `simplify`, une seule PR, environnement de test.
-- **Réglage fin** : `--skip <étapes>`, par exemple `--skip questions,stack`. Le skill garde les étapes dont une autre étape a besoin (pas d'environnement de test sans worktree).
+- **Réglage fin** : `--skip <étapes>`, par exemple `--skip questions,review`. Le skill garde les étapes dont une autre étape a besoin (pas d'environnement de test sans worktree).
 - **Changement en cours de route** : je dis « saute la review » dans la session. Le skill met à jour la liste des étapes dans `state.json`. Il relit cette liste avant chaque étape.
 - **Proposition de mode** : après la cartographie, Claude peut proposer `quick` pour un petit ticket. Je confirme en un mot.
 - Le mode `quick` garde toujours une passe de nettoyage : c'est le problème n°1.
@@ -70,8 +70,8 @@ Chaque étape tourne dans un sous-agent, avec un contexte propre. Chaque étape 
 - Il **écrit d'abord les contrats** entre les morceaux : types, routes API, format des données. Sans contrat fixé, le front et le back ne sont pas indépendants.
 - Il découpe le travail en **morceaux indépendants**. Chaque morceau peut être codé sans attendre un autre.
 - Il ne découpe pas pour rien. Un petit ticket donne un seul morceau. Chaque découpage ajoute un risque d'intégration.
-- Il fixe l'ordre de la future stack selon les dépendances : contrat, puis back, puis front.
-- Sortie : le plan, les contrats, la liste des morceaux et l'ordre de la stack.
+- Il fixe l'ordre des morceaux selon les dépendances : contrat, puis back, puis front.
+- Sortie : le plan, les contrats, la liste des morceaux et leur ordre.
 
 #### Étape 4 — Implémentation en parallèle
 - Un sous-agent et un worktree par morceau.
@@ -85,13 +85,14 @@ Chaque étape tourne dans un sous-agent, avec un contexte propre. Chaque étape 
 3. **Règle de sécurité :** après chaque passe qui modifie le code, relancer lint, typecheck et tests. Si un contrôle échoue, corriger ou annuler la passe.
 - Briques existantes à réutiliser : skills `simplify` et `code-review`.
 
-#### Étape 6 — Stack de PR
-- Une PR par morceau, empilées dans l'ordre fixé à l'étape 3.
-- Chaque PR ne montre que son morceau. La relecture reste simple.
-- Le sommet de la stack contient toute la feature.
+#### Fin de l'étape 5 — Ouverture de la PR
+- Chaque branche de morceau est rebasée sur la précédente, dans l'ordre fixé à l'étape 3.
+- Le morceau du sommet contient toute la feature. Il porte **une seule PR par repo**, sur la branche de base.
+- La PR liste les morceaux et leurs commits : je peux relire commit par commit.
+- Le merge se fait par un merge commit, jamais par un squash : les commits des morceaux restent dans l'historique.
 
-#### Étape 7 — Environnement de test
-- L'outil démarre l'application sur la branche du sommet de la stack.
+#### Étape 6 — Environnement de test
+- L'outil démarre l'application sur la branche du morceau du sommet.
 - Il attribue un port libre et une URL du type `http://<feature>.localhost:<port>`.
 - Le pipeline passe à l'état `ready`. Le dashboard affiche l'URL.
 
@@ -100,7 +101,7 @@ Chaque étape tourne dans un sous-agent, avec un contexte propre. Chaque étape 
 Principe : simple, mais efficace et fonctionnel.
 
 ### Dans la V1
-- Le skill du pipeline avec les 7 étapes, lancé par `/pipeship:run`.
+- Le skill du pipeline avec les 6 étapes, lancé par `/pipeship:run`.
 - Les modes `full` et `quick`, et l'option `--skip`.
 - Toute source de ticket que Claude peut lire, plus le texte collé.
 - Un fichier d'état par pipeline, écrit par le skill à chaque étape.
@@ -154,7 +155,7 @@ Choix et raisons :
   "mode": "full | quick",
   "repo": "/chemin/vers/le/repo",
   "status": "running | waiting_for_user | ready | done | failed | stopped | archived",
-  "step": "explore | questions | plan | implement | review | stack | preview",
+  "step": "explore | questions | plan | implement | review | preview",
   "steps": [{ "name": "explore", "status": "pending | running | done | skipped", "startedAt": "…", "endedAt": "…" }],
   "chunks": [{ "name": "api", "worktree": "…", "branch": "…", "status": "…", "pr": "https://…" }],
   "preview": { "url": "http://abc-123.localhost:3001", "pid": 12345, "port": 3001 },
@@ -201,8 +202,8 @@ Chaque jalon est utilisable seul.
 
 1. **Environnement de test.** Lire la recette, préparer le worktree, attribuer un port, démarrer, attendre `readyPath`, afficher l'URL. Tester à la main sur un vrai repo.
 2. **Dashboard en lecture seule.** Lire les fichiers d'état, afficher les pipelines et les liens, flux en direct.
-3. **Skill du pipeline.** Les 7 étapes, avec écriture du fichier d'état. Commencer par un ticket simple à un seul morceau.
-4. **Découpage et parallèle.** Plusieurs morceaux, plusieurs worktrees, stack de PR.
+3. **Skill du pipeline.** Les 6 étapes, avec écriture du fichier d'état. Commencer par un ticket simple à un seul morceau.
+4. **Découpage et parallèle.** Plusieurs morceaux, plusieurs worktrees, une PR par repo.
 5. **Bouton « Arrêter ».**
 
 ## 7. Outils existants à étudier avant de coder
@@ -210,7 +211,6 @@ Chaque jalon est utilisable seul.
 - **Skills superpowers** : `brainstorming`, `writing-plans`, `subagent-driven-development`, `requesting-code-review`. Ils couvrent une grande partie des étapes 1 à 5.
 - **Skills de Matt Pocock** : `grilling` correspond à l'étape 2.
 - **Conductor** et **Vibe Kanban** : agents en parallèle sur des worktrees, avec interface.
-- **`gh stack`** (ou Graphite) : création de stacks de PR.
 - **Claude Code** : sous-agents avec `isolation: "worktree"`, et l'outil Workflow pour orchestrer plusieurs agents.
 
 ## 8. Questions ouvertes

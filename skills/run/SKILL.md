@@ -100,7 +100,7 @@ When this step is skipped (`quick` mode), there is one chunk named after the tic
 
 ## Step 4 — implement
 
-For each chunk, in stack order:
+For each chunk, in chunk order:
 1. Branch `<ticket>/<chunk>`, worktree `<dir>/worktrees/<chunk>`:
    `git -C <chunk's repo> worktree add <dir>/worktrees/<chunk> -b <ticket>/<chunk> <that repo's base>`
    - `<ticket>` is the first ticket ref in lowercase (`abc-123`), or the 2 or 3 word `--name` for a plain-text ticket or a work request. Keep chunk names short too (`api`, `ui`, `backfill`): e.g. `abc-123/api`.
@@ -110,18 +110,18 @@ For each chunk, in stack order:
 
 Then launch **one subagent per chunk (model `sonnet`), started together** so they run in parallel. Brief: `<skill dir>/prompts/implement.md`. Each subagent gets: its worktree path (it works only there), `ticket.md`, `explore.md`, `plan.md` (contracts + its chunk), the fast checks and the targeted tests.
 
-When all are done, **restack**: in stack order, rebase each chunk branch onto the previous one (`git -C <worktree> rebase <previous branch>`). The last chunk branch is the **top of the stack** and contains the whole feature. Run the checks on the top, for the diff `<base>..<top branch>`. With several repos, restack each repo on its own: each repo has its own top. If the restack or the checks fail, set the chunks to fix back to `--status coding`. A failure listed under `## Baseline` in `explore.md` is not a regression: do not set a chunk back to `coding` for it.
+When all are done, **restack**: in chunk order, rebase each chunk branch onto the previous one (`git -C <worktree> rebase <previous branch>`). The last chunk branch is the **top chunk** and contains the whole feature. Run the checks on the top, for the diff `<base>..<top branch>`. With several repos, restack each repo on its own: each repo has its own top. If the restack or the checks fail, set the chunks to fix back to `--status coding`. A failure listed under `## Baseline` in `explore.md` is not a regression: do not set a chunk back to `coding` for it.
 
 ## Step 5 — review
 
 Cleanups first, then the global review on the cleaned top. Every finding has a severity (`blocking`, `important`, `minor`), a `file:line`, a failure scenario and a fix (see the briefs).
 
 1. **Cleanup per chunk** (one subagent per chunk, model `sonnet`, status `reviewing`), all started together. Brief: `<skill dir>/prompts/cleanup.md`. Give each one its worktree, the diff of its chunk (`<previous chunk branch or base>..<chunk branch>`) and `<dir>/explore.md`.
-2. When all are done, **restack** in stack order, per repo.
+2. When all are done, **restack** in chunk order, per repo.
 3. **Global review** (one subagent, model `opus`, top worktree, diff `<base>..<top branch>`; with several repos, the top worktree and diff of every repo). Brief: `<skill dir>/prompts/global-review.md`. Give it `<dir>/explore.md` too.
 4. **Sort** the findings of the global review and the ones the cleanups did not fix. Re-read the code of each one and drop those that do not hold. Fix every `blocking` and `important` finding. Fix a `minor` one only if the fix is safe and small. List the others in `review.md`.
 5. **Fix** each finding **in the worktree of the chunk that owns the code**, then commit. Before the first fix, note the top commit of each repo. Set the chunk to `fixing` while you fix it, and back to `done` after the safety rule.
-6. **Restack once** for the fixes, in stack order, per repo.
+6. **Restack once** for the fixes, in chunk order, per repo.
 7. **Re-check** after a `blocking` fix: run the global review once more (same brief), on the diff `<noted top>..<top branch>` only. Sort and fix what it finds, then restack. No second re-check.
 8. **Safety rule**: re-run the checks once: the fast checks and the targeted tests for the diff. If a check fails, fix it or revert the pass. A failure listed under `## Baseline` in `explore.md` is not a regression. Run one test suite at a time.
 
@@ -169,8 +169,8 @@ The user may ask for changes after the end, or comment on a PR. Do not fix it al
 1. **Same work or new work.** A change to the same work reopens the pipeline: `pipeship step <id> implement running` (it unarchives and clears the stop request). Set each chunk concerned to `pipeship chunk <id> <chunk> --status coding`. Unrelated work is a new pipeline.
 2. **Record it.** Add the feedback to `<dir>/ticket.md` under `## Feedback <n>`. The subagents read only this file.
 3. **Implement.** One subagent per chunk concerned (model `sonnet`), in its existing worktree. Brief: `<skill dir>/prompts/implement.md`. Give it the feedback. It fixes and commits.
-4. **Restack once**, in stack order, then run the targeted checks for the diff of the feedback. Mark `implement` `done`.
+4. **Restack once**, in chunk order, then run the targeted checks for the diff of the feedback. Mark `implement` `done`.
 5. **Review the delta only.** Mark `review` `running`. Run one cleanup subagent (model `sonnet`, brief `<skill dir>/prompts/cleanup.md`, chunks `reviewing`) on the diff of the feedback. Run the global review (model `opus`, brief `<skill dir>/prompts/global-review.md`) only if the feedback touches several chunks or a contract.
 6. **Push.** Run `pipeship pr <id> --title "<ticket title>" --body-file <dir>/pr.md` again. Always pass both: you cannot know before if a PR is merged or closed. `pipeship pr` ignores them for an open PR. It pushes the top branch of each repo with `--force-with-lease`, so a restack is safe, and an open PR updates on its own. If a PR is merged or closed, it opens a new PR on the base of the repo. It records the new PR on the top chunk and sets that chunk back to `done`, so the dashboard polls and merges it. Then mark `review` `done`.
-7. **Small feedback** (one line, a name, a text): you may fix it yourself. Commit in the chunk that owns the code, restack, re-run the checks, and update the steps.
+7. **Small feedback** (one line, a name, a text): you may fix it yourself. Commit in the chunk that owns the code, restack, re-run the checks, run `pipeship pr` as in item 6, and update the steps.
 8. **Test again.** If the tested behaviour changed, run `pipeship preview <id>` again and update `<dir>/verify.md` and `<dir>/test.md`.
