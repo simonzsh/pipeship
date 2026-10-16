@@ -166,7 +166,7 @@ The test URLs, one per service, and the agent's `test.md` guide: the page to ope
 The code diff, to review the work without leaving the dashboard.
 
 - **Whole repo** by default: `<base>...<top branch>`, one diff per repo.
-- **One chunk**: click it for `<previous chunk's branch>...<branch>`. A chunk without a PR shows `in #N`, the PR of its repo. The breadcrumb ("Whole repo › <chunk>") or the base branch row brings you back.
+- **One chunk**: click it for `<previous chunk's branch>...<branch>`. The chunks are grouped under the PR that holds them; chunks with no PR yet sit under "No PR yet". The breadcrumb ("Whole repo › <chunk>") or the base branch row brings you back.
 - Every file opens as a collapsible block with its line numbers, its +/− counts and syntax highlighting. "Collapse all" and "Expand all" toggle every file; "Refresh" reloads the diff.
 
 The base of each diff is `origin/<base>`, fetched before each diff: a base that moved on the remote does not add its commits to the diff. The other end is the local branch (or `origin/<branch>` when the local one is gone). When the local branch differs from `origin/<branch>`, a badge says so, for example "2 commits not pushed": the PR on GitHub does not show this work yet. A missing branch shows a message in its repo's section.

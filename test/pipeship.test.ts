@@ -5,7 +5,7 @@ import { join } from "node:path";
 import {
   addRepo, markRepoMerged, createPipeline, listStates, pipelineDir, pipelineStatus, readState, refreshSessionId, setMode, setStep, updateState, upsertChunk, waitForUser, type State,
 } from "../src/state.ts";
-import { chunksOf, diffRange, openPrChunks, repoName, repoStacks, sharesRepo, stackRefusal, topChunk } from "../src/repos.ts";
+import { chunksOf, diffRange, groupByPr, openPrChunks, repoName, repoStacks, sharesRepo, stackRefusal, topChunk } from "../src/repos.ts";
 import {
   archiveIfAllMerged, archivePipeline, DASHBOARD_PORT, deletePipeline, findRecipe, isAlive, mainService, normalizeRecipe, pickPorts, previewLines, resolveEnv,
   requestPreviewStart, savedRecipePath, startOrder, startPreview, stopPipeline, stopPreview, stopPreviewAndSettle, type Service, unarchivePipeline,
@@ -28,7 +28,7 @@ import { diffRequests, diffUrl } from "../src/dashboard/diff-requests.ts";
 import { highlightLines, languageOf } from "../src/dashboard/highlight.tsx";
 import { chunkActivity } from "../src/dashboard/status.tsx";
 import { compareVersions, currentVersion, getUpdateInfo, detectHarness, installUpdate, readCodexInstalled, resetUpdateCache, UpdateError, updateInPlace } from "../src/update.ts";
-import type { Harness, MergeRun } from "../src/state.ts";
+import type { Chunk, Harness, MergeRun } from "../src/state.ts";
 import { shouldReload } from "../src/dashboard/update-info.ts";
 
 const root = mkdtempSync(join(tmpdir(), "pipeship-test-"));
@@ -1887,6 +1887,21 @@ test("parseDiff handles no-newline markers, quoted and spaced paths, truncation,
 
   expect(parseDiff("")).toEqual([]);
   expect(() => parseDiff("@@ nonsense\n+++\n\0\ndiff --git\n@@ -x\n \\ \n")).not.toThrow();
+});
+
+test("groupByPr puts each chunk under the PR of the first chunk at or after it", () => {
+  const c = (name: string, pr?: string) => ({ name, ...(pr && { pr }) }) as Chunk;
+  expect(groupByPr([])).toEqual([]);
+  // Before the PRs exist: one group, no head.
+  expect(groupByPr([c("a"), c("b")]).map((g) => [g.head?.name, g.chunks.map((x) => x.name)])).toEqual([[undefined, ["a", "b"]]]);
+  // One PR per repo: the top chunk holds every chunk.
+  expect(groupByPr([c("a"), c("b"), c("c", "u3")]).map((g) => [g.head?.name, g.chunks.map((x) => x.name)])).toEqual([["c", ["a", "b", "c"]]]);
+  // Two PRs, and a chunk added after the last one.
+  expect(groupByPr([c("a"), c("b", "u2"), c("c", "u3"), c("d")]).map((g) => [g.head?.name, g.chunks.map((x) => x.name)])).toEqual([
+    ["b", ["a", "b"]],
+    ["c", ["c"]],
+    [undefined, ["d"]],
+  ]);
 });
 
 test("openPrChunks keeps the chunks with a PR not merged, closed ones included", () => {
