@@ -4,6 +4,7 @@ import { TriangleAlert } from "lucide-react";
 // Short delay so a quick reconnect (page load, server restart after an update) does not flash the alert.
 const DELAY_MS = 2000;
 
+// In the sidebar flow, above the version footer: it scrolls and resizes with the page instead of floating over it.
 export function OfflineAlert({ live }: { live: boolean }) {
   const [show, setShow] = useState(false);
   useEffect(() => {
@@ -15,10 +16,13 @@ export function OfflineAlert({ live }: { live: boolean }) {
   return (
     <div
       role="alert"
-      className="fixed bottom-14 left-3 z-50 flex items-center gap-1.5 rounded-md bg-destructive px-2.5 py-1.5 text-xs font-medium text-white shadow-lg"
+      className="flex animate-pulse items-center gap-2.5 border-t border-destructive/40 bg-destructive/15 px-3 py-2.5 text-sm font-medium text-destructive"
     >
-      <TriangleAlert className="size-3 shrink-0" />
-      Dashboard offline
+      <span className="relative flex size-5 shrink-0 items-center justify-center">
+        <span className="absolute inline-flex size-full animate-ping rounded-full bg-destructive/40" />
+        <TriangleAlert className="relative size-3.5" />
+      </span>
+      Attention, dashboard offline
     </div>
   );
 }

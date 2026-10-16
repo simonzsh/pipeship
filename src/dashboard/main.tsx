@@ -114,8 +114,6 @@ function App() {
         <ThemeToggle />
       </header>
 
-      <OfflineAlert live={live} />
-
       {!pipelines && (
         <div className="flex justify-center py-14 text-muted-foreground">
           <Spinner className="size-5" label="Loading pipelines" />
@@ -181,6 +179,7 @@ function App() {
                 );
               })}
             </div>
+            <OfflineAlert live={live} />
             <UpdateBanner live={live} />
           </aside>
           <main className={cn("flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden", !detailOnly && "max-[899px]:hidden")}>
