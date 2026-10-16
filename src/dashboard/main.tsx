@@ -9,6 +9,7 @@ import { PipelineDetail } from "./pipeline-detail";
 import { PipelineListItem } from "./pipeline-list-item";
 import { STATUS_ORDER, statusConfig } from "./status";
 import { ThemeToggle } from "./theme";
+import { OfflineAlert } from "./offline-alert";
 import { UpdateBanner } from "./update-banner";
 import { buildSearch, parseUrl, type UrlState } from "./url";
 import { cn, shortRepo } from "./utils";
@@ -112,6 +113,8 @@ function App() {
         </div>
         <ThemeToggle />
       </header>
+
+      <OfflineAlert live={live} />
 
       {!pipelines && (
         <div className="flex justify-center py-14 text-muted-foreground">
