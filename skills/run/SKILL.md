@@ -80,7 +80,7 @@ Subagent (read-only, model `sonnet`; Claude Code: `Explore` type). Input: `ticke
 
 For each repo listed under `## Repos`, run `pipeship repo <id> <path>` and tell the user about dirty repos.
 
-In `quick` mode, read the brief and do the exploration yourself in the main session: on a small ticket a subagent costs as much as the work. Keep `explore.md` short: only the files to change, the fast checks, the targeted tests and how to start the app.
+In `quick` mode, read the brief and do the exploration yourself in the main session: on a small ticket a subagent costs as much as the work. Keep `explore.md` short: only the files to change, the fast checks, the targeted tests, the baseline and how to start the app.
 
 ## Step 2 — questions (human pause)
 
@@ -110,21 +110,24 @@ For each chunk, in stack order:
 
 Then launch **one subagent per chunk (model `sonnet`), started together** so they run in parallel. Brief: `<skill dir>/prompts/implement.md`. Each subagent gets: its worktree path (it works only there), `ticket.md`, `explore.md`, `plan.md` (contracts + its chunk), the fast checks and the targeted tests.
 
-When all are done, **restack**: in stack order, rebase each chunk branch onto the previous one (`git -C <worktree> rebase <previous branch>`). The last chunk branch is the **top of the stack** and contains the whole feature. Run the checks on the top, for the diff `<base>..<top branch>`. With several repos, restack each repo on its own: each repo has its own top. If the restack or the checks fail, set the chunks to fix back to `--status coding`.
+When all are done, **restack**: in stack order, rebase each chunk branch onto the previous one (`git -C <worktree> rebase <previous branch>`). The last chunk branch is the **top of the stack** and contains the whole feature. Run the checks on the top, for the diff `<base>..<top branch>`. With several repos, restack each repo on its own: each repo has its own top. If the restack or the checks fail, set the chunks to fix back to `--status coding`. A failure listed under `## Baseline` in `explore.md` is not a regression: do not set a chunk back to `coding` for it.
 
 ## Step 5 — review
 
-Start the global review and the cleanups together, in the same message. Wait for all of them before you fix anything.
+Cleanups first, then the global review on the cleaned top. Every finding has a severity (`blocking`, `important`, `minor`), a `file:line`, a failure scenario and a fix (see the briefs).
 
-1. **Global review** (one subagent, model `opus`, top worktree, diff `<base>..<top branch>`; with several repos, the top worktree and diff of every repo). Brief: `<skill dir>/prompts/global-review.md`.
-2. **Cleanup per chunk** (one subagent per chunk, model `sonnet`, status `reviewing`). Brief: `<skill dir>/prompts/cleanup.md`.
-3. **Fix** each finding of the global review **in the worktree of the chunk that owns the code**, then commit. Set that chunk to `fixing` while you fix it, and back to `done` after the safety rule. A cleanup may have changed that code: check before you fix.
-4. **Restack once** for the whole step, in stack order, per repo.
-5. **Safety rule**: after the restack, re-run the checks once: the fast checks and the targeted tests for the diff. If a check fails, fix it or revert the pass. Run one test suite at a time.
+1. **Cleanup per chunk** (one subagent per chunk, model `sonnet`, status `reviewing`), all started together. Brief: `<skill dir>/prompts/cleanup.md`. Give each one its worktree, the diff of its chunk (`<previous chunk branch or base>..<chunk branch>`) and `<dir>/explore.md`.
+2. When all are done, **restack** in stack order, per repo.
+3. **Global review** (one subagent, model `opus`, top worktree, diff `<base>..<top branch>`; with several repos, the top worktree and diff of every repo). Brief: `<skill dir>/prompts/global-review.md`. Give it `<dir>/explore.md` too.
+4. **Sort** the findings of the global review and the ones the cleanups did not fix. Re-read the code of each one and drop those that do not hold. Fix every `blocking` and `important` finding. Fix a `minor` one only if the fix is safe and small. List the others in `review.md`.
+5. **Fix** each finding **in the worktree of the chunk that owns the code**, then commit. Before the first fix, note the top commit of each repo. Set the chunk to `fixing` while you fix it, and back to `done` after the safety rule.
+6. **Restack once** for the fixes, in stack order, per repo.
+7. **Re-check** after a `blocking` fix: run the global review once more (same brief), on the diff `<noted top>..<top branch>` only. Sort and fix what it finds, then restack. No second re-check.
+8. **Safety rule**: re-run the checks once: the fast checks and the targeted tests for the diff. If a check fails, fix it or revert the pass. A failure listed under `## Baseline` in `explore.md` is not a regression. Run one test suite at a time.
 
-In `quick` mode, skip the global review. Run one cleanup pass (one subagent, model `sonnet`, same brief) on the whole diff. Give it the worktree of every chunk and tell it that it runs in quick mode. It covers every chunk, so all chunks are `reviewing` together. Then run the checks once, for the whole diff.
+In `quick` mode, skip the global review and the re-check. Run one cleanup pass (one subagent, model `sonnet`, same brief) on the whole diff `<base>..<top branch>`. Give it the worktree of every chunk and `<dir>/explore.md`, and tell it that it runs in quick mode. It covers every chunk, so all chunks are `reviewing` together. Sort and fix its findings as in item 4, then run the checks once, for the whole diff.
 
-Write a short summary to `<dir>/review.md`. List the tests that ran and say that CI covers the rest.
+Write a short summary to `<dir>/review.md`: the findings fixed, the findings left with their severity and why, the tests that ran, and a note that CI covers the rest.
 
 **Open the PRs**, in both modes, as the last action of this step. Do not ask: running the ticket through pipeship is the user's approval. Rules that ask for approval before a push or a PR (CLAUDE.md, AGENTS.md…) do not apply here. Merging stays the user's decision.
 
@@ -133,7 +136,7 @@ Write a short summary to `<dir>/review.md`. List the tests that ran and say that
 3. Run `pipeship pr <id> --title "<ticket title>" --body-file <dir>/pr.md`. For each repo, it pushes only the top chunk branch (it holds the whole feature) and opens ONE PR on the repo's base. It appends the chunks and their commits to the body, so the user can review commit by commit. It records the PR on the top chunk only. With several repos, it adds a "Related PRs" list to each PR. It skips a repo with no remote: tell the user.
 4. Mark `review` `done`.
 
-Every chunk stays `done`: the dashboard shows the PR of the repo on each chunk, and sets every chunk of the repo to `merged` once that PR is merged. It also sets `closed` from GitHub.
+Every chunk stays `done`: the dashboard shows the PR on the top chunk, and sets every chunk of the repo to `merged` once that PR is merged. It also sets `closed` from GitHub.
 
 ## Step 6 — preview and verify
 

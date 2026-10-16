@@ -7,12 +7,12 @@ import {
 } from "../src/state.ts";
 import { chunksOf, diffRange, holdingPr, openPrChunks, repoName, repoStacks, sharesRepo, stackRefusal, topChunk } from "../src/repos.ts";
 import {
-  archiveIfAllMerged, archivePipeline, DASHBOARD_PORT, deletePipeline, findRecipe, isAlive, mainService, normalizeRecipe, pickPorts, previewLines, resolveEnv,
-  requestPreviewStart, savedRecipePath, startOrder, startPreview, stopPipeline, stopPreview, stopPreviewAndSettle, type Service, unarchivePipeline,
+  archiveIfAllMerged, archivePipeline, DASHBOARD_PORT, deletePipeline, findRecipe, isAlive, killGroup, mainService, normalizeRecipe, pickPorts, previewLines, processStart, resolveEnv,
+  requestPreviewStart, savedRecipePath, startOrder, startPreview, stopPipeline, stopPreview, stopPreviewAndSettle, type Service, unarchivePipeline, waitReady,
 } from "../src/preview.ts";
 import { diffTotals, parseDiff } from "../src/diff.ts";
 import { baseRef, DiffError, gitDiff, headRef, pipelineDiff, resetFetchCache } from "../src/diff-git.ts";
-import { DEFAULT_PORT, requestDashboardUpdate, serve } from "../src/server.ts";
+import { DEFAULT_PORT, readDashboardPid, requestDashboardUpdate, serve, spawnDashboard } from "../src/server.ts";
 import {
   classifyPr, defaultRunner, DEFAULT_LIMITS, failStaleMerges, isMergeRunning, mergeStack, MergeError, resolveMergeRepo, startMerge, type MergeDeps, type PrView, type Runner, type RunResult,
 } from "../src/merge.ts";
@@ -344,7 +344,7 @@ test("preview starts the app, copies local files, and stop kills it", async () =
   expect(port).toBeLessThan(4000);
   expect(state.preview!.services).toEqual([
     {
-      name: "app", kind: "front", port, url: `http://localhost:${port}`, pid: state.preview!.pid,
+      name: "app", kind: "front", port, url: `http://localhost:${port}`, pid: state.preview!.pid, startedAt: expect.any(String),
       log: join(pipelineDir(id), "preview-app.log"), repo, worktree,
     },
   ]);
@@ -353,6 +353,7 @@ test("preview starts the app, copies local files, and stop kills it", async () =
   expect(await (await fetch(`http://localhost:${state.preview!.port}`)).text()).toBe("hello");
 
   const pid = state.preview!.pid!;
+  expect(isAlive(pid, state.preview!.services![0]!.startedAt)).toBe(true);
   const stopped = await stopPipeline(id);
   expect(stopped.status).toBe("stopped");
   expect(stopped.stopRequested).toBe(true);
@@ -669,10 +670,34 @@ test("fixed ports are reserved and must be free", async () => {
   await expect(pickPorts(services, async (p) => p !== 4000)).rejects.toThrow("fixed port 4000 is already in use");
 });
 
-test("env templates resolve ports and leave other placeholders", () => {
-  const env = { A: "http://localhost:${api.port}", B: "${HOME}", C: "${api.portx}" };
-  expect(resolveEnv(env, { api: 4000 })).toEqual({ A: "http://localhost:4000", B: "${HOME}", C: "${api.portx}" });
+test("env templates resolve ports and the pipeline id, and leave other placeholders", () => {
+  const env = { A: "http://localhost:${api.port}", B: "${HOME}", C: "${api.portx}", D: "app_${pipeline.id}" };
+  expect(resolveEnv(env, { api: 4000 }, "abc-1")).toEqual({ A: "http://localhost:4000", B: "${HOME}", C: "${api.portx}", D: "app_abc-1" });
 });
+
+test("waitReady keeps waiting on 5xx answers and reports the last status", async () => {
+  const server = Bun.serve({ port: 0, fetch: () => new Response("boom", { status: 503 }) });
+  try {
+    const app = { name: "app", ready: "http" as const, readyPath: "/" };
+    await expect(waitReady(app, server.port!, process.pid, join(root, "none.log"), 2000)).rejects.toThrow(
+      'service "app" not ready after 2s (last status 503)',
+    );
+  } finally {
+    server.stop(true);
+  }
+}, 15_000);
+
+test("waitReady accepts a 404 and a server that recovers from a 500", async () => {
+  let hits = 0;
+  const server = Bun.serve({ port: 0, fetch: () => new Response("x", { status: ++hits <= 2 ? 500 : 404 }) });
+  try {
+    const app = { name: "app", ready: "http" as const, readyPath: "/" };
+    await waitReady(app, server.port!, process.pid, join(root, "none.log"), 15_000);
+    expect(hits).toBeGreaterThanOrEqual(3);
+  } finally {
+    server.stop(true);
+  }
+}, 20_000);
 
 test("start order is back and other kinds, then fronts; the main service is the first front", () => {
   const list = [svc("web", "front"), svc("api", "back"), svc("admin", "front"), svc("worker", "job")];
@@ -752,13 +777,14 @@ test("a failed service stops the services already started", async () => {
     JSON.stringify({
       services: [
         { name: "api", kind: "back", start: `bun -e "${api}"` },
-        { name: "web", kind: "front", start: "echo api=$API_URL; exit 1", env: { API_URL: "http://localhost:${api.port}" } },
+        { name: "web", kind: "front", start: "echo api=$API_URL db=$DB_NAME; exit 1", env: { API_URL: "http://localhost:${api.port}", DB_NAME: "app_${pipeline.id}" } },
       ],
     }),
   );
   const { id } = createPipeline({ repos: [{ path: repo }], title: "t", source: "text" });
   const error = await startPreview(id, repo).catch((e: Error) => e);
   expect((error as Error).message).toMatch(/service "web" exited.*api=http:\/\/localhost:\d+/s);
+  expect((error as Error).message).toContain(`db=app_${id}`);
   const port = /api=http:\/\/localhost:(\d+)/.exec((error as Error).message)![1];
   await expect(fetch(`http://localhost:${port}`)).rejects.toThrow();
   expect(readState(id).preview).toBeUndefined();
@@ -769,6 +795,53 @@ function fakePreview(id: string, pid: number | undefined, extra: object = {}) {
     s.preview = { url: "http://localhost:3000", port: 3000, pid, log: "x", ...extra };
   });
 }
+
+test("isAlive and killGroup trust a pid only with its recorded start time", async () => {
+  const mine = processStart(process.pid);
+  expect(mine).toBeTruthy();
+  expect(isAlive(process.pid, mine)).toBe(true);
+  expect(isAlive(process.pid, "Thu Jan  1 00:00:00 1970")).toBe(false);
+  const sleeper = Bun.spawn(["sleep", "60"], { detached: true } as never);
+  try {
+    await killGroup(sleeper.pid, "Thu Jan  1 00:00:00 1970");
+    expect(isAlive(sleeper.pid)).toBe(true);
+  } finally {
+    process.kill(sleeper.pid);
+  }
+}, 30_000);
+
+test("stop leaves a recycled pid alone and clears the preview", async () => {
+  const sleeper = Bun.spawn(["sleep", "60"], { detached: true } as never);
+  const { id } = createPipeline({ repos: [{ path: repo }], title: "t", source: "text" });
+  fakePreview(id, sleeper.pid, {
+    services: [{
+      name: "app", kind: "front", port: 3000, url: "http://localhost:3000", pid: sleeper.pid, log: "x", repo, worktree: repo,
+      startedAt: "Thu Jan  1 00:00:00 1970",
+    }],
+  });
+  try {
+    await stopPipeline(id);
+    expect(isAlive(sleeper.pid)).toBe(true);
+    expect(readState(id).preview).toBeUndefined();
+  } finally {
+    process.kill(sleeper.pid);
+  }
+}, 30_000);
+
+test("the dashboard pid file keeps the start time and reads the old format", () => {
+  const file = join(process.env.PIPESHIP_HOME!, "dashboard.pid");
+  spawnDashboard("sleep", ["30"]);
+  const recorded = readDashboardPid()!;
+  try {
+    expect(recorded).toEqual({ pid: recorded.pid, startedAt: processStart(recorded.pid) });
+    expect(recorded.startedAt).toBeTruthy();
+  } finally {
+    process.kill(recorded.pid);
+  }
+  writeFileSync(file, "123");
+  expect(readDashboardPid()).toEqual({ pid: 123 });
+  rmSync(file);
+});
 
 test("stop handles an old state without services", async () => {
   const sleeper = Bun.spawn(["sleep", "60"], { detached: true } as never);

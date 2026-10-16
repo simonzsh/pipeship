@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { mkdirSync, openSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, openSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import tailwind from "bun-plugin-tailwind";
 import { errorMessage, failStaleMerges, isMergeRunning, MergeError, startMerge } from "./merge.ts";
@@ -10,7 +10,7 @@ import { home, listDashboardStates, type Harness } from "./state.ts";
 import { currentHarness, currentVersion, getUpdateInfo, installUpdate, UpdateError, type InstallDeps, type InstallResponse } from "./update.ts";
 import { shouldReload } from "./dashboard/update-info.ts";
 import {
-  anyPreviewStarting, archivePipeline, deletePipeline, isPreviewStarting, PreviewError, requestPreviewStart, stopPipeline, stopPreviewAndSettle,
+  anyPreviewStarting, archivePipeline, deletePipeline, isPreviewStarting, PreviewError, processStart, requestPreviewStart, stopPipeline, stopPreviewAndSettle,
   unarchivePipeline,
 } from "./preview.ts";
 
@@ -55,7 +55,15 @@ export function spawnDashboard(command: string, args: string[]) {
   const out = openSync(join(home(), "dashboard.log"), "a");
   const child = spawn(command, args, { cwd: home(), detached: true, stdio: ["ignore", out, out] });
   child.unref();
-  writeFileSync(join(home(), "dashboard.pid"), String(child.pid));
+  writeFileSync(join(home(), "dashboard.pid"), `${child.pid}\n${processStart(child.pid!) ?? ""}`);
+}
+
+// Line 1 is the pid, line 2 (optional) its start time. A one-line file from an old version still reads.
+export function readDashboardPid(): { pid: number; startedAt?: string } | undefined {
+  const file = join(home(), "dashboard.pid");
+  if (!existsSync(file)) return undefined;
+  const [pid, startedAt] = readFileSync(file, "utf8").split("\n");
+  return { pid: Number(pid), ...(startedAt?.trim() && { startedAt: startedAt.trim() }) };
 }
 
 export interface ServeOptions { prSync?: boolean; retryMs?: number; harness?: Harness | null; update?: Partial<InstallDeps> }
