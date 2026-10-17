@@ -81,12 +81,8 @@ export function MergeButton({ id, repo, chunks, base, merge, finished }: {
           <AlertDialogHeader>
             <AlertDialogTitle>Merge #{prNumber(pr)} now?</AlertDialogTitle>
             <AlertDialogDescription>
-              The merge is {merge.message}. It merges by itself once they pass.{" "}
+              Merges right away with <code>--admin</code>, without waiting for the checks.{" "}
               <a href={`${pr}/checks`} target="_blank" rel="noreferrer" className="underline hover:text-foreground">See the checks</a>
-            </AlertDialogDescription>
-            <AlertDialogDescription>
-              "Merge now" stops the wait and merges with <code>gh pr merge --admin</code>. This bypasses the required checks and
-              branch protection, and needs admin rights on the repo. A failed check still stops the merge.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
