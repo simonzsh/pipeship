@@ -21,6 +21,8 @@ export function MergeButton({ id, repo, chunks, base, merge, finished }: {
   id: string; repo: string; chunks: Chunk[]; base?: string; merge?: MergeRun; finished: boolean;
 }) {
   const [error, setError] = useState<string>();
+  // A refused "Merge now", tied to its run: it must not hide the reason of a run that ended since.
+  const [forceError, setForceError] = useState<{ run: string; message: string }>();
   // Like GitHub's "delete branch" offer after a merge; checked by default.
   const [deleteBranches, setDeleteBranches] = useState(true);
   // The run's startedAt seen at the click (null: no click). Ends when the stream shows another run, or the POST fails.
@@ -37,26 +39,67 @@ export function MergeButton({ id, repo, chunks, base, merge, finished }: {
       setClickedAt(null);
     }
   };
+  const refusal = todo.length > 1 ? stackRefusal(repo, todo.length) : undefined;
+  const alert = (message: string | undefined) =>
+    message && (
+      <span className="flex min-w-0 items-center text-xs text-destructive" title={message}>
+        <span className="max-w-72 truncate">{message}</span>
+      </span>
+    );
+  const force = async () => {
+    const run = merge!.startedAt;
+    setForceError(undefined);
+    const err = await postAction(id, "merge", { repo, force: true });
+    if (err) setForceError({ run, message: err });
+  };
   if (running || starting) {
-    return (
-      <Button variant="outline" size="xs" disabled title={merge?.message}>
+    const pr = todo[0]?.pr;
+    const merging = (
+      <Button variant="outline" size="xs" disabled title={running ? merge.message : undefined}>
         <LogoLoader className="size-4 text-violet-600 dark:text-violet-400" label="Merging" /> Merging…
       </Button>
+    );
+    const forceAlert = running && forceError?.run === merge.startedAt && alert(forceError.message);
+    // While the checks run, the one button opens the "Merge now" choice instead of staying disabled.
+    if (!running || !pr || !merge.waitingChecks || merge.force) {
+      return (
+        <>
+          {forceAlert}
+          {merging}
+        </>
+      );
+    }
+    return (
+      <AlertDialog>
+        {forceAlert}
+        <AlertDialogTrigger asChild>
+          <Button variant="outline" size="xs" title={merge.message}>
+            <LogoLoader className="size-4 text-violet-600 dark:text-violet-400" label="Waiting for checks" /> Checks pending
+          </Button>
+        </AlertDialogTrigger>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Merge #{prNumber(pr)} now?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Merges right away with <code>--admin</code>, without waiting for the checks.{" "}
+              <a href={`${pr}/checks`} target="_blank" rel="noreferrer" className="underline hover:text-foreground">See the checks</a>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Keep waiting</AlertDialogCancel>
+            <AlertDialogAction variant="default" onClick={force} className={CONFIRM}>Merge now</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     );
   }
   // The server refuses a closed PR and a stack of 2 or more: hide the button when only closed PRs are left,
   // disable it for a stack (a closed PR among 2 or more is a stack too).
   if (!finished || todo.every((c) => c.status === CLOSED)) return null;
-  const refusal = todo.length > 1 ? stackRefusal(repo, todo.length) : undefined;
-  const message = refusal ?? error ?? (merge?.status === "failed" ? `Merge stopped: ${merge.error}` : undefined);
-  const failure = message && (
-    <span className="flex min-w-0 items-center text-xs text-destructive" title={message}>
-      <span className="max-w-72 truncate">{message}</span>
-    </span>
-  );
+  const failure = alert(refusal ?? error ?? (merge?.status === "failed" ? `Merge stopped: ${merge.error}` : undefined));
   const button = (
     <Button variant="outline" size="xs" disabled={!!refusal} title={refusal}>
-      <GitMerge className={ICON} /> {base ? `Merge into ${base}` : "Merge"}
+      <GitMerge className={ICON} /> Merge
     </Button>
   );
   if (refusal) {

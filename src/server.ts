@@ -2,7 +2,7 @@ import { spawn } from "node:child_process";
 import { existsSync, mkdirSync, openSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import tailwind from "bun-plugin-tailwind";
-import { errorMessage, failStaleMerges, isMergeRunning, MergeError, startMerge } from "./merge.ts";
+import { errorMessage, failStaleMerges, forceMerge, isMergeRunning, MergeError, startMerge } from "./merge.ts";
 import { DiffError, pipelineDiff } from "./diff-git.ts";
 import type { DiffErrorBody } from "./diff.ts";
 import { startPrSync } from "./pr-sync.ts";
@@ -180,9 +180,11 @@ export async function serve(port = DEFAULT_PORT, opts: ServeOptions = {}) {
       "/api/pipelines/:id/merge": {
         POST: async (req) => {
           try {
-            const body = (await req.json().catch(() => null)) as { mode?: unknown; repo?: unknown; deleteBranches?: unknown } | null;
+            const body = (await req.json().catch(() => null)) as { mode?: unknown; repo?: unknown; deleteBranches?: unknown; force?: unknown } | null;
             // An old tab would send a {mode} field without deleteBranches: reject, never reinterpret.
             if (body?.mode !== undefined) throw new MergeError("mode is no longer supported: reload the dashboard", 400);
+            if (body?.force !== undefined && typeof body.force !== "boolean") throw new MergeError("force must be a boolean", 400);
+            if (body?.force === true) return Response.json(forceMerge(req.params.id, body?.repo), { status: 202 });
             return Response.json(startMerge(req.params.id, {}, body?.repo, body?.deleteBranches).state, { status: 202 });
           } catch (err) {
             const status = err instanceof MergeError ? err.status : 500;

@@ -179,6 +179,24 @@ export function startMerge(
   return { state: readState(id), done };
 }
 
+// "Merge now": the running engine reads the flag at its next poll. Idempotent once set.
+export function forceMerge(id: string, rawRepo?: unknown): State {
+  let s: State;
+  try {
+    s = readState(id);
+  } catch (err) {
+    throw new MergeError(errorMessage(err), 404);
+  }
+  const repo = resolveMergeRepo(s, rawRepo);
+  return updateState(id, (x) => {
+    const run = x.merges?.[repo.path];
+    if (!run || run.status !== "running" || isStale(run, isAlive)) throw new MergeError("no merge is running", 409);
+    if (run.force) return;
+    if (!run.waitingChecks) throw new MergeError("the merge is not waiting for checks", 409);
+    x.merges![repo.path] = { ...run, force: true, message: "merge now requested", updatedAt: new Date().toISOString() };
+  });
+}
+
 // A merge whose dashboard died stays "running" forever: mark it failed so the user can resume.
 export function failStaleMerges(alive: (pid: number) => boolean = isAlive): void {
   for (const s of listStates()) {
@@ -201,10 +219,10 @@ interface Ctx {
   repo: string;
   d: MergeDeps;
   view: (url: string) => Promise<PrView>;
-  progress: (c: Chunk, message: string) => void;
+  progress: (c: Chunk, message: string, waitingChecks?: boolean) => void;
   finish: (message: string) => void;
-  mergePr: (c: Chunk, head: string, message: string) => Promise<void>;
-  waitReady: (c: Chunk, first: PrView) => Promise<PrView>;
+  mergePr: (c: Chunk, head: string, message: string, admin?: boolean) => Promise<void>;
+  waitReady: (c: Chunk, first: PrView) => Promise<{ view: PrView; admin: boolean }>;
 }
 
 function makeCtx(id: string, repo: string, d: MergeDeps): Ctx {
@@ -215,7 +233,8 @@ function makeCtx(id: string, repo: string, d: MergeDeps): Ctx {
     updateState(id, (s) => {
       s.merges![repo] = { ...s.merges![repo]!, ...fields, updatedAt: iso() };
     });
-  const progress = (c: Chunk, message: string) => write({ current: c.name, message });
+  const progress = (c: Chunk, message: string, waitingChecks = false) =>
+    write({ current: c.name, message, waitingChecks: waitingChecks || undefined });
   const finish = (message: string) => write({ status: "done", current: undefined, message, endedAt: iso() });
   const gh = (args: string[]) => d.run("gh", args, { cwd: repo });
   const view = async (url: string): Promise<PrView> => {
@@ -225,13 +244,18 @@ function makeCtx(id: string, repo: string, d: MergeDeps): Ctx {
     return JSON.parse(r.stdout) as PrView;
   };
 
-  const mergePr: Ctx["mergePr"] = async (c, head, message) => {
+  const mergePr: Ctx["mergePr"] = async (c, head, message, admin = false) => {
     const url = c.pr!;
     const { owner, repo: name, number: n } = parsePrUrl(url);
     // No -d: the branches go together, after the merge (see deleteBranches). No squash fallback: the chunk commits must stay.
-    const r = await gh(["pr", "merge", url, "--merge", "--match-head-commit", head]);
+    // Also clears waitingChecks, so "Merge now" hides while gh runs.
+    progress(c, admin ? `merging #${n} now with --admin` : `merging #${n}`);
+    const r = await gh(["pr", "merge", url, "--merge", ...(admin ? ["--admin"] : []), "--match-head-commit", head]);
     if (r.code !== 0 && /merge commits are not allowed/i.test(r.stderr)) {
       throw new Error(`merge commits are not allowed on ${owner}/${name}: enable "Allow merge commits" in the GitHub settings, or merge #${n} by hand`);
+    }
+    if (r.code !== 0 && admin) {
+      throw new Error(`forced merge of #${n} refused: ${firstLine(r.stderr)} (--admin needs admin rights on ${owner}/${name})`);
     }
     if (r.code !== 0) throw new Error(`gh pr merge #${n} failed: ${firstLine(r.stderr)}`);
     upsertChunk(id, { name: c.name, status: MERGED });
@@ -248,18 +272,19 @@ function makeCtx(id: string, repo: string, d: MergeDeps): Ctx {
     for (let reuse = true; ; reuse = false) {
       if (!reuse) v = await view(url);
       const verdict = classifyPr(v);
-      if (verdict.kind === "ready") break;
+      if (verdict.kind === "ready") return { view: v, admin: false };
       if (verdict.kind === "blocked") throw new Error(verdict.reason);
       if (verdict.pendingChecks) {
+        // Before the timeout: a forced merge must not wait for it. Classify ran first, so a failed check still blocks.
+        if (readState(id).merges?.[repo]?.force) return { view: v, admin: true };
         checksSince ??= d.now();
         if (d.now() - checksSince > d.limits.checksMs) throw new Error(`checks still running on #${n} after 15 min`);
       } else if (d.now() - t0 > d.limits.mergeableMs) {
         throw new Error(`GitHub has not computed whether #${n} can merge after 2 min`);
       }
-      progress(c, verdict.reason);
+      progress(c, verdict.reason, verdict.pendingChecks);
       await d.sleep(d.limits.pollMs);
     }
-    return v;
   };
 
   return { id, repo, d, view, progress, finish, mergePr, waitReady };
@@ -290,13 +315,15 @@ async function mergeIntoBase(x: Ctx, repo: Repo, chunks: Chunk[], remove: boolea
   if (v.state === "CLOSED") throw new Error(`PR #${n} is closed`);
   // GitHub is the truth: the state base only serves before a PR exists, so a stale one must not block.
   const base = v.baseRefName;
+  let admin = false;
   if (v.state === "MERGED") upsertChunk(x.id, { name: c.name, status: MERGED });
   else {
-    const ready = await x.waitReady(c, v);
-    await x.mergePr(c, ready.headRefOid, `merged #${n}`);
+    const { view: ready, admin: forced } = await x.waitReady(c, v);
+    admin = forced;
+    await x.mergePr(c, ready.headRefOid, `merged #${n}`, admin);
   }
   const left = remove ? await deleteBranches(x, chunks, [base, repo.base ?? base]) : [];
-  x.finish(`merged #${n} into ${base}` + (left.length ? `; could not delete ${left.join(", ")}` : ""));
+  x.finish(`merged #${n} into ${base}` + (admin ? " with --admin" : "") + (left.length ? `; could not delete ${left.join(", ")}` : ""));
 }
 
 // Never throws: every failure ends up in state.merges. `repo` is a path or a name.

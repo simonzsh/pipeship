@@ -44,6 +44,8 @@ export interface MergeRun {
   current?: string; // name of the chunk being merged, or the one that stopped the merge
   message?: string; // progress, e.g. "waiting for checks on #12 (2 pending)"
   error?: string; // why it stopped (status "failed" only)
+  waitingChecks?: boolean; // true while the run waits for pending checks: "Merge now" shows only then
+  force?: boolean; // "Merge now" was requested; the engine reads it at each poll
   startedAt: string;
   updatedAt: string; // refreshed on every progress write
   endedAt?: string;

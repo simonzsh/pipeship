@@ -14,7 +14,7 @@ import { diffTotals, parseDiff } from "../src/diff.ts";
 import { baseRef, DiffError, gitDiff, headRef, pipelineDiff, resetFetchCache } from "../src/diff-git.ts";
 import { DEFAULT_PORT, readDashboardPid, requestDashboardUpdate, serve, spawnDashboard } from "../src/server.ts";
 import {
-  classifyPr, defaultRunner, DEFAULT_LIMITS, failStaleMerges, isMergeRunning, mergeRepo, MergeError, resolveMergeRepo, startMerge, type MergeDeps, type PrView, type Runner, type RunResult,
+  classifyPr, defaultRunner, DEFAULT_LIMITS, failStaleMerges, forceMerge, isMergeRunning, mergeRepo, MergeError, resolveMergeRepo, startMerge, type MergeDeps, type PrView, type Runner, type RunResult,
 } from "../src/merge.ts";
 import { startPrSync, syncPrStatuses } from "../src/pr-sync.ts";
 import { openPrs } from "../src/pr.ts";
@@ -1052,7 +1052,7 @@ function fakeGh(stack: ReturnType<typeof makeStack>, count: number) {
     }
     if (args[0] === "pr" && args[1] === "merge") {
       const n = Number(args[2]!.split("/").pop());
-      calls.push(`merge ${n} ${args.includes("--merge") ? "--merge" : "--squash"}`);
+      calls.push(`merge ${n} ${args.includes("--merge") ? "--merge" : "--squash"}${args.includes("--admin") ? " --admin" : ""}`);
       const pr = prs[n]!;
       const want = args[args.indexOf("--match-head-commit") + 1];
       if (want !== originSha(pr.head)) return { code: 1, stdout: "", stderr: "head commit mismatch\n" };
@@ -1569,12 +1569,90 @@ test("merge: a repo with 2 open PRs is refused with a 409 and a failed run, and 
   expect(gh.calls).toEqual([]);
 });
 
+test("merge: Merge now during a checks wait merges with --admin at the next poll", async () => {
+  const stack = makeFeature(2);
+  const gh = featureGh(stack, 2);
+  gh.prs[2]!.checks = [{ name: "ci", status: "IN_PROGRESS" }];
+  let sleeps = 0;
+  const sleep = gh.deps.sleep!;
+  gh.deps.sleep = async (ms) => {
+    sleeps++;
+    expect(readState(stack.id).merges?.[stack.clone]?.waitingChecks).toBe(true);
+    forceMerge(stack.id, stack.clone);
+    await sleep(ms);
+  };
+  await mergeRepo(stack.id, gh.deps);
+  const run = readState(stack.id).merges?.[stack.clone];
+  expect(run).toMatchObject({ status: "done", message: "merged #2 into main with --admin" });
+  expect(run?.waitingChecks).toBeFalsy();
+  expect(gh.calls).toEqual(["merge 2 --merge --admin"]);
+  expect(sleeps).toBe(1);
+});
+
+test("merge: a failed check after Merge now still blocks", async () => {
+  const stack = makeFeature(2);
+  const gh = featureGh(stack, 2);
+  gh.prs[2]!.checks = [{ name: "ci", status: "IN_PROGRESS" }];
+  gh.prs[2]!.view = (n) => (n > 1 ? { statusCheckRollup: [{ name: "ci", status: "COMPLETED", conclusion: "FAILURE" }] } : {});
+  const sleep = gh.deps.sleep!;
+  gh.deps.sleep = async (ms) => {
+    forceMerge(stack.id, stack.clone);
+    await sleep(ms);
+  };
+  await mergeRepo(stack.id, gh.deps);
+  expect(readState(stack.id).merges?.[stack.clone]).toMatchObject({ status: "failed", error: "check failed on #2: ci" });
+  expect(gh.calls).toEqual([]);
+});
+
+test("merge: GitHub refusing the forced merge fails the run with the reason", async () => {
+  const stack = makeFeature(2);
+  const gh = featureGh(stack, 2);
+  gh.prs[2]!.checks = [{ name: "ci", status: "IN_PROGRESS" }];
+  const sleep = gh.deps.sleep!;
+  gh.deps.sleep = async (ms) => {
+    forceMerge(stack.id, stack.clone);
+    await sleep(ms);
+  };
+  const run = gh.deps.run!;
+  gh.deps.run = async (cmd, args, opts) =>
+    args.includes("--admin") ? { code: 1, stdout: "", stderr: "GraphQL: Must have admin rights to Repository.\n" } : run(cmd, args, opts);
+  await mergeRepo(stack.id, gh.deps);
+  expect(readState(stack.id).merges?.[stack.clone]).toMatchObject({
+    status: "failed",
+    error: "forced merge of #2 refused: GraphQL: Must have admin rights to Repository. (--admin needs admin rights on o/r)",
+  });
+});
+
+test("merge: Merge now is refused when no merge waits for checks", () => {
+  const stack = makeFeature(2);
+  const refused = () => {
+    try {
+      forceMerge(stack.id, stack.clone);
+    } catch (err) {
+      return [(err as MergeError).status, (err as MergeError).message];
+    }
+  };
+  expect(refused()).toEqual([409, "no merge is running"]);
+  const now = new Date().toISOString();
+  const run = { status: "running" as const, repo: stack.clone, pid: process.pid, startedAt: now, updatedAt: now };
+  updateState(stack.id, (x) => {
+    x.merges = { [stack.clone]: run };
+  });
+  expect(refused()).toEqual([409, "the merge is not waiting for checks"]);
+  updateState(stack.id, (x) => {
+    x.merges![stack.clone] = { ...run, status: "done" };
+  });
+  expect(refused()).toEqual([409, "no merge is running"]);
+});
+
 test("the merge route rejects a mode", async () => {
   const one = makeStack(1);
   const server = await serve(0);
   try {
     const res = await fetch(`http://localhost:${server.port}/api/pipelines/${one.id}/merge`, { method: "POST", body: JSON.stringify({ mode: "base" }) });
     expect([res.status, ((await res.json()) as { error?: string }).error]).toEqual([400, "mode is no longer supported: reload the dashboard"]);
+    const bad = await fetch(`http://localhost:${server.port}/api/pipelines/${one.id}/merge`, { method: "POST", body: JSON.stringify({ force: "yes" }) });
+    expect([bad.status, ((await bad.json()) as { error?: string }).error]).toEqual([400, "force must be a boolean"]);
   } finally {
     server.stop(true);
   }
