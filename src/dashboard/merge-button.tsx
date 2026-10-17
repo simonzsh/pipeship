@@ -54,39 +54,47 @@ export function MergeButton({ id, repo, chunks, base, merge, finished }: {
   };
   if (running || starting) {
     const pr = todo[0]?.pr;
+    const merging = (
+      <Button variant="outline" size="xs" disabled title={running ? merge.message : undefined}>
+        <LogoLoader className="size-4 text-violet-600 dark:text-violet-400" label="Merging" /> Merging…
+      </Button>
+    );
+    const forceAlert = running && forceError?.run === merge.startedAt && alert(forceError.message);
+    // While the checks run, the one button opens the "Merge now" choice instead of staying disabled.
+    if (!running || !pr || !merge.waitingChecks || merge.force) {
+      return (
+        <>
+          {forceAlert}
+          {merging}
+        </>
+      );
+    }
     return (
-      <>
-        {running && forceError?.run === merge.startedAt && alert(forceError.message)}
-        {running && (
-          <span className="max-w-72 truncate text-xs text-muted-foreground" title={merge.message}>{merge.message}</span>
-        )}
-        {running && pr && (
-          <a href={`${pr}/checks`} target="_blank" rel="noreferrer" className="text-xs text-muted-foreground underline hover:text-foreground">Checks</a>
-        )}
-        {running && pr && merge.waitingChecks && !merge.force && (
-          <AlertDialog>
-            <AlertDialogTrigger asChild>
-              <Button variant="outline" size="xs"><GitMerge className={ICON} /> Merge now</Button>
-            </AlertDialogTrigger>
-            <AlertDialogContent>
-              <AlertDialogHeader>
-                <AlertDialogTitle>Merge #{prNumber(pr)} now?</AlertDialogTitle>
-                <AlertDialogDescription>
-                  Stops waiting for the pending checks and merges with <code>gh pr merge --admin</code>. This bypasses the required checks and
-                  branch protection, and needs admin rights on the repo. A failed check still stops the merge.
-                </AlertDialogDescription>
-              </AlertDialogHeader>
-              <AlertDialogFooter>
-                <AlertDialogCancel>Cancel</AlertDialogCancel>
-                <AlertDialogAction variant="default" onClick={force} className={CONFIRM}>Merge now</AlertDialogAction>
-              </AlertDialogFooter>
-            </AlertDialogContent>
-          </AlertDialog>
-        )}
-        <Button variant="outline" size="xs" disabled>
-          <LogoLoader className="size-4 text-violet-600 dark:text-violet-400" label="Merging" /> Merging…
-        </Button>
-      </>
+      <AlertDialog>
+        {forceAlert}
+        <AlertDialogTrigger asChild>
+          <Button variant="outline" size="xs" title={merge.message}>
+            <LogoLoader className="size-4 text-violet-600 dark:text-violet-400" label="Waiting for checks" /> Checks pending
+          </Button>
+        </AlertDialogTrigger>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Merge #{prNumber(pr)} now?</AlertDialogTitle>
+            <AlertDialogDescription>
+              The merge is {merge.message}. It merges by itself once they pass.{" "}
+              <a href={`${pr}/checks`} target="_blank" rel="noreferrer" className="underline hover:text-foreground">See the checks</a>
+            </AlertDialogDescription>
+            <AlertDialogDescription>
+              "Merge now" stops the wait and merges with <code>gh pr merge --admin</code>. This bypasses the required checks and
+              branch protection, and needs admin rights on the repo. A failed check still stops the merge.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Keep waiting</AlertDialogCancel>
+            <AlertDialogAction variant="default" onClick={force} className={CONFIRM}>Merge now</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     );
   }
   // The server refuses a closed PR and a stack of 2 or more: hide the button when only closed PRs are left,
