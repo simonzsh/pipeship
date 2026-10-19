@@ -30,3 +30,16 @@ export async function postAction(id: string, action: string, body?: unknown): Pr
     return "Network error: the request did not reach the dashboard";
   }
 }
+
+// Deletes every archived pipeline. Returns the error to show, if any, including the ones that could not go.
+export async function deleteArchived(): Promise<string | undefined> {
+  try {
+    const res = await fetch("/api/pipelines/delete-archived", { method: "POST" });
+    if (!res.ok) return await responseError(res);
+    const { failed }: { failed: { id: string; error: string }[] } = await res.json();
+    if (!failed.length) return undefined;
+    return `${failed.length} not deleted: ${failed.map((f) => `${f.id} (${f.error})`).join("; ")}`;
+  } catch {
+    return "Network error: the request did not reach the dashboard";
+  }
+}
