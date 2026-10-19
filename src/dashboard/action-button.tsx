@@ -123,7 +123,7 @@ export function PipelineActions({ p, merging, starting }: { p: State; merging: b
   return actions.map((name) => <ActionButton key={name} id={p.id} action={name} hasServers={!!p.preview} disabledTitle={disabledTitle(name)} />);
 }
 
-// Icon of the archived group header, shown on hover of the header (`group/header`) or on focus. It deletes every archived pipeline, whatever the repo filter.
+// Icon of the archived group header, shown over the end of the header divider on hover of the header (`group/header`) or on focus. It deletes every archived pipeline, whatever the repo filter.
 export function DeleteArchivedButton({ onResult }: { onResult: (error: string | undefined) => void }) {
   return (
     <AlertDialog>
@@ -133,7 +133,7 @@ export function DeleteArchivedButton({ onResult }: { onResult: (error: string | 
           size="xs"
           aria-label="Delete all archived pipelines"
           title="Delete all archived pipelines"
-          className="w-6 px-0 opacity-0 group-hover/header:opacity-100 focus-visible:opacity-100 data-[state=open]:opacity-100"
+          className="absolute right-0 top-1/2 w-6 -translate-y-1/2 bg-background px-0 opacity-0 group-hover/header:opacity-100 focus-visible:opacity-100 data-[state=open]:opacity-100"
         >
           <Trash2 className="text-muted-foreground" />
         </Button>
