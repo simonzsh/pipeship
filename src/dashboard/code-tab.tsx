@@ -355,7 +355,7 @@ function FileTree({ sections, multi, active, onSelect }: { sections: TreeSection
   }), []);
   const trees = useMemo(() => sections.map((s) => ({ repo: s.repo, nodes: buildFileTree(s.files) })), [sections]);
   return (
-    <nav aria-label="Changed files" className="sticky top-[calc(var(--bar)+0.75rem)] ml-6 hidden max-h-[calc(100vh-10rem-var(--bar))] w-72 shrink-0 self-start overflow-y-auto rounded-lg border bg-card p-1 lg:block">
+    <nav aria-label="Changed files" className="sticky top-[calc(var(--bar)+0.75rem)] ml-6 hidden max-h-[calc(var(--pane)-var(--bar)-1.5rem)] w-72 shrink-0 self-start overflow-y-auto rounded-lg border bg-card p-1 lg:block">
       {trees.map(({ repo, nodes }) => {
         const key = `${repo}\0`;
         const shut = closed.has(key);
@@ -447,13 +447,19 @@ export function CodeTab({ p, target, onTarget }: CodeTabProps) {
     [results],
   );
   // The toolbar sticks at the pane top and wraps on narrow panes: share its height through `--bar`.
+  // The pane starts below the page headers, so the tree sizes from its height (`--pane`), not the viewport.
   const bar = useRef<HTMLDivElement>(null);
   const barHeight = () => bar.current?.offsetHeight ?? 0;
   useEffect(() => {
     const el = bar.current;
+    const pane = scrollPane(root.current);
     if (!el) return;
-    const ro = new ResizeObserver(() => root.current?.style.setProperty("--bar", `${el.offsetHeight}px`));
+    const ro = new ResizeObserver(() => {
+      root.current?.style.setProperty("--bar", `${el.offsetHeight}px`);
+      if (pane) root.current?.style.setProperty("--pane", `${pane.clientHeight}px`);
+    });
     ro.observe(el);
+    if (pane) ro.observe(pane);
     return () => ro.disconnect();
   }, []);
   const select = useCallback((repo: string, path: string) => {
@@ -520,7 +526,7 @@ export function CodeTab({ p, target, onTarget }: CodeTabProps) {
   const hasTests = datas.some((d) => d.files.some((f) => isTestFile(f.path)));
 
   return (
-    <div ref={root} className="flex flex-col gap-4 [--bar:0px]">
+    <div ref={root} className="flex flex-col gap-4 [--bar:0px] [--pane:100vh]">
       <div ref={bar} className="sticky top-0 z-20 flex flex-wrap items-center gap-x-3 gap-y-1 border-b bg-background px-6 py-2 text-sm">
         {/* Breadcrumb: "Whole repo" is the way back once a chunk is picked. */}
         {chunk ? (
