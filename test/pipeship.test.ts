@@ -3135,7 +3135,36 @@ test("codex: runs marketplace upgrade then add", async () => {
     "codex plugin marketplace upgrade pipeship",
     "codex plugin add pipeship@pipeship",
     "codex plugin list --json",
+    "bun install --frozen-lockfile --production --omit=peer",
   ]);
+});
+
+describe("installUpdate dependencies", () => {
+  const BUN = "bun install --frozen-lockfile --production --omit=peer";
+
+  test("installs them in the new copy when node_modules is missing", async () => {
+    const f = fakeHarness("claude", ["0.10.0", "0.11.0"]);
+    const cwds: (string | undefined)[] = [];
+    const run: Runner = async (cmd, args, opts) => (cmd === "bun" && cwds.push(opts?.cwd), f.run(cmd, args, opts));
+    const res = await installUpdate("claude", { run, env: f.env, launcherExists: () => true, depsInstalled: () => false });
+    expect(res).toMatchObject({ restarting: true });
+    expect(f.ran.filter((l) => l === BUN)).toHaveLength(1);
+    expect(cwds).toEqual(["/cache/0.11.0"]);
+  });
+
+  test("skips the install when node_modules exists", async () => {
+    const f = fakeHarness("claude", ["0.10.0", "0.11.0"]);
+    const res = await installUpdate("claude", { run: f.run, env: f.env, launcherExists: () => true, depsInstalled: () => true });
+    expect(res).toMatchObject({ restarting: true });
+    expect(f.ran).not.toContain(BUN);
+  });
+
+  test("does not restart when the install fails", async () => {
+    const f = fakeHarness("claude", ["0.10.0", "0.11.0"]);
+    const run: Runner = async (cmd, args, opts) => (cmd === "bun" ? { code: 1, stdout: "", stderr: "no network" } : f.run(cmd, args, opts));
+    const res = await installUpdate("claude", { run, env: f.env, launcherExists: () => true, depsInstalled: () => false });
+    expect(res).toEqual({ restarting: false, message: expect.stringContaining("no network") });
+  });
 });
 
 describe.each(["claude", "codex"] as const)("installUpdate with %s", (harness) => {

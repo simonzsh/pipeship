@@ -1,4 +1,4 @@
-import { existsSync, readFileSync, realpathSync } from "node:fs";
+import { existsSync, readFileSync, realpathSync, rmSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { defaultRunner, errorMessage, type Runner } from "./merge.ts";
@@ -113,12 +113,16 @@ export interface InstallDeps {
   run: Runner;
   env: Env;
   launcherExists: (path: string) => boolean;
+  depsInstalled: (root: string) => boolean;
   blocker: () => string | undefined; // why a restart is unsafe right now
 }
 
 type InstallResult = { restarting: true; launcher: string; warning?: string } | { restarting: false; message: string };
 
 let installing = false;
+
+// `--omit=peer`: the tailwind plugin's `bun` peer would pull two Bun binaries (164 MB). Keep in sync with scripts/pipeship.
+const INSTALL_DEPS: [string, string[]] = ["bun", ["install", "--frozen-lockfile", "--production", "--omit=peer"]];
 
 async function updateHarness(h: Harness, run: Runner): Promise<void> {
   for (const [cmd, args] of strategies[h].commands) {
@@ -133,7 +137,7 @@ async function updateHarness(h: Harness, run: Runner): Promise<void> {
 // One dashboard serves pipelines from both harnesses, so it updates every installed copy, not only its own.
 // It restarts from the running copy when that one moved, else from another copy that is newer than the running one.
 export async function installUpdate(harness: Harness | null, deps: Partial<InstallDeps> = {}): Promise<InstallResult> {
-  const { run = defaultRunner, env = process.env, launcherExists = existsSync, blocker = () => undefined } = deps;
+  const { run = defaultRunner, env = process.env, launcherExists = existsSync, depsInstalled = (root) => existsSync(join(root, "node_modules")), blocker = () => undefined } = deps;
   const busy = blocker();
   if (busy) throw new UpdateError(busy, 409);
   if (!harness) return { restarting: false, message: "This copy is not installed through a plugin manager (Claude Code or Codex): update it with git" };
@@ -174,6 +178,16 @@ export async function installUpdate(harness: Harness | null, deps: Partial<Insta
     }
     const launcher = join(best.installPath, "scripts", "pipeship");
     if (!launcherExists(launcher)) return { restarting: false, message: `The new version has no launcher at ${launcher}${note}` };
+    // Install while the old dashboard still runs, so the downtime is only the build and bind.
+    if (!depsInstalled(best.installPath)) {
+      const [cmd, args] = INSTALL_DEPS;
+      const res = await run(cmd, args, { cwd: best.installPath, timeoutMs: 120_000 }).catch((err) => ({ code: 1, stdout: "", stderr: errorMessage(err) }));
+      if (res.code !== 0) {
+        // A partial node_modules would make scripts/pipeship skip its own install.
+        rmSync(join(best.installPath, "node_modules"), { recursive: true, force: true });
+        return { restarting: false, message: `Updated, but installing the dependencies failed: ${(res.stderr || res.stdout).trim() || `exit ${res.code}`}${note}` };
+      }
+    }
     // A start or merge may have begun while the update ran.
     const late = blocker();
     if (late) throw new UpdateError(`Updated, but not restarted: ${late}`, 409);
