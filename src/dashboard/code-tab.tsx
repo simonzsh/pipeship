@@ -179,14 +179,14 @@ const FileDiff = memo(function FileDiff({ id, file, open, onToggle }: { id: stri
   const lang = useMemo(() => languageOf(file.path), [file.path]);
   const renamed = file.oldPath && file.newPath && file.oldPath !== file.newPath;
   return (
-    <section id={id} data-diff-file className="border-y bg-card">
+    <section id={id} data-diff-file className="mx-6 overflow-clip rounded-lg border bg-card lg:ml-0">
       {/* Opaque colours and no transition or blur: the old blur made the borders flicker on hover.
-          Full-bleed file cards: square corners, so nothing shows through once the header sticks. */}
+          The card clips its corners, not the header: a stuck header stays square, so nothing shows through. */}
       <button
         type="button"
         onClick={() => onToggle(file.path, open)}
         aria-expanded={open}
-        className={`sticky top-(--bar) z-10 flex w-full items-center gap-2 bg-card px-6 py-2 text-left text-sm hover:bg-[color-mix(in_oklab,var(--card),var(--foreground)_4%)] ${open ? "border-b" : ""}`}
+        className={`sticky top-(--bar) z-10 flex w-full items-center gap-2 bg-card px-4 py-2 text-left text-sm hover:bg-[color-mix(in_oklab,var(--card),var(--foreground)_4%)] ${open ? "border-b" : ""}`}
       >
         {open ? <ChevronDown className="size-4 shrink-0 text-muted-foreground" /> : <ChevronRight className="size-4 shrink-0 text-muted-foreground" />}
         <FilePath path={renamed ? `${file.oldPath} → ${file.newPath}` : file.path} />
