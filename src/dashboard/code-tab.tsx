@@ -423,6 +423,8 @@ function ScrollTop({ root }: { root: RefObject<HTMLElement | null> }) {
   );
 }
 
+const USER_SCROLL = ["wheel", "touchstart", "keydown", "mousedown"] as const;
+
 export function CodeTab({ p, target, onTarget }: CodeTabProps) {
   const root = useRef<HTMLDivElement>(null);
   const [manual, setManual] = useState(0);
@@ -452,13 +454,32 @@ export function CodeTab({ p, target, onTarget }: CodeTabProps) {
 
   useEffect(() => {
     if (!reveal) return;
-    const raf = requestAnimationFrame(() => {
-      const pane = scrollPane(root.current);
+    const pane = scrollPane(root.current);
+    if (!pane) return;
+    // Lazy sections near the target grow once rendered: re-align until it holds still, or until the user scrolls.
+    let raf = 0;
+    let frames = 0;
+    let still = 0;
+    const stop = () => {
+      cancelAnimationFrame(raf);
+      for (const e of USER_SCROLL) pane.removeEventListener(e, stop);
+    };
+    const align = () => {
       const el = document.getElementById(fileDomId(reveal.repo, reveal.path));
+      if (!el) return stop();
       // The file header is sticky at the pane top: aligning the section top keeps it visible.
-      if (pane && el) pane.scrollTo({ top: el.getBoundingClientRect().top - pane.getBoundingClientRect().top + pane.scrollTop });
-    });
-    return () => cancelAnimationFrame(raf);
+      const delta = el.getBoundingClientRect().top - pane.getBoundingClientRect().top;
+      if (Math.abs(delta) > 1) {
+        pane.scrollTo({ top: pane.scrollTop + delta });
+        still = 0;
+      } else still++;
+      lockUntil.current = performance.now() + 200;
+      if (still < 3 && ++frames < 60) raf = requestAnimationFrame(align);
+      else stop();
+    };
+    for (const e of USER_SCROLL) pane.addEventListener(e, stop, { passive: true });
+    raf = requestAnimationFrame(align);
+    return stop;
   }, [reveal]);
 
   // The highlighted file is the last one whose top has passed the top of the pane.
