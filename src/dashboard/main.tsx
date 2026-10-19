@@ -164,7 +164,7 @@ function App() {
                 );
                 return (
                   <section key={g.status} className="flex flex-col gap-1.5">
-                    <div className="flex items-center gap-2">
+                    <div className="group/header flex items-center gap-2">
                       <button
                         type="button"
                         aria-expanded={!collapsed}
