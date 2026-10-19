@@ -16,6 +16,7 @@ command -v gh >/dev/null 2>&1 || echo "pipeship: gh not found, PR steps will fai
 root="$(cd "$(dirname "$(realpath "$0")")/.." && pwd)"
 if [ ! -d "$root/node_modules" ]; then
   echo "pipeship: installing dependencies (first run)..." >&2
-  (cd "$root" && bun install --frozen-lockfile --production >&2)
+  # --omit=peer: the tailwind plugin's `bun` peer pulls two Bun binaries.
+  (cd "$root" && bun install --frozen-lockfile --production --omit=peer >&2)
 fi
 exec bun "$root/src/cli.ts" "$@"

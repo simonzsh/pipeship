@@ -29,7 +29,7 @@ export function UpdateBanner({ live }: { live: boolean }) {
     };
   }, []);
 
-  // Check the version on each SSE reconnect, and every 3 s as a fallback if the restart was too quick to see.
+  // Check the version on each SSE reconnect, and every 500 ms as a fallback if the restart was too quick to see.
   useEffect(() => {
     if (from === undefined) return;
     const check = () =>
@@ -38,7 +38,7 @@ export function UpdateBanner({ live }: { live: boolean }) {
         .then((h) => shouldReload(from, h.version) && location.reload(), () => {});
     if (live && !wasLive.current) check();
     wasLive.current = live;
-    const timer = setInterval(check, 3000);
+    const timer = setInterval(check, 500);
     return () => clearInterval(timer);
   }, [live, from]);
 
