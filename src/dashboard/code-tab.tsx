@@ -186,7 +186,7 @@ const FileDiff = memo(function FileDiff({ id, file, open, onToggle }: { id: stri
         type="button"
         onClick={() => onToggle(file.path, open)}
         aria-expanded={open}
-        className={`sticky top-0 z-10 flex w-full items-center gap-2 bg-card px-6 py-2 text-left text-sm hover:bg-[color-mix(in_oklab,var(--card),var(--foreground)_4%)] ${open ? "border-b" : ""}`}
+        className={`sticky top-(--bar) z-10 flex w-full items-center gap-2 bg-card px-6 py-2 text-left text-sm hover:bg-[color-mix(in_oklab,var(--card),var(--foreground)_4%)] ${open ? "border-b" : ""}`}
       >
         {open ? <ChevronDown className="size-4 shrink-0 text-muted-foreground" /> : <ChevronRight className="size-4 shrink-0 text-muted-foreground" />}
         <FilePath path={renamed ? `${file.oldPath} → ${file.newPath}` : file.path} />
@@ -355,7 +355,7 @@ function FileTree({ sections, multi, active, onSelect }: { sections: TreeSection
   }), []);
   const trees = useMemo(() => sections.map((s) => ({ repo: s.repo, nodes: buildFileTree(s.files) })), [sections]);
   return (
-    <nav aria-label="Changed files" className="sticky top-0 ml-6 hidden max-h-[calc(100vh-10rem)] w-72 shrink-0 self-start overflow-y-auto rounded-lg border bg-card p-1 lg:block">
+    <nav aria-label="Changed files" className="sticky top-[calc(var(--bar)+0.75rem)] ml-6 hidden max-h-[calc(100vh-10rem-var(--bar))] w-72 shrink-0 self-start overflow-y-auto rounded-lg border bg-card p-1 lg:block">
       {trees.map(({ repo, nodes }) => {
         const key = `${repo}\0`;
         const shut = closed.has(key);
@@ -446,6 +446,16 @@ export function CodeTab({ p, target, onTarget }: CodeTabProps) {
     () => results.flatMap((r) => ("data" in r && r.data.files.length ? [{ repo: r.data.repo, files: r.data.files }] : [])),
     [results],
   );
+  // The toolbar sticks at the pane top and wraps on narrow panes: share its height through `--bar`.
+  const bar = useRef<HTMLDivElement>(null);
+  const barHeight = () => bar.current?.offsetHeight ?? 0;
+  useEffect(() => {
+    const el = bar.current;
+    if (!el) return;
+    const ro = new ResizeObserver(() => root.current?.style.setProperty("--bar", `${el.offsetHeight}px`));
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
   const select = useCallback((repo: string, path: string) => {
     setActive(fileDomId(repo, path));
     lockUntil.current = performance.now() + 500;
@@ -467,8 +477,8 @@ export function CodeTab({ p, target, onTarget }: CodeTabProps) {
     const align = () => {
       const el = document.getElementById(fileDomId(reveal.repo, reveal.path));
       if (!el) return stop();
-      // The file header is sticky at the pane top: aligning the section top keeps it visible.
-      const delta = el.getBoundingClientRect().top - pane.getBoundingClientRect().top;
+      // The file header sticks under the toolbar: aligning the section top there keeps it visible.
+      const delta = el.getBoundingClientRect().top - pane.getBoundingClientRect().top - barHeight();
       if (Math.abs(delta) > 1) {
         pane.scrollTo({ top: pane.scrollTop + delta });
         still = 0;
@@ -488,7 +498,7 @@ export function CodeTab({ p, target, onTarget }: CodeTabProps) {
     if (!pane || sections.length === 0) return;
     const track = () => {
       if (performance.now() < lockUntil.current) return;
-      const top = pane.getBoundingClientRect().top + 4;
+      const top = pane.getBoundingClientRect().top + barHeight() + 4;
       const els = root.current?.querySelectorAll<HTMLElement>("[data-diff-file]") ?? [];
       let id = els[0]?.id ?? null;
       for (const el of els) if (el.getBoundingClientRect().top <= top) id = el.id;
@@ -509,8 +519,8 @@ export function CodeTab({ p, target, onTarget }: CodeTabProps) {
   const hasTests = datas.some((d) => d.files.some((f) => isTestFile(f.path)));
 
   return (
-    <div ref={root} className="flex flex-col gap-4">
-      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 px-6 text-sm">
+    <div ref={root} className="flex flex-col gap-4 [--bar:0px]">
+      <div ref={bar} className="sticky top-0 z-20 flex flex-wrap items-center gap-x-3 gap-y-1 border-b bg-background px-6 py-2 text-sm">
         {/* Breadcrumb: "Whole repo" is the way back once a chunk is picked. */}
         {chunk ? (
           <span className="flex items-center gap-1.5">
