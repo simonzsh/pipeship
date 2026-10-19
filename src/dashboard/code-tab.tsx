@@ -1,5 +1,5 @@
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from "react";
-import { AlertCircle, ArrowUp, ChevronDown, ChevronRight, ChevronsDownUp, ChevronsUpDown, FlaskConical, RefreshCw } from "lucide-react";
+import { AlertCircle, ArrowUp, ChevronDown, ChevronRight, ChevronsDownUp, ChevronsUpDown, FlaskConical, Folder, RefreshCw } from "lucide-react";
 import { Spinner } from "./components/ui/spinner";
 import type { DashboardState } from "../state.ts";
 import { chunksOf, holdingPr, repoName } from "../repos.ts";
@@ -8,6 +8,7 @@ import { Badge } from "./components/ui/badge";
 import { Button } from "./components/ui/button";
 import { highlightLines, languageOf } from "./highlight";
 import { diffRequests, diffUrl, type DiffRequest, type DiffTarget } from "./diff-requests";
+import { buildFileTree, fileDomId, type TreeNode } from "./file-tree";
 import { isTestFile } from "./test-files";
 import { prNumber } from "./utils";
 
@@ -66,7 +67,9 @@ function useDiff(id: string, requests: DiffRequest[], keys: RefreshKeys): { resu
     return () => ctl.abort();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [urlsKey, keys.manual, keys.soft]);
-  return { results: urls.map((u) => results[u] ?? ({ loading: true } as Result)), fetching };
+  // Stable identity between renders: the tree and its scroll tracking depend on it.
+  const list = useMemo(() => urls.map((u) => results[u] ?? ({ loading: true } as Result)), [results, urlsKey]);
+  return { results: list, fetching };
 }
 
 const STATUS_STYLE: Record<DiffFile["status"], string> = {
@@ -172,11 +175,11 @@ function WhenVisible({ lines, children }: { lines: number; children: ReactNode }
   return seen ? children : <div ref={ref} style={{ height: lines * LINE_PX }} />;
 }
 
-const FileDiff = memo(function FileDiff({ file, open, onToggle }: { file: DiffFile; open: boolean; onToggle: (path: string, open: boolean) => void }) {
+const FileDiff = memo(function FileDiff({ id, file, open, onToggle }: { id: string; file: DiffFile; open: boolean; onToggle: (path: string, open: boolean) => void }) {
   const lang = useMemo(() => languageOf(file.path), [file.path]);
   const renamed = file.oldPath && file.newPath && file.oldPath !== file.newPath;
   return (
-    <section className="border-y bg-card">
+    <section id={id} data-diff-file className="border-y bg-card">
       {/* Opaque colours and no transition or blur: the old blur made the borders flicker on hover.
           Full-bleed file cards: square corners, so nothing shows through once the header sticks. */}
       <button
@@ -239,8 +242,19 @@ function openByDefault(files: DiffFile[]): Set<string> {
 }
 
 // memo: each pipeline change on the SSE stream re-renders CodeTab; the diff must not re-render with it.
-const RepoDiff = memo(function RepoDiff({ data, all, tests }: { data: DiffResponse; all: All; tests: number }) {
+// A tree click: `seq` makes a second click on the same file count as a new request.
+interface Reveal {
+  repo: string;
+  path: string;
+  seq: number;
+}
+
+const RepoDiff = memo(function RepoDiff({ data, all, tests, reveal }: { data: DiffResponse; all: All; tests: number; reveal: Reveal | null }) {
   const [overrides, setOverrides] = useState<Record<string, boolean>>({});
+  // Layout effect: the file is open before the scroll that CodeTab runs on the next frame.
+  useLayoutEffect(() => {
+    if (reveal) setOverrides((o) => ({ ...o, [reveal.path]: true }));
+  }, [reveal]);
   useEffect(() => {
     if (all) setOverrides(Object.fromEntries(data.files.map((f) => [f.path, all.open])));
   }, [all, data]);
@@ -267,6 +281,7 @@ const RepoDiff = memo(function RepoDiff({ data, all, tests }: { data: DiffRespon
       {data.files.map((f) => (
         <FileDiff
           key={f.path}
+          id={fileDomId(data.repo, f.path)}
           file={f}
           open={overrides[f.path] ?? defaults.has(f.path)}
           onToggle={toggle}
@@ -275,6 +290,89 @@ const RepoDiff = memo(function RepoDiff({ data, all, tests }: { data: DiffRespon
     </div>
   );
 });
+
+interface TreeSection {
+  repo: string;
+  files: DiffFile[];
+}
+
+const STATUS_LETTER: Record<DiffFile["status"], string> = { added: "A", deleted: "D", modified: "M", renamed: "R", copied: "C" };
+
+function TreeRows({ nodes, depth, repo, active, closed, onFold, onSelect }: {
+  nodes: TreeNode[];
+  depth: number;
+  repo: string;
+  active: string | null;
+  closed: Set<string>;
+  onFold: (key: string) => void;
+  onSelect: (repo: string, path: string) => void;
+}) {
+  return nodes.map((n) => {
+    const pad = { paddingLeft: 8 + depth * 12 };
+    if (n.kind === "dir") {
+      const key = `${repo}\0${n.path}`;
+      const shut = closed.has(key);
+      return (
+        <div key={key}>
+          <button type="button" onClick={() => onFold(key)} aria-expanded={!shut} style={pad} className="flex w-full items-center gap-1 rounded py-0.5 pr-2 text-left text-xs hover:bg-muted">
+            {shut ? <ChevronRight className="size-3.5 shrink-0 text-muted-foreground" /> : <ChevronDown className="size-3.5 shrink-0 text-muted-foreground" />}
+            <Folder className="size-3.5 shrink-0 text-muted-foreground" />
+            <span className="min-w-0 truncate font-mono" title={n.path}>{n.name}</span>
+          </button>
+          {!shut && <TreeRows nodes={n.children} depth={depth + 1} repo={repo} active={active} closed={closed} onFold={onFold} onSelect={onSelect} />}
+        </div>
+      );
+    }
+    const f = n.file;
+    const renamed = f.oldPath && f.newPath && f.oldPath !== f.newPath;
+    return (
+      <button
+        key={n.path}
+        type="button"
+        onClick={() => onSelect(repo, n.path)}
+        title={renamed ? `${f.oldPath} → ${f.newPath}` : n.path}
+        aria-current={active === fileDomId(repo, n.path) || undefined}
+        style={{ paddingLeft: 8 + depth * 12 + 18 }}
+        className={`flex w-full items-center gap-1.5 rounded py-0.5 pr-2 text-left text-xs hover:bg-muted ${active === fileDomId(repo, n.path) ? "bg-accent" : ""}`}
+      >
+        <span className={`shrink-0 rounded px-1 font-mono text-[10px] font-medium ${STATUS_STYLE[f.status]}`}>{STATUS_LETTER[f.status]}</span>
+        <span className="min-w-0 truncate font-mono font-medium">{n.name}</span>
+        <span className="ml-auto" />
+        <Counts additions={f.additions} deletions={f.deletions} />
+      </button>
+    );
+  });
+}
+
+// One tree for all repos: with several, each repo is a root node. Hidden on narrow screens.
+function FileTree({ sections, multi, active, onSelect }: { sections: TreeSection[]; multi: boolean; active: string | null; onSelect: (repo: string, path: string) => void }) {
+  const [closed, setClosed] = useState<Set<string>>(new Set());
+  const onFold = useCallback((key: string) => setClosed((c) => {
+    const next = new Set(c);
+    if (!next.delete(key)) next.add(key);
+    return next;
+  }), []);
+  const trees = useMemo(() => sections.map((s) => ({ repo: s.repo, nodes: buildFileTree(s.files) })), [sections]);
+  return (
+    <nav aria-label="Changed files" className="sticky top-0 ml-6 hidden max-h-[calc(100vh-10rem)] w-72 shrink-0 self-start overflow-y-auto rounded-lg border bg-card p-1 lg:block">
+      {trees.map(({ repo, nodes }) => {
+        const key = `${repo}\0`;
+        const shut = closed.has(key);
+        return (
+          <div key={repo}>
+            {multi && (
+              <button type="button" onClick={() => onFold(key)} aria-expanded={!shut} className="flex w-full items-center gap-1 rounded px-2 py-0.5 text-left text-xs font-medium hover:bg-muted">
+                {shut ? <ChevronRight className="size-3.5 shrink-0 text-muted-foreground" /> : <ChevronDown className="size-3.5 shrink-0 text-muted-foreground" />}
+                <span className="min-w-0 truncate">{repoName(repo)}</span>
+              </button>
+            )}
+            {!shut && <TreeRows nodes={nodes} depth={multi ? 1 : 0} repo={repo} active={active} closed={closed} onFold={onFold} onSelect={onSelect} />}
+          </div>
+        );
+      })}
+    </nav>
+  );
+}
 
 // Warns when the diff shows work the PR on GitHub does not have yet.
 function OriginSync({ data }: { data: DiffResponse }) {
@@ -289,13 +387,19 @@ function OriginSync({ data }: { data: DiffResponse }) {
   );
 }
 
-// Sticky corner button: the diff scrolls inside the detail pane, so we find that pane from the tab itself.
+// The diff scrolls inside the detail pane: its first scrollable ancestor.
+function scrollPane(from: HTMLElement | null): HTMLElement | null {
+  let el = from?.parentElement ?? null;
+  while (el && !/(auto|scroll)/.test(getComputedStyle(el).overflowY)) el = el.parentElement;
+  return el;
+}
+
+// Sticky corner button, shown once the pane is scrolled down.
 function ScrollTop({ root }: { root: RefObject<HTMLElement | null> }) {
   const [shown, setShown] = useState(false);
   const pane = useRef<HTMLElement | null>(null);
   useEffect(() => {
-    let el = root.current?.parentElement ?? null;
-    while (el && !/(auto|scroll)/.test(getComputedStyle(el).overflowY)) el = el.parentElement;
+    const el = scrollPane(root.current);
     pane.current = el;
     if (!el) return;
     const on = () => setShown(el.scrollTop > 400);
@@ -330,6 +434,48 @@ export function CodeTab({ p, target, onTarget }: CodeTabProps) {
   const keys = { manual, soft: JSON.stringify(mine.map((c) => [c.branch, c.status])) };
   const { results, fetching } = useDiff(p.id, requests, keys);
   const multi = p.repos.length > 1;
+  const [active, setActive] = useState<string | null>(null);
+  const [reveal, setReveal] = useState<Reveal | null>(null);
+  const seq = useRef(0);
+  // While a tree click scrolls, the scroll tracking must not replace the clicked file.
+  const lockUntil = useRef(0);
+  const sections = useMemo(
+    () => results.flatMap((r) => ("data" in r && r.data.files.length ? [{ repo: r.data.repo, files: r.data.files }] : [])),
+    [results],
+  );
+  const select = useCallback((repo: string, path: string) => {
+    setActive(fileDomId(repo, path));
+    lockUntil.current = performance.now() + 500;
+    setReveal({ repo, path, seq: ++seq.current });
+  }, []);
+
+  useEffect(() => {
+    if (!reveal) return;
+    const raf = requestAnimationFrame(() => {
+      const pane = scrollPane(root.current);
+      const el = document.getElementById(fileDomId(reveal.repo, reveal.path));
+      // The file header is sticky at the pane top: aligning the section top keeps it visible.
+      if (pane && el) pane.scrollTo({ top: el.getBoundingClientRect().top - pane.getBoundingClientRect().top + pane.scrollTop });
+    });
+    return () => cancelAnimationFrame(raf);
+  }, [reveal]);
+
+  // The highlighted file is the last one whose top has passed the top of the pane.
+  useEffect(() => {
+    const pane = scrollPane(root.current);
+    if (!pane || sections.length === 0) return;
+    const track = () => {
+      if (performance.now() < lockUntil.current) return;
+      const top = pane.getBoundingClientRect().top + 4;
+      const els = root.current?.querySelectorAll<HTMLElement>("[data-diff-file]") ?? [];
+      let id = els[0]?.id ?? null;
+      for (const el of els) if (el.getBoundingClientRect().top <= top) id = el.id;
+      setActive(id);
+    };
+    track();
+    pane.addEventListener("scroll", track, { passive: true });
+    return () => pane.removeEventListener("scroll", track);
+  }, [sections]);
 
   const chunk = target.chunk ? p.chunks.find((c) => c.name === target.chunk) : undefined;
   const held = chunk ? holdingPr(chunksOf(p, chunk.repo), chunk.name) : undefined;
@@ -378,31 +524,36 @@ export function CodeTab({ p, target, onTarget }: CodeTabProps) {
       {requests.length === 0 && (
         <p className="px-6 text-sm text-muted-foreground">No branch yet: nothing to compare.</p>
       )}
-      {requests.map((req, i) => {
-        const r = results[i]!;
-        return (
-          <div key={`${req.repo}:${req.chunk ?? ""}`} className="flex flex-col gap-3">
-            {multi && (
-              <h4 className="flex items-center gap-2 px-6 text-sm font-medium">
-                {repoName(req.repo)}
-                {"data" in r && <code className="rounded bg-muted px-1.5 py-0.5 text-xs font-normal text-muted-foreground">{r.data.range}</code>}
-                {"data" in r && <OriginSync data={r.data} />}
-              </h4>
-            )}
-            {"loading" in r ? (
-              <p className="flex items-center gap-2 px-6 text-sm text-muted-foreground">
-                <Spinner className="size-4" /> Loading diff…
-              </p>
-            ) : "error" in r ? (
-              <p className="mx-6 flex items-center gap-2 rounded-lg border bg-muted/50 px-3 py-2 text-sm text-muted-foreground">
-                <AlertCircle className="size-4 shrink-0" /> {r.error}
-              </p>
-            ) : (
-              <RepoDiff data={r.data} all={all} tests={tests} />
-            )}
-          </div>
-        );
-      })}
+      <div className="flex items-start gap-4">
+        {sections.length > 0 && <FileTree sections={sections} multi={multi} active={active} onSelect={select} />}
+        <div className="flex min-w-0 flex-1 flex-col gap-4">
+          {requests.map((req, i) => {
+            const r = results[i]!;
+            return (
+              <div key={`${req.repo}:${req.chunk ?? ""}`} className="flex flex-col gap-3">
+                {multi && (
+                  <h4 className="flex items-center gap-2 px-6 text-sm font-medium">
+                    {repoName(req.repo)}
+                    {"data" in r && <code className="rounded bg-muted px-1.5 py-0.5 text-xs font-normal text-muted-foreground">{r.data.range}</code>}
+                    {"data" in r && <OriginSync data={r.data} />}
+                  </h4>
+                )}
+                {"loading" in r ? (
+                  <p className="flex items-center gap-2 px-6 text-sm text-muted-foreground">
+                    <Spinner className="size-4" /> Loading diff…
+                  </p>
+                ) : "error" in r ? (
+                  <p className="mx-6 flex items-center gap-2 rounded-lg border bg-muted/50 px-3 py-2 text-sm text-muted-foreground">
+                    <AlertCircle className="size-4 shrink-0" /> {r.error}
+                  </p>
+                ) : (
+                  <RepoDiff data={r.data} all={all} tests={tests} reveal={reveal?.repo === r.data.repo ? reveal : null} />
+                )}
+              </div>
+            );
+          })}
+        </div>
+      </div>
       <ScrollTop root={root} />
     </div>
   );
