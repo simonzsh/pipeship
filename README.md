@@ -168,7 +168,7 @@ The code diff, to review the work without leaving the dashboard.
 
 - **Whole repo** by default: `<base>...<top branch>`, one diff per repo.
 - **One chunk**: click it for `<previous chunk's branch>...<branch>`. The rows are joined by a rail from the base branch to the top chunk, which carries the PR (a button with its number). The breadcrumb ("Whole repo › <chunk>") or the base branch row brings you back.
-- Every file opens as a collapsible block with its line numbers, its +/− counts and syntax highlighting. "Collapse all" and "Expand all" toggle every file; "Refresh" reloads the diff.
+- Every file opens as a collapsible block with its line numbers, its +/− counts and syntax highlighting. "Collapse all" and "Expand all" toggle every file; "Collapse tests" and "Expand tests" toggle the test files only; "Refresh" reloads the diff.
 - **File tree**: a column on the left lists the changed files in nested folders (a single-folder chain is shown on one line), each with its status and +/− counts. With several repos, each repo is a root node. Click a file to open it and scroll to its diff; the tree highlights the file in view. It is hidden on narrow screens.
 
 The base of each diff is `origin/<base>`, fetched before each diff: a base that moved on the remote does not add its commits to the diff. The other end is the local branch (or `origin/<branch>` when the local one is gone). When the local branch differs from `origin/<branch>`, a badge says so, for example "2 commits not pushed": the PR on GitHub does not show this work yet. A missing branch shows a message in its repo's section.

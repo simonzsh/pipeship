@@ -1,5 +1,5 @@
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from "react";
-import { AlertCircle, ArrowUp, ChevronDown, ChevronRight, ChevronsDownUp, ChevronsUpDown, FlaskConical, Folder, RefreshCw } from "lucide-react";
+import { AlertCircle, ArrowUp, ChevronDown, ChevronRight, ChevronsDownUp, ChevronsUpDown, FlaskConical, FlaskConicalOff, Folder, RefreshCw } from "lucide-react";
 import { Spinner } from "./components/ui/spinner";
 import type { DashboardState } from "../state.ts";
 import { chunksOf, holdingPr, repoName } from "../repos.ts";
@@ -249,7 +249,7 @@ interface Reveal {
 }
 
 // memo: each pipeline change on the SSE stream re-renders CodeTab; the diff must not re-render with it.
-const RepoDiff = memo(function RepoDiff({ data, all, tests, reveal }: { data: DiffResponse; all: All; tests: number; reveal: Reveal | null }) {
+const RepoDiff = memo(function RepoDiff({ data, all, tests, reveal }: { data: DiffResponse; all: All; tests: All; reveal: Reveal | null }) {
   const [overrides, setOverrides] = useState<Record<string, boolean>>({});
   // Layout effect: the file is open before the scroll that CodeTab runs on the next frame.
   useLayoutEffect(() => {
@@ -258,13 +258,13 @@ const RepoDiff = memo(function RepoDiff({ data, all, tests, reveal }: { data: Di
   useEffect(() => {
     if (all) setOverrides(Object.fromEntries(data.files.map((f) => [f.path, all.open])));
   }, [all, data]);
-  // Each "Collapse tests" click bumps `tests`; apply it once, so a refetch does not re-close files the user opened.
-  const doneTests = useRef(0);
+  // Apply each tests click once, so a refetch does not re-close files the user opened.
+  const doneTests = useRef<All>(null);
   useEffect(() => {
-    if (tests === doneTests.current) return;
+    if (!tests || tests === doneTests.current) return;
     doneTests.current = tests;
     const testFiles = data.files.filter((f) => isTestFile(f.path));
-    if (testFiles.length) setOverrides((o) => ({ ...o, ...Object.fromEntries(testFiles.map((f) => [f.path, false])) }));
+    if (testFiles.length) setOverrides((o) => ({ ...o, ...Object.fromEntries(testFiles.map((f) => [f.path, tests.open])) }));
   }, [tests, data]);
   const defaults = useMemo(() => openByDefault(data.files), [data]);
   const toggle = useCallback((path: string, open: boolean) => setOverrides((o) => ({ ...o, [path]: !open })), []);
@@ -429,7 +429,7 @@ export function CodeTab({ p, target, onTarget }: CodeTabProps) {
   const root = useRef<HTMLDivElement>(null);
   const [manual, setManual] = useState(0);
   const [all, setAll] = useState<All>(null);
-  const [tests, setTests] = useState(0);
+  const [tests, setTests] = useState<All>(null);
   const requests = useMemo(() => diffRequests(p, target), [p, target]);
   // A chunk's range starts at the previous chunk, so any chunk of the repo can move it.
   const repos = new Set(requests.map((r) => r.repo));
@@ -516,6 +516,7 @@ export function CodeTab({ p, target, onTarget }: CodeTabProps) {
   const additions = datas.reduce((n, d) => n + d.additions, 0);
   const deletions = datas.reduce((n, d) => n + d.deletions, 0);
   const allOpen = all?.open ?? true;
+  const testsOpen = tests?.open ?? true;
   const hasTests = datas.some((d) => d.files.some((f) => isTestFile(f.path)));
 
   return (
@@ -539,13 +540,21 @@ export function CodeTab({ p, target, onTarget }: CodeTabProps) {
         {datas.length > 0 && <span className="text-xs text-muted-foreground">{datas.reduce((n, d) => n + d.files.length, 0)} files</span>}
         <span className="ml-auto flex items-center gap-2">
           {datas.length > 0 && (
-            <Button size="sm" variant="outline" onClick={() => setAll({ open: !allOpen })}>
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => {
+                // Expand/collapse all moves the test files too: keep the tests button in step.
+                setAll({ open: !allOpen });
+                setTests({ open: !allOpen });
+              }}
+            >
               {allOpen ? <ChevronsDownUp /> : <ChevronsUpDown />} {allOpen ? "Collapse all" : "Expand all"}
             </Button>
           )}
           {hasTests && (
-            <Button size="sm" variant="outline" onClick={() => setTests((n) => n + 1)} title="Collapse test files">
-              <FlaskConical /> Collapse tests
+            <Button size="sm" variant="outline" onClick={() => setTests({ open: !testsOpen })} title={testsOpen ? "Collapse test files" : "Expand test files"}>
+              {testsOpen ? <FlaskConicalOff /> : <FlaskConical />} {testsOpen ? "Collapse tests" : "Expand tests"}
             </Button>
           )}
           <Button size="sm" variant="outline" onClick={() => setManual((n) => n + 1)} disabled={fetching}>
