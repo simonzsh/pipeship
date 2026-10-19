@@ -181,7 +181,7 @@ The base of each diff is `origin/<base>`, fetched before each diff: a base that 
 
 pipeship recognizes when a session runs in [T3 Code](https://github.com/pingdotgg/t3code). The header then shows a **T3** button next to the agent logo. Click it to open that pipeline's session in the T3 Code desktop app (`t3code://threads/<environmentId>/<threadId>`, T3 Code 0.0.46 or later). Each pipeline opens its own thread, so you can jump from the dashboard to the right conversation.
 
-`pipeship new` finds the thread in T3 Code's local database (`$T3CODE_HOME`, default `~/.t3`), read-only; `pipeship step` looks again until it is found. Without T3 Code, the header has no T3 button and nothing else changes.
+`pipeship new` finds the thread in T3 Code's local database (`$T3CODE_HOME`, default `~/.t3`; `statev2.sqlite` since T3 Code 0.1.0, `state.sqlite` before), read-only; `pipeship step` looks again until it is found. Without T3 Code, the header has no T3 button and nothing else changes.
 
 ### Run it
 

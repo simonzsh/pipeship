@@ -120,7 +120,8 @@ export function detectSession(opts: { env?: Env; startPid?: number; readProc?: R
   return t3Thread ? { ...session, t3Thread } : session;
 }
 
-// T3 Code gives the agent no thread id: find the thread whose provider cursor resumes this session.
+// T3 Code gives the agent no thread id: find the thread that runs this session.
+// T3 Code 0.1.0 moved the data to statev2.sqlite; older versions keep the provider cursor in state.sqlite.
 export function findT3Thread(session: Session, t3Home = harnessHomes().t3): T3Thread | undefined {
   const dir = join(t3Home, "userdata");
   let environmentId: string;
@@ -130,13 +131,23 @@ export function findT3Thread(session: Session, t3Home = harnessHomes().t3): T3Th
     return undefined;
   }
   const field = session.harness === "claude" ? "$.resume" : "$.threadId";
-  const threadId = queryOne<{ threadId: string }>(
-    join(dir, "state.sqlite"),
-    `SELECT r.thread_id AS threadId FROM provider_session_runtime r
-     JOIN projection_threads t ON t.thread_id = r.thread_id
-     WHERE json_extract(r.resume_cursor_json, ?) = ? AND t.deleted_at IS NULL LIMIT 1`,
-    field,
-    session.id,
+  const threadId = (
+    queryOne<{ threadId: string }>(
+      join(dir, "statev2.sqlite"),
+      `SELECT p.thread_id AS threadId FROM orchestration_v2_projection_provider_threads p
+       JOIN orchestration_v2_projection_threads t ON t.thread_id = p.thread_id
+       WHERE json_extract(p.payload_json, '$.nativeThreadRef.nativeId') = ? AND t.deleted_at IS NULL
+       ORDER BY p.updated_at DESC LIMIT 1`,
+      session.id,
+    ) ??
+    queryOne<{ threadId: string }>(
+      join(dir, "state.sqlite"),
+      `SELECT r.thread_id AS threadId FROM provider_session_runtime r
+       JOIN projection_threads t ON t.thread_id = r.thread_id
+       WHERE json_extract(r.resume_cursor_json, ?) = ? AND t.deleted_at IS NULL LIMIT 1`,
+      field,
+      session.id,
+    )
   )?.threadId;
   return ID_RE.test(environmentId) && threadId && ID_RE.test(threadId) ? { environmentId, threadId } : undefined;
 }
