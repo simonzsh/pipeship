@@ -1,4 +1,4 @@
-import { existsSync, readFileSync, realpathSync } from "node:fs";
+import { existsSync, readFileSync, realpathSync, rmSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { defaultRunner, errorMessage, type Runner } from "./merge.ts";
@@ -182,7 +182,11 @@ export async function installUpdate(harness: Harness | null, deps: Partial<Insta
     if (!depsInstalled(best.installPath)) {
       const [cmd, args] = INSTALL_DEPS;
       const res = await run(cmd, args, { cwd: best.installPath, timeoutMs: 120_000 }).catch((err) => ({ code: 1, stdout: "", stderr: errorMessage(err) }));
-      if (res.code !== 0) return { restarting: false, message: `Updated, but installing the dependencies failed: ${(res.stderr || res.stdout).trim() || `exit ${res.code}`}${note}` };
+      if (res.code !== 0) {
+        // A partial node_modules would make scripts/pipeship skip its own install.
+        rmSync(join(best.installPath, "node_modules"), { recursive: true, force: true });
+        return { restarting: false, message: `Updated, but installing the dependencies failed: ${(res.stderr || res.stdout).trim() || `exit ${res.code}`}${note}` };
+      }
     }
     // A start or merge may have begun while the update ran.
     const late = blocker();
