@@ -241,7 +241,6 @@ function openByDefault(files: DiffFile[]): Set<string> {
   return open;
 }
 
-// memo: each pipeline change on the SSE stream re-renders CodeTab; the diff must not re-render with it.
 // A tree click: `seq` makes a second click on the same file count as a new request.
 interface Reveal {
   repo: string;
@@ -249,6 +248,7 @@ interface Reveal {
   seq: number;
 }
 
+// memo: each pipeline change on the SSE stream re-renders CodeTab; the diff must not re-render with it.
 const RepoDiff = memo(function RepoDiff({ data, all, tests, reveal }: { data: DiffResponse; all: All; tests: number; reveal: Reveal | null }) {
   const [overrides, setOverrides] = useState<Record<string, boolean>>({});
   // Layout effect: the file is open before the scroll that CodeTab runs on the next frame.
@@ -325,15 +325,16 @@ function TreeRows({ nodes, depth, repo, active, closed, onFold, onSelect }: {
     }
     const f = n.file;
     const renamed = f.oldPath && f.newPath && f.oldPath !== f.newPath;
+    const current = active === fileDomId(repo, n.path);
     return (
       <button
         key={n.path}
         type="button"
         onClick={() => onSelect(repo, n.path)}
         title={renamed ? `${f.oldPath} → ${f.newPath}` : n.path}
-        aria-current={active === fileDomId(repo, n.path) || undefined}
+        aria-current={current || undefined}
         style={{ paddingLeft: 8 + depth * 12 + 18 }}
-        className={`flex w-full items-center gap-1.5 rounded py-0.5 pr-2 text-left text-xs hover:bg-muted ${active === fileDomId(repo, n.path) ? "bg-accent" : ""}`}
+        className={`flex w-full items-center gap-1.5 rounded py-0.5 pr-2 text-left text-xs hover:bg-muted ${current ? "bg-accent" : ""}`}
       >
         <span className={`shrink-0 rounded px-1 font-mono text-[10px] font-medium ${STATUS_STYLE[f.status]}`}>{STATUS_LETTER[f.status]}</span>
         <span className="min-w-0 truncate font-mono font-medium">{n.name}</span>
