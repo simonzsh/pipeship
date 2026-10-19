@@ -9,7 +9,6 @@ import { PipelineDetail } from "./pipeline-detail";
 import { PipelineListItem } from "./pipeline-list-item";
 import { STATUS_ORDER, statusConfig } from "./status";
 import { ThemeToggle } from "./theme";
-import { OfflineAlert } from "./offline-alert";
 import { UpdateBanner } from "./update-banner";
 import { buildSearch, parseUrl, type UrlState } from "./url";
 import { cn, shortRepo } from "./utils";
@@ -179,7 +178,6 @@ function App() {
                 );
               })}
             </div>
-            <OfflineAlert live={live} />
             <UpdateBanner live={live} />
           </aside>
           <main className={cn("flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden", !detailOnly && "max-[899px]:hidden")}>
