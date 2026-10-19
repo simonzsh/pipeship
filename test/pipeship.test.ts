@@ -27,6 +27,7 @@ import { buildSearch, parseUrl } from "../src/dashboard/url.ts";
 import { allMerged, displaySteps, finished, formatElapsed, timeAgo, timeAgoShort } from "../src/dashboard/pipeline-info.ts";
 import { isTestFile } from "../src/dashboard/test-files.ts";
 import { diffRequests, diffUrl } from "../src/dashboard/diff-requests.ts";
+import { buildFileTree, type TreeNode } from "../src/dashboard/file-tree.ts";
 import { highlightLines, languageOf } from "../src/dashboard/highlight.tsx";
 import { chunkActivity } from "../src/dashboard/status.tsx";
 import { compareVersions, currentVersion, getUpdateInfo, detectHarness, installUpdate, readCodexInstalled, resetUpdateCache, UpdateError, updateInPlace } from "../src/update.ts";
@@ -3287,5 +3288,32 @@ describe("isTestFile", () => {
     for (const p of ["src/a.ts", "package.json", "web/package.json", "node_modules/x/index.js", "vendor/a.go", "dist/a.js", "bun.lock", "web/package-lock.json", "yarn.lock", "src/contest.ts", "src/latest/a.ts", "README.md"]) {
       expect(isTestFile(p)).toBe(false);
     }
+  });
+});
+
+describe("buildFileTree", () => {
+  const f = (path: string, status: "added" | "deleted" | "modified" | "renamed" = "modified") =>
+    ({ path, oldPath: path, newPath: path, status, binary: false, additions: 1, deletions: 0, hunks: [] }) as import("../src/diff.ts").DiffFile;
+  // Compact view: folders as `name/` with their children, files as `name`.
+  const shape = (nodes: TreeNode[]): unknown[] =>
+    nodes.map((n) => (n.kind === "file" ? n.name : { [`${n.name}/`]: shape(n.children) }));
+
+  test("nests folders, puts folders before files and sorts by name", () => {
+    const tree = buildFileTree([f("z.ts"), f("src/b.ts"), f("README.md"), f("src/a/x.ts"), f("src/a/y.ts"), f("lib/q.ts")]);
+    expect(shape(tree)).toEqual([{ "lib/": ["q.ts"] }, { "src/": [{ "a/": ["x.ts", "y.ts"] }, "b.ts"] }, "README.md", "z.ts"]);
+  });
+  test("merges a chain of single-folder parents and keeps the full path of the last folder", () => {
+    const tree = buildFileTree([f("src/dashboard/components/a.tsx"), f("src/dashboard/components/b.tsx")]);
+    expect(shape(tree)).toEqual([{ "src/dashboard/components/": ["a.tsx", "b.tsx"] }]);
+    expect(tree[0]!.path).toBe("src/dashboard/components");
+  });
+  test("does not merge a folder that also holds a file", () => {
+    const tree = buildFileTree([f("a/x.ts"), f("a/b/c/y.ts")]);
+    expect(shape(tree)).toEqual([{ "a/": [{ "b/c/": ["y.ts"] }, "x.ts"] }]);
+  });
+  test("keeps the file for status and rename display", () => {
+    const file = { ...f("new/n.ts", "renamed"), oldPath: "old/n.ts" };
+    const node = buildFileTree([file])[0]!;
+    expect(node.kind === "dir" && node.children[0]).toMatchObject({ kind: "file", name: "n.ts", path: "new/n.ts", file });
   });
 });
