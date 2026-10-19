@@ -610,6 +610,24 @@ test("a session is matched to the T3 Code thread that runs it", () => {
   expect(detectSession({ env: { CLAUDE_CODE_SESSION_ID: CLAUDE_ID }, startPid: 100, readProc: read, homes, cwd: "/c" })?.t3Thread).toEqual({ environmentId: T3_ENV, threadId: T3_THREAD });
 });
 
+test("a session is matched through the T3 Code 0.1.0 database", () => {
+  const dir = mkdtempSync(join(root, "t3v2-"));
+  mkdirSync(join(dir, "userdata"), { recursive: true });
+  writeFileSync(join(dir, "userdata", "environment-id"), `${T3_ENV}\n`);
+  const db = new Database(join(dir, "userdata", "statev2.sqlite"));
+  db.run("CREATE TABLE orchestration_v2_projection_provider_threads (thread_id TEXT, updated_at TEXT, payload_json TEXT)");
+  db.run("CREATE TABLE orchestration_v2_projection_threads (thread_id TEXT, deleted_at TEXT)");
+  const add = (thread: string, native: string, deleted?: boolean) => {
+    db.run("INSERT INTO orchestration_v2_projection_provider_threads VALUES (?, ?, ?)", [thread, "2026-10-19", JSON.stringify({ nativeThreadRef: { nativeId: native } })]);
+    db.run("INSERT INTO orchestration_v2_projection_threads VALUES (?, ?)", [thread, deleted ? "2026-10-19" : null]);
+  };
+  add(T3_THREAD, CLAUDE_ID);
+  add("99999999-2222-4333-8444-555555555555", CODEX_ID, true);
+  db.close();
+  expect(findT3Thread({ harness: "claude", id: CLAUDE_ID, cwd: "/w" }, dir)).toEqual({ environmentId: T3_ENV, threadId: T3_THREAD });
+  expect(findT3Thread({ harness: "codex", id: CODEX_ID, cwd: "/w" }, dir)).toBeUndefined();
+});
+
 test("step records the T3 Code thread once T3 Code knows the session", () => {
   const state = createPipeline({ repos: [{ path: repo }], title: "t", source: "text", session: { harness: "claude", id: CLAUDE_ID, cwd: "/w" } });
   const step = (status: string) =>
