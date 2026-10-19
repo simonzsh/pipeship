@@ -10,7 +10,7 @@ import { home, listDashboardStates, type Harness } from "./state.ts";
 import { currentHarness, currentVersion, getUpdateInfo, installUpdate, UpdateError, type InstallDeps, type InstallResponse } from "./update.ts";
 import { shouldReload } from "./dashboard/update-info.ts";
 import {
-  anyPreviewStarting, archivePipeline, deletePipeline, isPreviewStarting, PreviewError, processStart, requestPreviewStart, stopPipeline, stopPreviewAndSettle,
+  anyPreviewStarting, archivePipeline, deleteArchivedPipelines, deletePipeline, isPreviewStarting, PreviewError, processStart, requestPreviewStart, stopPipeline, stopPreviewAndSettle,
   unarchivePipeline,
 } from "./preview.ts";
 
@@ -189,6 +189,15 @@ export async function serve(port = DEFAULT_PORT, opts: ServeOptions = {}) {
           } catch (err) {
             const status = err instanceof MergeError ? err.status : 500;
             return Response.json({ error: errorMessage(err) }, { status });
+          }
+        },
+      },
+      "/api/pipelines/delete-archived": {
+        POST: async () => {
+          try {
+            return Response.json(await deleteArchivedPipelines());
+          } catch (err) {
+            return Response.json({ error: errorMessage(err) }, { status: 500 });
           }
         },
       },

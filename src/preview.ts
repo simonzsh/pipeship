@@ -695,6 +695,21 @@ export async function deletePipeline(id: string, opts: { force?: boolean } = {})
   }
 }
 
+// One failure never stops the others: a pipeline with uncommitted changes refuses its delete.
+export async function deleteArchivedPipelines(): Promise<{ deleted: string[]; failed: { id: string; error: string }[] }> {
+  const deleted: string[] = [];
+  const failed: { id: string; error: string }[] = [];
+  for (const { id } of listStates().filter((s) => s.status === "archived")) {
+    try {
+      await deletePipeline(id);
+      deleted.push(id);
+    } catch (err) {
+      failed.push({ id, error: err instanceof Error ? err.message : String(err) });
+    }
+  }
+  return { deleted, failed };
+}
+
 export function git(cwd: string, ...args: string[]) {
   const result = spawnSync("git", ["-C", cwd, ...args], { encoding: "utf8" });
   return { status: result.status, stdout: result.stdout ?? "" };

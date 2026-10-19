@@ -1,4 +1,5 @@
 import { ChevronDown, ChevronRight, Workflow } from "lucide-react";
+import { DeleteArchivedButton } from "./action-button";
 import { Spinner } from "./components/ui/spinner";
 import { useEffect, useMemo, useState } from "react";
 import { createRoot } from "react-dom/client";
@@ -38,6 +39,7 @@ function App() {
   // Groups the user opened or closed. Archived pipelines are history: that group starts collapsed, the others open.
   const [open, setOpen] = useState<Record<string, boolean>>({});
   const isOpen = (status: string) => open[status] ?? status !== "archived";
+  const [deleteError, setDeleteError] = useState<string>();
 
   useEffect(() => {
     const events = new EventSource("/api/events");
@@ -162,15 +164,19 @@ function App() {
                 );
                 return (
                   <section key={g.status} className="flex flex-col gap-1.5">
-                    <button
-                      type="button"
-                      aria-expanded={!collapsed}
-                      onClick={() => setOpen({ ...open, [g.status]: collapsed })}
-                      className="flex cursor-pointer items-center gap-2 px-1"
-                    >
-                      {collapsed ? <ChevronRight className="size-3 text-muted-foreground" /> : <ChevronDown className="size-3 text-muted-foreground" />}
-                      {title}
-                    </button>
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        aria-expanded={!collapsed}
+                        onClick={() => setOpen({ ...open, [g.status]: collapsed })}
+                        className="flex min-w-0 flex-1 cursor-pointer items-center gap-2 px-1"
+                      >
+                        {collapsed ? <ChevronRight className="size-3 text-muted-foreground" /> : <ChevronDown className="size-3 text-muted-foreground" />}
+                        {title}
+                      </button>
+                      {g.status === "archived" && <DeleteArchivedButton onResult={setDeleteError} />}
+                    </div>
+                    {g.status === "archived" && deleteError && <p className="px-1 text-xs text-destructive">{deleteError}</p>}
                     {!collapsed && g.items.map((p) => (
                       <PipelineListItem key={p.id} p={p} selected={p.id === current.id} onSelect={() => selectPipeline(p.id)} />
                     ))}

@@ -9,7 +9,7 @@ import {
 import { Button, buttonVariants } from "./components/ui/button";
 import type { State } from "../state.ts";
 import { finished } from "./pipeline-info";
-import { postAction } from "./utils";
+import { deleteArchived, postAction } from "./utils";
 
 interface ActionDef {
   endpoint: string;
@@ -121,6 +121,32 @@ export function PipelineActions({ p, merging, starting }: { p: State; merging: b
   // Delete would remove the worktrees a merge runs in: it waits, disabled.
   const disabledTitle = (name: ActionName) => (name === "delete" && merging ? "Wait for the merges to end" : undefined);
   return actions.map((name) => <ActionButton key={name} id={p.id} action={name} hasServers={!!p.preview} disabledTitle={disabledTitle(name)} />);
+}
+
+// Header button of the archived group. It deletes every archived pipeline, whatever the repo filter.
+export function DeleteArchivedButton({ onResult }: { onResult: (error: string | undefined) => void }) {
+  return (
+    <AlertDialog>
+      <AlertDialogTrigger asChild>
+        <Button variant="outline" size="xs">
+          <Trash2 className="text-red-600 dark:text-red-400" /> Delete all
+        </Button>
+      </AlertDialogTrigger>
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>Delete all archived pipelines?</AlertDialogTitle>
+          <AlertDialogDescription>
+            Deletes the worktrees, the pipeline files and the local branches of merged PRs of every archived pipeline, whatever the repo filter.
+            A pipeline with uncommitted changes stays and is reported.
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel>Cancel</AlertDialogCancel>
+          <AlertDialogAction variant="destructive" onClick={async () => onResult(await deleteArchived())}>Delete all</AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
+  );
 }
 
 // No confirm dialog: starting loses nothing. The POST returns at once, so the label follows the preview too.

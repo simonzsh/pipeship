@@ -7,7 +7,7 @@ import {
 } from "../src/state.ts";
 import { chunksOf, diffRange, holdingPr, openPrChunks, repoName, repoChunks, sharesRepo, stackRefusal, topChunk } from "../src/repos.ts";
 import {
-  archiveIfAllMerged, archivePipeline, DASHBOARD_PORT, deletePipeline, findRecipe, isAlive, killGroup, mainService, normalizeRecipe, pickPorts, previewLines, processStart, resolveEnv,
+  archiveIfAllMerged, archivePipeline, DASHBOARD_PORT, deleteArchivedPipelines, deletePipeline, findRecipe, isAlive, killGroup, mainService, normalizeRecipe, pickPorts, previewLines, processStart, resolveEnv,
   requestPreviewStart, savedRecipePath, startOrder, startPreview, stopPipeline, stopPreview, stopPreviewAndSettle, type Service, unarchivePipeline, waitReady,
 } from "../src/preview.ts";
 import { diffTotals, parseDiff } from "../src/diff.ts";
@@ -480,6 +480,34 @@ test("delete removes the worktrees and files, keeps the branch, and protects unc
   expect(existsSync(pipelineDir(id))).toBe(false);
   expect(git(repo, "worktree", "list").stdout).not.toContain(wt);
   expect(git(repo, "branch", "--list", "pipeship/test/main").stdout).toContain("pipeship/test/main");
+});
+
+test("deleteArchivedPipelines removes the archived ones, keeps the others and reports the ones it cannot delete", async () => {
+  const git = (cwd: string, ...args: string[]) => spawnSync("git", ["-C", cwd, ...args], { encoding: "utf8" });
+  git(repo, "init", "-q", "-b", "main");
+  git(repo, "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "--allow-empty", "-m", "init");
+  const archived = rules();
+  const dirty = rules();
+  const active = rules();
+  finishSteps(archived);
+  finishSteps(dirty);
+  finishSteps(active);
+  const wt = join(pipelineDir(dirty), "worktrees", "main");
+  git(repo, "worktree", "add", "-q", "-b", "pipeship/test/dirty", wt);
+  writeFileSync(join(wt, "draft.ts"), "work in progress");
+  archiveNow(archived);
+  archiveNow(dirty);
+
+  const result = await deleteArchivedPipelines();
+  // Earlier tests leave archived pipelines in the shared home: they go too.
+  expect(result.deleted).toContain(archived);
+  expect(result.deleted).not.toContain(dirty);
+  expect(result.deleted).not.toContain(active);
+  expect(result.failed.map((f) => f.id)).toEqual([dirty]);
+  expect(result.failed[0]!.error).toContain("uncommitted changes");
+  expect(existsSync(pipelineDir(archived))).toBe(false);
+  expect(existsSync(pipelineDir(dirty))).toBe(true);
+  expect(existsSync(pipelineDir(active))).toBe(true);
 });
 
 test("package.json and both plugin manifests declare the same version", () => {
