@@ -135,7 +135,7 @@ export function DeleteArchivedButton({ onResult }: { onResult: (error: string | 
           title="Delete all archived pipelines"
           className="w-6 px-0 opacity-0 group-hover/header:opacity-100 focus-visible:opacity-100 data-[state=open]:opacity-100"
         >
-          <Trash2 className="text-red-600 dark:text-red-400" />
+          <Trash2 className="text-muted-foreground" />
         </Button>
       </AlertDialogTrigger>
       <AlertDialogContent>
