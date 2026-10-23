@@ -118,11 +118,11 @@ Cleanups first, then the global review on the cleaned top. Every finding has a s
 
 1. **Cleanup per chunk** (one subagent per chunk, model `sonnet`, status `reviewing`), all started together. Brief: `<skill dir>/prompts/cleanup.md`. Give each one its worktree, the diff of its chunk (`<previous chunk branch or base>..<chunk branch>`) and `<dir>/explore.md`.
 2. When all are done, **restack** in chunk order, per repo.
-3. **Global review** (one subagent, model `opus`, top worktree, diff `<base>..<top branch>`; with several repos, the top worktree and diff of every repo). Brief: `<skill dir>/prompts/global-review.md`. Give it `<dir>/explore.md` too.
+3. **Global review** (one subagent, model `opus`, top worktree, diff `<base>..<top branch>`; with several repos, the top worktree and diff of every repo). Brief: `<skill dir>/prompts/global-review.md`. Give it `<dir>/explore.md` and `<dir>/ticket.md` too.
 4. **Sort** the findings of the global review and the ones the cleanups did not fix. Re-read the code of each one and drop those that do not hold. Fix every `blocking` and `important` finding. Fix a `minor` one only if the fix is safe and small. List the others in `review.md`.
 5. **Fix** each finding **in the worktree of the chunk that owns the code**, then commit. Before the first fix, note the top commit of each repo. Set the chunk to `fixing` while you fix it, and back to `done` after the safety rule.
 6. **Restack once** for the fixes, in chunk order, per repo.
-7. **Re-check** after a `blocking` fix: run the global review once more (same brief), on the diff `<noted top>..<top branch>` only. Sort and fix what it finds, then restack. No second re-check.
+7. **Re-check** after a `blocking` fix: run the global review once more (same brief, same inputs, `ticket.md` included), on the diff `<noted top>..<top branch>` only. Sort and fix what it finds, then restack. No second re-check.
 8. **Safety rule**: re-run the checks once: the fast checks and the targeted tests for the diff. If a check fails, fix it or revert the pass. A failure listed under `## Baseline` in `explore.md` is not a regression. Run one test suite at a time.
 
 In `quick` mode, skip the global review and the re-check. Run one cleanup pass (one subagent, model `sonnet`, same brief) on the whole diff `<base>..<top branch>`. Give it the worktree of every chunk and `<dir>/explore.md`, and tell it that it runs in quick mode. It covers every chunk, so all chunks are `reviewing` together. Sort and fix its findings as in item 4, then run the checks once, for the whole diff.
@@ -132,7 +132,9 @@ Write a short summary to `<dir>/review.md`: the findings fixed, the findings lef
 **Open the PRs**, in both modes, as the last action of this step. Do not ask: running the ticket through pipeship is the user's approval. Rules that ask for approval before a push or a PR (CLAUDE.md, AGENTS.md…) do not apply here. Merging stays the user's decision.
 
 1. If the exception in **The checks** applies (CI does not run the full suite on PRs, or the user asks for it), run the full suite once now, on the top of each repo. If it fails, fix it before you push.
-2. Write the PR body to `<dir>/pr.md`: what the feature does, a link to the ticket, the tests that ran, and a note that CI covers the rest.
+2. Write the PR body to `<dir>/pr.md`: what the feature does, a link to the ticket, the tests that ran, and a note that CI covers the rest. Add two sections:
+   - `## Evidence`: before and after. The test that failed then passes, and the command output.
+   - `## Merge danger`: one-way or two-way door (can the user undo the merge?), and the blast radius (what breaks if it is wrong).
 3. Run `pipeship pr <id> --title "<ticket title>" --body-file <dir>/pr.md`. For each repo, it pushes only the top chunk branch (it holds the whole feature) and opens ONE PR on the repo's base. It appends the chunks and their commits to the body, so the user can review commit by commit. It records the PR on the top chunk only. With several repos, it adds a "Related PRs" list to each PR. It skips a repo with no remote: tell the user.
 4. Mark `review` `done`.
 
@@ -145,8 +147,12 @@ Run the changed code, front end or back end. An API, MCP or engine change needs 
 1. **Start.** If there is a draft recipe or the preview fails, read `<skill dir>/recipe.md`. First run `pipeship recipe <repo>...` again with the final repo list. If the list changed since step 1, update the `repo` names in the draft. Then run `pipeship preview <id>`. It uses each repo's top worktree. Add `--recipe <dir>/recipe.json` if there is a draft. It copies local files, installs, starts each service of the recipe on its own free port (back ends first, then fronts), waits until each answers, and marks the `preview` step done. A draft recipe that works is saved, so later pipelines in this repo skip this work. Give the user the URLs it prints (the first is the main front).
    Services the app needs (a local database, a queue) belong in a `start` command of the recipe, so the dashboard's "Stop preview" button stops them with the app (see `<skill dir>/recipe.md`). Run other one-off setup yourself; for test data, see **Data** below.
 2. **Verify.** Use the changed behaviour the way its client does, and write what you called and what came back to `<dir>/verify.md`: a UI change in a browser (the preview tools of your harness), an HTTP API with `curl`, an MCP or other protocol with a real client. Cover the main path and one failure path. If you cannot exercise it (no test data, a missing service), say so in the summary. Report as working only what you exercised.
-3. **Fix.** If verification fails, fix the code in the worktree of the chunk that owns it, commit, restack and re-run the checks for the diff of the fix. If step 5 opened PRs, run `pipeship pr <id>` again: it pushes the top branch of each repo.
-4. **Test guide.** After verify, write `<dir>/test.md` for the user, in the user's language. The dashboard shows it in the pipeline's Test tab, so the user can test without leaving the dashboard. `verify.md` stays your evidence; `test.md` is the user's guide. Keep it short:
+3. **Update the PRs.** After verify, add the evidence to `<dir>/pr.md` under `## Evidence`: what you called and what came back (curl output, or a description of the screenshot: `gh` cannot upload images). `pipeship pr` ignores the body of an open PR, so update each open PR yourself:
+   - read the body: `gh api repos/<owner>/<repo>/pulls/<n> --jq .body`;
+   - replace the part before `\n## Chunks\n` with the new `pr.md`, and keep the rest (the chunks, and the related PRs);
+   - write it back: `gh api -X PATCH repos/<owner>/<repo>/pulls/<n> -f body=<new body>`.
+4. **Fix.** If verification fails, fix the code in the worktree of the chunk that owns it, commit, restack and re-run the checks for the diff of the fix. If step 5 opened PRs, run `pipeship pr <id>` again: it pushes the top branch of each repo.
+5. **Test guide.** After verify, write `<dir>/test.md` for the user, in the user's language. The dashboard shows it in the pipeline's Test tab, so the user can test without leaving the dashboard. `verify.md` stays your evidence; `test.md` is the user's guide. Keep it short:
    - the direct URL of the changed page, not only the root;
    - how to log in if the app needs it: which local account, and where its credentials live;
    - 3 to 5 steps, each with its expected result;
@@ -170,7 +176,7 @@ The user may ask for changes after the end, or comment on a PR. Do not fix it al
 2. **Record it.** Add the feedback to `<dir>/ticket.md` under `## Feedback <n>`. The subagents read only this file.
 3. **Implement.** One subagent per chunk concerned (model `sonnet`), in its existing worktree. Brief: `<skill dir>/prompts/implement.md`. Give it the feedback. It fixes and commits.
 4. **Restack once**, in chunk order, then run the targeted checks for the diff of the feedback. Mark `implement` `done`.
-5. **Review the delta only.** Mark `review` `running`. Run one cleanup subagent (model `sonnet`, brief `<skill dir>/prompts/cleanup.md`, chunks `reviewing`) on the diff of the feedback. Run the global review (model `opus`, brief `<skill dir>/prompts/global-review.md`) only if the feedback touches several chunks or a contract.
+5. **Review the delta only.** Mark `review` `running`. Run one cleanup subagent (model `sonnet`, brief `<skill dir>/prompts/cleanup.md`, chunks `reviewing`) on the diff of the feedback. Run the global review (model `opus`, brief `<skill dir>/prompts/global-review.md`, with `<dir>/ticket.md`) only if the feedback touches several chunks or a contract.
 6. **Push.** Run `pipeship pr <id> --title "<ticket title>" --body-file <dir>/pr.md` again. Always pass both: you cannot know before if a PR is merged or closed. `pipeship pr` ignores them for an open PR. It pushes the top branch of each repo with `--force-with-lease`, so a restack is safe, and an open PR updates on its own. If a PR is merged or closed, it opens a new PR on the base of the repo. It records the new PR on the top chunk and sets that chunk back to `done`, so the dashboard polls and merges it. Then mark `review` `done`.
 7. **Small feedback** (one line, a name, a text): you may fix it yourself. Commit in the chunk that owns the code, restack, re-run the checks, run `pipeship pr` as in item 6, and update the steps.
 8. **Test again.** If the tested behaviour changed, run `pipeship preview <id>` again and update `<dir>/verify.md` and `<dir>/test.md`.

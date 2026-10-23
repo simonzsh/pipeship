@@ -40,7 +40,9 @@ Find the worktree and the diff to review. Work in the main worktree for the git 
 
 If the diff is empty, say so and stop. Do this check before you create any worktree. Create a temporary worktree only after it, under `$(mktemp -d)` (`git worktree add --detach <dir> <sha>`). Remove it (`git worktree remove --force <dir>`, then the temporary directory) on every exit: empty diff, error and end.
 
-Tell the user the target in one line (PR, branch or current diff, and the base).
+**Spec.** Find the originating spec, if one exists. If the user named one, use it. For a PR, run `gh pr view <n|url> --json body,closingIssuesReferences`, then `gh issue view` for each linked issue. For a branch or the current diff, look for ticket refs in the commit messages (`git log origin/<base>..<sha>`) and read them with `gh issue view` or a tool of this session. The spec is the PR body plus the issues. If you find none, there is no spec.
+
+Tell the user the target in one line (PR, branch or current diff, and the base) and the spec used, or `no spec`.
 
 ## Step 2 — Review
 
@@ -49,6 +51,8 @@ Start both subagents together, in the same message. Wait for both before you go 
 1. **Global review** (model `opus`, read-only). Input: the worktree and the diff command, as absolute paths. Brief: `<run dir>/prompts/global-review.md`. The brief is read-only already. Add to the brief, word for word:
 
 > Review mode: the diff is one change, not several chunks. Besides the problems in the brief, look for every correctness bug in the diff: logic errors, edge cases, regressions, missing error handling, and tests that do not test what they claim. Each finding needs a failure scenario.
+
+   Then give it the spec (its text or its path), or tell it, word for word: `no spec: skip the spec check`.
 2. **Cleanup** (model `sonnet`). Input: the worktree and the diff command, as absolute paths. Brief: `<run dir>/prompts/cleanup.md`. Pass this rule to the subagent, word for word:
 
 > Review mode: report your findings only. Do not edit, stage or commit any file, and run no command that changes the worktree. This overrides the brief's instruction to commit. Do not run `simplify` (it applies its fixes); `code-review` without `--fix` is fine.
@@ -71,6 +75,7 @@ Answer in this shape:
 ## Cleanups (optional)
 - `path/to/file.ts:88` – suggestion (no failure scenario needed).
 
+Spec: <issue, PR body or ticket used> | none
 Nothing was changed, committed, pushed or commented.
 ```
 
