@@ -1,16 +1,16 @@
-import { ChevronDown, ChevronRight, Workflow } from "lucide-react";
+import { ChevronDown, ChevronRight, Filter, Search, Workflow } from "lucide-react";
 import { DeleteArchivedButton } from "./action-button";
 import { Spinner } from "./components/ui/spinner";
 import { useEffect, useMemo, useState } from "react";
 import { createRoot } from "react-dom/client";
 import type { DashboardState } from "../state.ts";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "./components/ui/select";
+import { Select, SelectContent, SelectItem, SelectTrigger } from "./components/ui/select";
 import { groupByStatus } from "./groups";
 import { PipelineDetail } from "./pipeline-detail";
 import { PipelineListItem } from "./pipeline-list-item";
 import { STATUS_ORDER, statusConfig } from "./status";
-import { ThemeToggle } from "./theme";
-import { UpdateBanner } from "./update-banner";
+import { matchesSearch } from "./pipeline-info";
+import { SidebarFooter } from "./sidebar-footer";
 import { buildSearch, parseUrl, type UrlState } from "./url";
 import { cn, shortRepo } from "./utils";
 
@@ -40,6 +40,7 @@ function App() {
   const [open, setOpen] = useState<Record<string, boolean>>({});
   const isOpen = (status: string) => open[status] ?? status !== "archived";
   const [deleteError, setDeleteError] = useState<string>();
+  const [query, setQuery] = useState("");
 
   useEffect(() => {
     const events = new EventSource("/api/events");
@@ -67,18 +68,8 @@ function App() {
   }, [pipelines]);
   // An unknown repo in the URL falls back to all repos; the URL is left as is.
   const selected = repos.some(([r]) => r === url.repo) ? url.repo : null;
-  const shown = selected ? pipelines?.filter((p) => p.repos.some((r) => r.path === selected)) : pipelines;
+  const shown = pipelines?.filter((p) => (!selected || p.repos.some((r) => r.path === selected)) && matchesSearch(p, query));
   const groups = shown ? groupByStatus(shown, STATUS_ORDER) : [];
-  // Only states that are present, archived ones left out, total included: "3 pipelines · 1 waiting for you · 2 running".
-  const active = shown?.filter((p) => p.status !== "archived") ?? [];
-  const summary = shown
-    ? [
-        `${active.length} ${active.length === 1 ? "pipeline" : "pipelines"}`,
-        ...groups
-          .filter((g) => g.status !== "archived")
-          .map((g) => `${g.items.length} ${statusConfig(g.status).label.toLowerCase()}`),
-      ].join(" · ")
-    : "Loading…";
 
   // The selection follows the displayed order: groups first, then each group's items.
   const ordered = groups.flatMap((g) => g.items);
@@ -99,33 +90,17 @@ function App() {
 
   return (
     <div className="flex h-dvh flex-col">
-      <header className="flex items-center gap-3 border-b px-4 py-3 sm:px-6">
-        <div className="flex flex-col">
-          <h1 className="text-xl font-semibold tracking-tight">pipeship</h1>
-          <p className="text-sm text-muted-foreground">
-            {summary}
-          </p>
-        </div>
-        <div className="ml-auto flex min-w-0 items-center gap-3">
-          <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
-            <span className={cn("size-2 rounded-full", live ? "bg-emerald-500" : "bg-muted-foreground/40")} />
-            {live ? "Live" : "Offline"}
-          </span>
-        </div>
-        <ThemeToggle />
-      </header>
-
       {!pipelines && (
         <div className="flex justify-center py-14 text-muted-foreground">
           <Spinner className="size-5" label="Loading pipelines" />
         </div>
       )}
-      {pipelines && ordered.length === 0 && (
+      {pipelines?.length === 0 && (
         <div className="overflow-y-auto px-4">
           <EmptyState />
         </div>
       )}
-      {current && (
+      {pipelines && pipelines.length > 0 && (
         <div className="flex min-h-0 flex-1">
           <aside
             className={cn(
@@ -133,25 +108,41 @@ function App() {
               detailOnly && "max-[899px]:hidden",
             )}
           >
-            {/* The filter only narrows this list, so it sits on top of it and does not scroll away. */}
-            <div className="border-b px-3 py-3">
-              <Select value={selected ?? ALL} onValueChange={selectRepo}>
-                <SelectTrigger size="sm" className="w-full" aria-label="Filter by repo">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent align="start">
-                  <SelectItem value={ALL}>
-                    All repos <span className="text-muted-foreground">{pipelines?.length}</span>
-                  </SelectItem>
-                  {repos.map(([r, n]) => (
-                    <SelectItem key={r} value={r}>
-                      {shortRepo(r)} <span className="text-muted-foreground">{n}</span>
+            {/* The search and filter only narrow this list, so they sit on top of it and do not scroll away. */}
+            <div className="flex flex-col gap-2 border-b px-3 py-3">
+              <h1 className="text-sm font-semibold">Pipelines</h1>
+              <div className="flex items-center gap-2">
+                <div className="relative min-w-0 flex-1">
+                  <Search className="pointer-events-none absolute left-2 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
+                  <input
+                    type="search"
+                    value={query}
+                    onChange={(e) => setQuery(e.target.value)}
+                    placeholder="Search"
+                    aria-label="Search pipelines"
+                    className="h-8 w-full rounded-md border border-input bg-transparent pl-7 pr-2 text-sm shadow-xs outline-none placeholder:text-muted-foreground focus-visible:ring-[3px] focus-visible:ring-ring/50 dark:bg-input/30"
+                  />
+                </div>
+                <Select value={selected ?? ALL} onValueChange={selectRepo}>
+                  <SelectTrigger size="sm" chevron={false} className="relative w-8 shrink-0 justify-center px-0" aria-label="Filter by repo" title="Filter by repo">
+                    <Filter className="size-3.5" />
+                    {selected && <span className="absolute right-1 top-1 size-2 rounded-full bg-primary" />}
+                  </SelectTrigger>
+                  <SelectContent align="end">
+                    <SelectItem value={ALL}>
+                      All repos <span className="text-muted-foreground">{pipelines?.length}</span>
                     </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+                    {repos.map(([r, n]) => (
+                      <SelectItem key={r} value={r}>
+                        {shortRepo(r)} <span className="text-muted-foreground">{n}</span>
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
             </div>
             <div className="flex min-h-0 flex-1 flex-col gap-5 overflow-y-auto px-3 py-4">
+              {ordered.length === 0 && <p className="px-1 text-sm text-muted-foreground">No match</p>}
               {groups.map((g) => {
                 const { group, dot, text } = statusConfig(g.status);
                 const collapsed = !isOpen(g.status);
@@ -178,16 +169,16 @@ function App() {
                     </div>
                     {g.status === "archived" && deleteError && <p className="px-1 text-xs text-destructive">{deleteError}</p>}
                     {!collapsed && g.items.map((p) => (
-                      <PipelineListItem key={p.id} p={p} selected={p.id === current.id} onSelect={() => selectPipeline(p.id)} />
+                      <PipelineListItem key={p.id} p={p} selected={p.id === current?.id} onSelect={() => selectPipeline(p.id)} />
                     ))}
                   </section>
                 );
               })}
             </div>
-            <UpdateBanner live={live} />
+            <SidebarFooter live={live} />
           </aside>
           <main className={cn("flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden", !detailOnly && "max-[899px]:hidden")}>
-            <PipelineDetail key={current.id} p={current} onBack={() => selectPipeline(null)} />
+            {current && <PipelineDetail key={current.id} p={current} onBack={() => selectPipeline(null)} />}
           </main>
         </div>
       )}

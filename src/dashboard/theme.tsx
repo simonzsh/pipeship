@@ -21,7 +21,7 @@ export function ThemeToggle() {
 
   const Icon = ICON[theme];
   return (
-    <Button variant="ghost" size="icon" onClick={() => setTheme(NEXT[theme])} title={`Theme: ${theme}`}>
+    <Button variant="ghost" size="icon" className="size-7" onClick={() => setTheme(NEXT[theme])} title={`Theme: ${theme}`}>
       <Icon />
     </Button>
   );

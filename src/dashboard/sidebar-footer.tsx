@@ -1,17 +1,16 @@
-import { ArrowUpCircle } from "lucide-react";
-import { Spinner } from "./components/ui/spinner";
+import { RefreshCw } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { Button } from "./components/ui/button";
 import { shouldReload, type UpdateInfo } from "./update-info";
-import { responseError } from "./utils";
+import { ThemeToggle } from "./theme";
+import { cn, responseError } from "./utils";
 
-// Bottom of the sidebar. `live` is the SSE state: after an install, a new live=true means the server restarted.
-export function UpdateBanner({ live }: { live: boolean }) {
+// Bottom of the sidebar: live state, theme, version and update. `live` is the SSE state: after an install, a new live=true means the server restarted.
+export function SidebarFooter({ live }: { live: boolean }) {
   const [info, setInfo] = useState<UpdateInfo>();
   // The version at click time: later /api/update refreshes must not change what the reload check compares to.
   const [from, setFrom] = useState<string>();
   const updating = from !== undefined;
-  const [restarting, setRestarting] = useState(false);
   const [error, setError] = useState<string>();
   const wasLive = useRef(live);
 
@@ -50,8 +49,7 @@ export function UpdateBanner({ live }: { live: boolean }) {
       const res = await fetch("/api/update/install", { method: "POST" });
       if (!res.ok) throw new Error(await responseError(res));
       const data: { restarting?: boolean; message?: string } = await res.json();
-      if (data.restarting) setRestarting(true);
-      else {
+      if (!data.restarting) {
         setError(data.message ?? "Nothing to update");
         setFrom(undefined);
       }
@@ -61,25 +59,36 @@ export function UpdateBanner({ live }: { live: boolean }) {
     }
   };
 
-  if (!info) return null;
-  if (!info.available) return <p className="border-t px-3 py-2 text-xs text-muted-foreground">Current version: {info.current}</p>;
+  const title = info?.available
+    ? info.harness
+      ? `Update available: ${info.current} → ${info.latest}. Click to update and restart`
+      : `Update to ${info.latest} with git`
+    : undefined;
   return (
-    <div className="flex flex-col gap-2 border-t px-3 py-3">
+    <div className="flex flex-col gap-1 border-t px-3 py-1.5">
       <div className="flex items-center gap-2">
-        <ArrowUpCircle className="size-4 shrink-0 text-muted-foreground" />
-        <div className="flex min-w-0 flex-1 flex-col">
-          <span className="text-sm font-medium">Update available</span>
-          <span className="truncate text-xs text-muted-foreground">{info.current} → {info.latest}</span>
-        </div>
-        {info.harness && (
-          <Button size="xs" variant="outline" disabled={updating} onClick={install}>
-            {updating && <Spinner />}
-            {restarting ? "Restarting…" : updating ? "Updating…" : "Update & restart"}
+        <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
+          <span className={cn("size-2 rounded-full", live ? "bg-emerald-500" : "bg-muted-foreground/40")} />
+          {live ? "Live" : "Offline"}
+        </span>
+        <ThemeToggle />
+        {info && <span className="text-xs text-muted-foreground">v{info.current}</span>}
+        {info?.available && (
+          <Button
+            variant="ghost"
+            size="icon"
+            className="relative ml-auto size-7"
+            disabled={updating || !info.harness}
+            onClick={install}
+            title={title}
+            aria-label={title}
+          >
+            <RefreshCw className={cn("size-3.5", updating && "animate-spin")} />
+            {info.harness && !updating && <span className="absolute right-1 top-1 size-2 rounded-full bg-primary" />}
           </Button>
         )}
       </div>
-      {!info.harness && <p className="text-xs text-muted-foreground">Not installed through a plugin manager: update it with git.</p>}
-      {error && <p className="text-xs text-destructive">{error}</p>}
+      {error && <p className="truncate text-xs text-destructive" title={error}>{error}</p>}
     </div>
   );
 }
