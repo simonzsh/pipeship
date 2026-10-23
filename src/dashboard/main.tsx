@@ -68,6 +68,7 @@ function App() {
   }, [pipelines]);
   // An unknown repo in the URL falls back to all repos; the URL is left as is.
   const selected = repos.some(([r]) => r === url.repo) ? url.repo : null;
+  const filterLabel = selected ? `Filter by repo: ${shortRepo(selected)}` : "Filter by repo";
   const shown = pipelines?.filter((p) => (!selected || p.repos.some((r) => r.path === selected)) && matchesSearch(p, query));
   const groups = shown ? groupByStatus(shown, STATUS_ORDER) : [];
 
@@ -128,7 +129,7 @@ function App() {
                   />
                 </div>
                 <Select value={selected ?? ALL} onValueChange={selectRepo}>
-                  <SelectTrigger size="sm" chevron={false} className="relative w-8 shrink-0 justify-center px-0" aria-label="Filter by repo" title="Filter by repo">
+                  <SelectTrigger size="sm" chevron={false} className="relative w-8 shrink-0 justify-center px-0" aria-label={filterLabel} title={filterLabel}>
                     <Filter className="size-3.5" />
                     {selected && <span className="absolute right-1 top-1 size-2 rounded-full bg-primary" />}
                   </SelectTrigger>

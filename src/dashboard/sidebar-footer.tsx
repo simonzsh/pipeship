@@ -60,7 +60,9 @@ export function SidebarFooter({ live }: { live: boolean }) {
   };
 
   const title = info?.available
-    ? info.harness
+    ? updating
+      ? "Updating…"
+      : info.harness
       ? `Update available: ${info.current} → ${info.latest}. Click to update and restart`
       : `Update to ${info.latest} with git`
     : undefined;
@@ -78,13 +80,14 @@ export function SidebarFooter({ live }: { live: boolean }) {
             variant="ghost"
             size="icon"
             className="relative ml-auto size-7"
-            disabled={updating || !info.harness}
-            onClick={install}
+            // aria-disabled keeps the git hint focusable; a disabled button hides it from keyboard users.
+            aria-disabled={updating || !info.harness}
+            onClick={() => !updating && info.harness && install()}
             title={title}
             aria-label={title}
           >
             <RefreshCw className={cn("size-3.5", updating && "animate-spin")} />
-            {info.harness && !updating && <span className="absolute right-1 top-1 size-2 rounded-full bg-primary" />}
+            {info.harness && !updating && <span className="absolute right-1 top-1 size-2 rounded-full bg-amber-500" />}
           </Button>
         )}
       </div>
