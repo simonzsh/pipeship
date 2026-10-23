@@ -629,8 +629,9 @@ test("POST delete-archived answers 202 at once, the server keeps answering and G
   const server = await serve(0);
   const url = (path: string) => `http://localhost:${server.port}${path}`;
   try {
+    // The last run of earlier tests stays in the module: only check that none is going.
     const idle = await (await fetch(url("/api/pipelines/delete-archived"))).json();
-    expect(idle).toMatchObject({ running: false, deleted: [], failed: [] });
+    expect(idle).toMatchObject({ running: false });
 
     const res = await fetch(url("/api/pipelines/delete-archived"), { method: "POST" });
     expect(res.status).toBe(202);
