@@ -1,5 +1,6 @@
 import type { State } from "../state.ts";
 import type { DisplayStep } from "./steps";
+import { repoName } from "../repos.ts";
 
 // Age as a value and unit; null under a minute.
 function age(iso: string, now: number): [number, "m" | "h" | "d"] | null {
@@ -48,4 +49,13 @@ export { allMerged } from "../repos.ts";
 
 export function finished(p: Pick<State, "status">): boolean {
   return p.status === "ready" || p.status === "done" || p.status === "failed" || p.status === "stopped" || p.status === "archived";
+}
+
+// Sidebar search: every word of the query must match the title, a ticket ref, the id or a repo name.
+export function matchesSearch(p: Pick<State, "id" | "ticket" | "repos">, query: string): boolean {
+  const words = query.toLowerCase().split(/\s+/).filter(Boolean);
+  const haystack = [p.ticket.title, p.id, ...p.ticket.links.map((l) => l.ref), ...p.repos.map((r) => repoName(r.path))]
+    .join("\n")
+    .toLowerCase();
+  return words.every((w) => haystack.includes(w));
 }

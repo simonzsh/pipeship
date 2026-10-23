@@ -24,7 +24,7 @@ import { detectSession, findT3Thread, type ReadProc } from "../src/session.ts";
 import { groupByStatus } from "../src/dashboard/groups.ts";
 import { t3ThreadLink } from "../src/dashboard/session.tsx";
 import { buildSearch, parseUrl } from "../src/dashboard/url.ts";
-import { allMerged, displaySteps, finished, formatElapsed, timeAgo, timeAgoShort } from "../src/dashboard/pipeline-info.ts";
+import { allMerged, displaySteps, finished, formatElapsed, matchesSearch, timeAgo, timeAgoShort } from "../src/dashboard/pipeline-info.ts";
 import { isTestFile } from "../src/dashboard/test-files.ts";
 import { diffRequests, diffUrl } from "../src/dashboard/diff-requests.ts";
 import { buildFileTree, type TreeNode } from "../src/dashboard/file-tree.ts";
@@ -2588,6 +2588,23 @@ test("timeAgo uses the given clock", () => {
   expect(timeAgoShort("2026-01-01T23:50:00Z", now)).toBe("10m");
   expect(timeAgoShort("2026-01-01T21:00:00Z", now)).toBe("3h");
   expect(timeAgoShort("2025-12-30T00:00:00Z", now)).toBe("3d");
+});
+
+test("matchesSearch looks at title, refs, id and repo names", () => {
+  const p = {
+    id: "ABC-1-fix-login",
+    ticket: { title: "Fix the Login form", links: [{ ref: "ABC-1" }, { ref: "ABC-2" }] },
+    repos: [{ path: "/home/me/web-app" }],
+  } as Parameters<typeof matchesSearch>[0];
+  expect(matchesSearch(p, "")).toBe(true);
+  expect(matchesSearch(p, "   ")).toBe(true);
+  expect(matchesSearch(p, "LOGIN")).toBe(true);
+  expect(matchesSearch(p, "abc-2")).toBe(true);
+  expect(matchesSearch(p, "fix-login")).toBe(true);
+  expect(matchesSearch(p, "web-app")).toBe(true);
+  expect(matchesSearch(p, "login web")).toBe(true);
+  expect(matchesSearch(p, "login api")).toBe(false);
+  expect(matchesSearch(p, "zzz")).toBe(false);
 });
 
 test("displaySteps shows a running step as waiting while the user is needed", () => {
