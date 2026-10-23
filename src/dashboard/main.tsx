@@ -96,9 +96,13 @@ function App() {
         </div>
       )}
       {pipelines?.length === 0 && (
-        <div className="overflow-y-auto px-4">
-          <EmptyState />
-        </div>
+        <>
+          <div className="min-h-0 flex-1 overflow-y-auto px-4">
+            <EmptyState />
+          </div>
+          {/* The header is gone: the footer is the only place for the live state and the theme. */}
+          <SidebarFooter live={live} />
+        </>
       )}
       {pipelines && pipelines.length > 0 && (
         <div className="flex min-h-0 flex-1">
