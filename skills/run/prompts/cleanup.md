@@ -17,4 +17,9 @@ Report what you changed, if you changed anything. Then list the problems you fou
 
 `blocking`: wrong result, crash, data loss, security hole, broken contract. `important`: a real failure on a plausible path, or a test that does not test what it claims. `minor`: the rest. Re-read the code before you report a finding. If you find nothing, say so.
 
-In quick mode you cover the whole diff, every chunk, with the same checks.
+In quick mode you cover the whole diff, every chunk, with the same checks. There is no global review, so you also get `ticket.md` and check the diff against it. Report each of these as a finding, and quote the ticket line:
+- a requirement that is missing or only partly done;
+- behaviour the ticket did not ask for (scope creep);
+- a requirement implemented wrongly.
+
+Do not fix them: a spec finding changes behaviour.

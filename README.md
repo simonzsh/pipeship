@@ -68,10 +68,10 @@ Do not use it for a small edit in one file, a config tweak, a question, a review
 
 ### Options
 
-- **Modes**: `full` (default, all 6 steps) and `quick` (one chunk, blocking questions only, explore in the main session, one `sonnet` cleanup pass instead of the full review, no `opus`).
+- **Modes**: `full` (default, all 6 steps) and `quick` (one chunk, blocking questions only, explore in the main session, one `sonnet` cleanup pass instead of the full review, which also checks the diff against the ticket, no `opus`).
 - **`--skip`** removes steps, e.g. `--skip questions,preview`. You can also say "skip the review" during the run. Steps run in order: `pipeship step` and `pipeship wait` refuse a step whose earlier steps are not done or skipped, so mark a step `skipped` to pass it.
 - **Several repos**: a ticket can span several repos. Pass `--repo` once per repo, or let the explore step find them. Each repo gets its own PR.
-- **PRs**: the review step ends with `pipeship pr <id>`. For each repo, it pushes the top chunk branch (`--force-with-lease`) and opens one PR on the repo's base, or only pushes when that PR is still open. The body lists the chunks with their commits and, with several repos, the related PRs. A repo with no remote is skipped. After feedback, the agent runs it again: a merged or closed PR gets a new one.
+- **PRs**: the review step ends with `pipeship pr <id>`. For each repo, it pushes the top chunk branch (`--force-with-lease`) and opens one PR on the repo's base, or only pushes when that PR is still open. The body holds `pr.md` (what changed, the evidence, the merge danger), the chunks with their commits and, with several repos, the related PRs. After verify, the agent adds the verify evidence to the body of each open PR. A repo with no remote is skipped. After feedback, the agent runs it again: a merged or closed PR gets a new one.
 - **Checks**: subagents run the fast checks (typecheck, lint, format) and only the tests related to the diff, never the full suite. CI runs the full suite on each PR. pipeship runs the full suite locally, once on the top of each repo before it opens the PRs, only when CI does not run it on PRs or when you ask for it. Never two test suites at once on the machine.
 - pipeship starts on its own on a work request: make, fix, build or change something, with or without a ticket (a reference, a URL, a text, or a task decided after a discussion). You do not need to name it. It never starts on a question, an explanation, a plain discussion, a review or a status request.
 
@@ -126,7 +126,7 @@ Use `review` when you want a review and no code change. It reviews a PR, a branc
 
 With no argument, it reviews the current diff against `origin/<default branch>`, uncommitted and untracked files included. It diffs a PR or a branch from its merge base with `origin/<base>`. In Codex, call it with `$review`, for example `$review 42`.
 
-It reuses the global review and cleanup briefs of `run` (`skills/run/prompts/`) and starts both subagents together: the global review on `opus`, the cleanup on `sonnet`. Both only report. It then merges the reports, re-reads the code of each finding and drops the false positives.
+It reuses the global review and cleanup briefs of `run` (`skills/run/prompts/`) and starts both subagents together: the global review on `opus`, the cleanup on `sonnet`. Both only report. It looks for the spec (the PR body and its linked issues, or ticket refs in commits; or the one you name) and gives it to the global review, which checks the diff against it. With no spec, it skips that check. It then merges the reports, re-reads the code of each finding and drops the false positives.
 
 It starts only when you ask for a review. It creates no pipeline, writes no code, pushes nothing and does not comment on the PR unless you ask. To fix the findings, use `run`.
 
