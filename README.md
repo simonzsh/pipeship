@@ -68,7 +68,7 @@ Do not use it for a small edit in one file, a config tweak, a question, a review
 
 ### Options
 
-- **Modes**: `full` (default, all 6 steps) and `quick` (one chunk, blocking questions only, explore in the main session, one `sonnet` cleanup pass instead of the full review, no `opus`).
+- **Modes**: `full` (default, all 6 steps) and `quick` (one chunk, blocking questions only, explore in the main session, one `sonnet` cleanup pass instead of the full review, which also checks the diff against the ticket, no `opus`).
 - **`--skip`** removes steps, e.g. `--skip questions,preview`. You can also say "skip the review" during the run. Steps run in order: `pipeship step` and `pipeship wait` refuse a step whose earlier steps are not done or skipped, so mark a step `skipped` to pass it.
 - **Several repos**: a ticket can span several repos. Pass `--repo` once per repo, or let the explore step find them. Each repo gets its own PR.
 - **PRs**: the review step ends with `pipeship pr <id>`. For each repo, it pushes the top chunk branch (`--force-with-lease`) and opens one PR on the repo's base, or only pushes when that PR is still open. The body holds `pr.md` (what changed, the evidence, the merge danger), the chunks with their commits and, with several repos, the related PRs. After verify, the agent adds the verify evidence to the body of each open PR. A repo with no remote is skipped. After feedback, the agent runs it again: a merged or closed PR gets a new one.
