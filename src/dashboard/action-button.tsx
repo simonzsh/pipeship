@@ -128,12 +128,19 @@ export function PipelineActions({ p, merging, starting }: { p: DashboardState; m
 export function DeleteArchivedButton({ onResult }: { onResult: (error: string | undefined) => void }) {
   const [run, setRun] = useState<DeleteRun>();
   const busy = run?.running === true;
-  const progress = busy ? `Deleting… ${run.deleted.length + run.failed.length}/${run.total}` : undefined;
+  const done = busy ? run.deleted.length + run.failed.length : 0;
+  const progress = busy ? `Deleting… ${done}/${run.total}` : undefined;
+  const label = busy ? `Deleting archived pipelines: ${done} of ${run.total}` : "Delete all archived pipelines";
+  // When following stops on a network error the last run still says "running": drop it so the button works again (a new click follows the run).
+  const settle = (error: string | undefined) => {
+    setRun((r) => (r?.running ? undefined : r));
+    onResult(error);
+  };
   // A reload keeps the batch going on the server: pick it up again.
   useEffect(() => {
     let live = true;
     void fetchDeleteRun().then((last) => {
-      if (live && last?.running) void followDeleteRun(last, setRun).then(onResult);
+      if (live && last?.running) void followDeleteRun(last, setRun).then(settle);
     });
     return () => {
       live = false;
@@ -146,8 +153,8 @@ export function DeleteArchivedButton({ onResult }: { onResult: (error: string | 
           variant="ghost"
           size="xs"
           disabled={busy}
-          aria-label={busy ? "Deleting archived pipelines" : "Delete all archived pipelines"}
-          title={busy ? "Deleting archived pipelines" : "Delete all archived pipelines"}
+          aria-label={label}
+          title={label}
           className={cn(
             "absolute right-0 top-1/2 -translate-y-1/2 bg-background focus-visible:opacity-100 data-[state=open]:opacity-100",
             busy ? "px-2 text-xs tabular-nums text-muted-foreground opacity-100" : "w-6 px-0 opacity-0 group-hover/header:opacity-100",
@@ -167,7 +174,7 @@ export function DeleteArchivedButton({ onResult }: { onResult: (error: string | 
         </AlertDialogHeader>
         <AlertDialogFooter>
           <AlertDialogCancel>Cancel</AlertDialogCancel>
-          <AlertDialogAction variant="destructive" onClick={async () => onResult(await deleteArchived(setRun))}>Delete all</AlertDialogAction>
+          <AlertDialogAction variant="destructive" onClick={async () => settle(await deleteArchived(setRun))}>Delete all</AlertDialogAction>
         </AlertDialogFooter>
       </AlertDialogContent>
     </AlertDialog>
