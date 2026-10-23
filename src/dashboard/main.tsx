@@ -1,4 +1,4 @@
-import { ChevronDown, ChevronRight, Filter, Search, Workflow } from "lucide-react";
+import { ChevronDown, ChevronRight, Filter, Search, Workflow, X } from "lucide-react";
 import { DeleteArchivedButton } from "./action-button";
 import { Spinner } from "./components/ui/spinner";
 import { useEffect, useMemo, useState } from "react";
@@ -123,10 +123,23 @@ function App() {
                     type="search"
                     value={query}
                     onChange={(e) => setQuery(e.target.value)}
+                    onKeyDown={(e) => e.key === "Escape" && setQuery("")}
                     placeholder="Search"
                     aria-label="Search pipelines"
-                    className="h-8 w-full rounded-md border border-input bg-transparent pl-7 pr-2 text-sm shadow-xs outline-none placeholder:text-muted-foreground focus-visible:ring-[3px] focus-visible:ring-ring/50 dark:bg-input/30"
+                    // The native clear button is blue in Chrome: hide it and draw our own.
+                    className="h-8 w-full rounded-md border border-input bg-transparent pl-7 pr-7 text-sm shadow-xs outline-none placeholder:text-muted-foreground focus-visible:ring-[3px] focus-visible:ring-ring/50 dark:bg-input/30 [&::-webkit-search-cancel-button]:appearance-none"
                   />
+                  {query && (
+                    <button
+                      type="button"
+                      onClick={() => setQuery("")}
+                      aria-label="Clear search"
+                      title="Clear search"
+                      className="absolute right-1.5 top-1/2 flex size-5 -translate-y-1/2 cursor-pointer items-center justify-center rounded-sm text-muted-foreground hover:text-foreground"
+                    >
+                      <X className="size-3.5" />
+                    </button>
+                  )}
                 </div>
                 <Select value={selected ?? ALL} onValueChange={selectRepo}>
                   <SelectTrigger size="sm" chevron={false} className="relative w-8 shrink-0 justify-center px-0" aria-label={filterLabel} title={filterLabel}>
