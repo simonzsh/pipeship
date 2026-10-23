@@ -74,12 +74,12 @@ export function SidebarFooter({ live }: { live: boolean }) {
           {live ? "Live" : "Offline"}
         </span>
         <ThemeToggle />
-        {info && <span className="text-xs text-muted-foreground">v{info.current}</span>}
+        {info && <span className="ml-auto text-xs text-muted-foreground">v{info.current}</span>}
         {info?.available && (
           <Button
             variant="ghost"
             size="icon"
-            className="relative ml-auto size-7 aria-disabled:cursor-default aria-disabled:opacity-50"
+            className="relative size-7 aria-disabled:cursor-default aria-disabled:opacity-50"
             // aria-disabled keeps the git hint focusable; a disabled button hides it from keyboard users.
             aria-disabled={updating || !info.harness}
             onClick={() => !updating && info.harness && install()}
