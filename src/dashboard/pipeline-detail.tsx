@@ -43,8 +43,9 @@ export function PipelineDetail({ p, onBack }: { p: DashboardState; onBack: () =>
           <div key={r.repo.path} className="flex flex-col gap-2">
             <div className="flex items-center gap-2 text-sm">
               <FolderGit2 className="size-4 shrink-0 text-muted-foreground" />
-              <span className="font-medium">{r.name}</span>
-              <span className="truncate font-mono text-xs text-muted-foreground" title={r.repo.path}>
+              <span className="min-w-0 truncate font-medium" title={r.name}>{r.name}</span>
+              {/* The path shrinks first, so the repo name stays readable. */}
+              <span className="min-w-0 shrink-[3] truncate font-mono text-xs text-muted-foreground" title={r.repo.path}>
                 {shortRepo(r.repo.path)}
               </span>
               <div className="ml-auto flex items-center gap-2">
