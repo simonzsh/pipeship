@@ -1,14 +1,14 @@
 import { afterAll, beforeEach, describe, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync, existsSync, readFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync, existsSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
-  addRepo, markRepoMerged, createPipeline, listStates, pipelineDir, pipelineStatus, readState, refreshSessionId, setBase, setMode, setStep, updateState, upsertChunk, waitForUser, type State,
+  addRepo, markRepoMerged, createPipeline, listDashboardStates, listStates, pipelineDir, pipelineStatus, readState, refreshSessionId, setBase, setMode, setStep, updateState, upsertChunk, waitForUser, type State,
 } from "../src/state.ts";
 import { chunksOf, diffRange, holdingPr, openPrChunks, repoName, repoChunks, sharesRepo, stackRefusal, topChunk } from "../src/repos.ts";
 import {
-  archiveIfAllMerged, archivePipeline, DASHBOARD_PORT, deleteArchivedPipelines, deletePipeline, findRecipe, isAlive, killGroup, mainService, normalizeRecipe, pickPorts, previewLines, processStart, resolveEnv,
-  requestPreviewStart, savedRecipePath, startOrder, startPreview, stopPipeline, stopPreview, stopPreviewAndSettle, type Service, unarchivePipeline, waitReady,
+  archiveIfAllMerged, archivePipeline, DASHBOARD_PORT, deleteArchivedPipelines, deletePipeline, findRecipe, getDeleteRun, isAlive, isDeleting, killGroup, mainService, normalizeRecipe, pickPorts, previewLines, processStart, resolveEnv,
+  requestPreviewStart, savedRecipePath, startDeleteArchived, startOrder, startPreview, stopPipeline, stopPreview, stopPreviewAndSettle, type Service, unarchivePipeline, waitReady,
 } from "../src/preview.ts";
 import { diffTotals, parseDiff } from "../src/diff.ts";
 import { baseRef, DiffError, gitDiff, headRef, pipelineDiff, resetFetchCache } from "../src/diff-git.ts";
@@ -26,6 +26,7 @@ import { t3ThreadLink } from "../src/dashboard/session.tsx";
 import { buildSearch, parseUrl } from "../src/dashboard/url.ts";
 import { allMerged, displaySteps, finished, formatElapsed, matchesSearch, timeAgo, timeAgoShort } from "../src/dashboard/pipeline-info.ts";
 import { isTestFile } from "../src/dashboard/test-files.ts";
+import { deleteArchived } from "../src/dashboard/utils.ts";
 import { diffRequests, diffUrl } from "../src/dashboard/diff-requests.ts";
 import { buildFileTree, type TreeNode } from "../src/dashboard/file-tree.ts";
 import { highlightLines, languageOf } from "../src/dashboard/highlight.tsx";
@@ -508,6 +509,162 @@ test("deleteArchivedPipelines removes the archived ones, keeps the others and re
   expect(existsSync(pipelineDir(archived))).toBe(false);
   expect(existsSync(pipelineDir(dirty))).toBe(true);
   expect(existsSync(pipelineDir(active))).toBe(true);
+});
+
+test("delete does not block the event loop while it removes a big worktree", async () => {
+  sh(repo, "init", "-q", "-b", "main");
+  sh(repo, "commit", "-q", "--allow-empty", "-m", "init");
+  writeFileSync(join(repo, ".git", "info", "exclude"), "big/\n"); // ignored: the dirty check stays clean
+  const { id } = createPipeline({ repos: [{ path: repo, base: "main" }], title: "t", source: "text" });
+  const wt = join(pipelineDir(id), "worktrees", "main");
+  sh(repo, "worktree", "add", "-q", "-b", "pipeship/big/main", wt);
+  mkdirSync(join(wt, "big"));
+  for (let i = 0; i < 2000; i++) writeFileSync(join(wt, "big", `f${i}.txt`), "x");
+  finishSteps(id);
+  archiveNow(id);
+
+  let ticks = 0;
+  const ticker = setInterval(() => ticks++, 0);
+  try {
+    await deletePipeline(id);
+  } finally {
+    clearInterval(ticker);
+  }
+  expect(ticks).toBeGreaterThan(0);
+  expect(existsSync(pipelineDir(id))).toBe(false);
+  expect(sh(repo, "worktree", "list")).not.toContain(wt);
+});
+
+// Archived pipelines on one shared repo, each with a worktree and a merged chunk branch: a delete of each runs `branch -D` on the same repo.
+function archivedOnSharedRepo(n: number, files = 0) {
+  sh(repo, "init", "-q", "-b", "main");
+  sh(repo, "commit", "-q", "--allow-empty", "-m", "init");
+  return Array.from({ length: n }, (_, i) => {
+    const { id } = createPipeline({ repos: [{ path: repo, base: "main" }], title: "t", source: "text", name: `batch-${n}-${i}-${Date.now()}` });
+    const wt = join(pipelineDir(id), "worktrees", "main");
+    const branch = `pipeship/${id}/main`;
+    sh(repo, "worktree", "add", "-q", "-b", branch, wt);
+    for (let f = 0; f < files; f++) writeFileSync(join(wt, `f${f}.txt`), "x");
+    sh(wt, "add", "."); // tracked: the dirty check stays clean
+    if (files) sh(wt, "commit", "-q", "-m", "files");
+    upsertChunk(id, { name: "main", branch, worktree: wt, status: "merged" });
+    finishSteps(id);
+    archiveNow(id);
+    return { id, branch };
+  });
+}
+
+test("startDeleteArchived deletes archived pipelines of one repo in parallel without git lock errors", async () => {
+  const items = archivedOnSharedRepo(6);
+  const { run, done } = startDeleteArchived({ concurrency: 3 });
+  expect(run.running).toBe(true);
+  await done;
+  expect(run.running).toBe(false);
+  expect(run.finishedAt).toBeDefined();
+  // Earlier tests leave a refused pipeline in the shared home: only ours must not fail.
+  expect(run.failed.filter((f) => items.some((i) => i.id === f.id))).toEqual([]);
+  for (const { id } of items) expect(run.deleted).toContain(id);
+  expect(run.total).toBe(run.deleted.length + run.failed.length);
+  expect(items.some(({ id }) => existsSync(pipelineDir(id)))).toBe(false);
+  expect(sh(repo, "worktree", "list").split("\n")).toHaveLength(1);
+  expect(existsSync(join(repo, ".git", "worktrees")) ? readdirSync(join(repo, ".git", "worktrees")) : []).toEqual([]);
+  expect(sh(repo, "branch", "--format=%(refname:short)")).toBe("main");
+});
+
+test("startDeleteArchived reports the pipelines it refuses and still deletes the others", async () => {
+  const items = archivedOnSharedRepo(4);
+  // The run takes them newest first: the one it reaches last is unarchived while the run is busy with the others.
+  const order = listStates().filter((s) => s.status === "archived").map((s) => s.id);
+  const unarchived = items.reduce((a, b) => (order.indexOf(b.id) > order.indexOf(a.id) ? b : a));
+  const [ok, dirty, merging] = items.filter((i) => i !== unarchived);
+  writeFileSync(join(pipelineDir(dirty!.id), "worktrees", "main", "draft.ts"), "work in progress");
+  const now = new Date().toISOString();
+  updateState(merging!.id, (s) => void (s.merges = { [repo]: { status: "running", repo, pid: 999_999, startedAt: now, updatedAt: now } }));
+  const { run, done } = startDeleteArchived({ concurrency: 1 });
+  // The snapshot holds it, but it is not archived when its turn comes.
+  updateState(unarchived.id, (s) => void delete s.archivedAt);
+  await done;
+  expect(run.deleted).toContain(ok!.id);
+  const failed = Object.fromEntries(run.failed.map((f) => [f.id, f.error]));
+  expect(failed[dirty!.id]).toContain("uncommitted changes");
+  expect(failed[merging!.id]).toContain("wait for the merge to finish");
+  expect(failed[unarchived.id]).toContain("no longer archived");
+  expect(existsSync(pipelineDir(unarchived.id))).toBe(true);
+  expect(existsSync(pipelineDir(dirty!.id))).toBe(true);
+  expect(existsSync(pipelineDir(ok!.id))).toBe(false);
+  // The refused ones would stay archived for the next tests of the shared home.
+  updateState(merging!.id, (s) => void delete s.merges);
+  for (const { id } of [dirty!, merging!, unarchived]) await deletePipeline(id, { force: true });
+});
+
+test("startDeleteArchived refuses a second run, counts the progress and marks the pending pipelines", async () => {
+  const items = archivedOnSharedRepo(3);
+  const { run, done } = startDeleteArchived({ concurrency: 1 });
+  expect(() => startDeleteArchived()).toThrow("a delete is already running");
+  expect(getDeleteRun()).toBe(run);
+  expect(run.total).toBeGreaterThanOrEqual(3);
+  // Every id of the batch is marked from the start, the dashboard payload carries the flag.
+  for (const { id } of items) expect(isDeleting(id)).toBe(true);
+  expect(listDashboardStates(undefined, isDeleting).find((s) => s.id === items[2]!.id)?.deleting).toBe(true);
+  await done;
+  for (const { id } of items) expect(isDeleting(id)).toBe(false);
+  expect(listDashboardStates().some((s) => s.deleting)).toBe(false);
+  expect(run.deleted.length + run.failed.length).toBe(run.total);
+  expect(run.running).toBe(false);
+});
+
+test("startDeleteArchived with nothing archived returns a finished run", async () => {
+  // Leftovers of earlier tests share the home: unarchive them.
+  for (const s of listStates().filter((x) => x.status === "archived")) updateState(s.id, (x) => void delete x.archivedAt);
+  const { run, done } = startDeleteArchived();
+  await done;
+  expect(run).toMatchObject({ running: false, total: 0, deleted: [], failed: [] });
+  expect(run.finishedAt).toBeDefined();
+  expect(getDeleteRun()).toBe(run);
+});
+
+test("POST delete-archived answers 202 at once, the server keeps answering and GET reports the run", async () => {
+  for (const s of listStates().filter((x) => x.status === "archived")) updateState(s.id, (x) => void delete x.archivedAt);
+  const items = archivedOnSharedRepo(4, 300);
+  const server = await serve(0);
+  const url = (path: string) => `http://localhost:${server.port}${path}`;
+  try {
+    const idle = await (await fetch(url("/api/pipelines/delete-archived"))).json();
+    expect(idle).toMatchObject({ running: false, deleted: [], failed: [] });
+
+    const res = await fetch(url("/api/pipelines/delete-archived"), { method: "POST" });
+    expect(res.status).toBe(202);
+    expect(await res.json()).toMatchObject({ running: true, total: 4 });
+    const again = await fetch(url("/api/pipelines/delete-archived"), { method: "POST" });
+    expect([again.status, ((await again.json()) as { error?: string }).error]).toEqual([409, "a delete is already running"]);
+    expect((await fetch(url("/api/pipelines"))).status).toBe(200);
+
+    let run: { running: boolean; deleted: string[]; failed: unknown[] } | undefined;
+    for (let i = 0; i < 100 && run?.running !== false; i++) {
+      await Bun.sleep(50);
+      run = await (await fetch(url("/api/pipelines/delete-archived"))).json();
+    }
+    expect(run?.running).toBe(false);
+    expect(run?.deleted.sort()).toEqual(items.map((i) => i.id).sort());
+    expect(run?.failed).toEqual([]);
+  } finally {
+    server.stop(true);
+  }
+});
+
+test("dashboard deleteArchived follows a run already going on a 409 and reports the failures", async () => {
+  const base = { total: 2, deleted: [] as string[], startedAt: "2026-10-23T10:00:00Z" };
+  const polls = [{ ...base, running: true, failed: [] }, { ...base, running: false, deleted: ["a"], failed: [{ id: "b", error: "uncommitted changes" }] }];
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = (async (_url: string, init?: RequestInit) =>
+    init?.method === "POST" ? Response.json({ error: "a delete is already running" }, { status: 409 }) : Response.json(polls.shift())) as typeof fetch;
+  const seen: number[] = [];
+  try {
+    expect(await deleteArchived((run) => seen.push(run.deleted.length + run.failed.length))).toBe("1 not deleted: b (uncommitted changes)");
+  } finally {
+    globalThis.fetch = realFetch;
+  }
+  expect(seen).toEqual([0, 2]);
 });
 
 test("package.json and both plugin manifests declare the same version", () => {

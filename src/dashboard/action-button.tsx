@@ -1,15 +1,16 @@
 import { Archive, ArchiveRestore, Play, Square, Trash2, type LucideIcon } from "lucide-react";
 import { LogoLoader } from "./logo-loader";
 import type { VariantProps } from "class-variance-authority";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription,
   AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger,
 } from "./components/ui/alert-dialog";
 import { Button, buttonVariants } from "./components/ui/button";
-import type { State } from "../state.ts";
+import type { DashboardState } from "../state.ts";
 import { finished } from "./pipeline-info";
-import { deleteArchived, postAction } from "./utils";
+import type { DeleteRun } from "../preview.ts";
+import { cn, deleteArchived, fetchDeleteRun, followDeleteRun, postAction } from "./utils";
 
 interface ActionDef {
   endpoint: string;
@@ -110,7 +111,7 @@ function ActionButton({ id, action, hasServers, disabledTitle }: { id: string; a
 }
 
 // The stop, archive, unarchive and delete buttons of a pipeline. Renders nothing when no action applies.
-export function PipelineActions({ p, merging, starting }: { p: State; merging: boolean; starting: boolean }) {
+export function PipelineActions({ p, merging, starting }: { p: DashboardState; merging: boolean; starting: boolean }) {
   const actions: ActionName[] = [];
   // Only agents at work can be stopped. Once they are done, a failed or done pipeline may still run its preview.
   if (p.status === "running" || p.status === "waiting_for_user") actions.push("stopPipeline");
@@ -119,23 +120,41 @@ export function PipelineActions({ p, merging, starting }: { p: State; merging: b
   if (p.status === "archived") actions.push("unarchive");
   if (finished(p)) actions.push("delete");
   // Delete would remove the worktrees a merge runs in: it waits, disabled.
-  const disabledTitle = (name: ActionName) => (name === "delete" && merging ? "Wait for the merges to end" : undefined);
+  const disabledTitle = (name: ActionName) => (name !== "delete" ? undefined : merging ? "Wait for the merges to end" : p.deleting ? "Deleting…" : undefined);
   return actions.map((name) => <ActionButton key={name} id={p.id} action={name} hasServers={!!p.preview} disabledTitle={disabledTitle(name)} />);
 }
 
-// Icon of the archived group header, shown over the end of the header divider on hover of the header (`group/header`) or on focus. It deletes every archived pipeline, whatever the repo filter.
+// Icon of the archived group header, shown over the end of the header divider on hover of the header (`group/header`) or on focus. It deletes every archived pipeline, whatever the repo filter. While a batch runs it stays visible with a counter.
 export function DeleteArchivedButton({ onResult }: { onResult: (error: string | undefined) => void }) {
+  const [run, setRun] = useState<DeleteRun>();
+  const busy = run?.running === true;
+  const progress = busy ? `Deleting… ${run.deleted.length + run.failed.length}/${run.total}` : undefined;
+  // A reload keeps the batch going on the server: pick it up again.
+  useEffect(() => {
+    let live = true;
+    void fetchDeleteRun().then((last) => {
+      if (live && last?.running) void followDeleteRun(last, setRun).then(onResult);
+    });
+    return () => {
+      live = false;
+    };
+  }, [onResult]);
   return (
     <AlertDialog>
       <AlertDialogTrigger asChild>
         <Button
           variant="ghost"
           size="xs"
-          aria-label="Delete all archived pipelines"
-          title="Delete all archived pipelines"
-          className="absolute right-0 top-1/2 w-6 -translate-y-1/2 bg-background px-0 opacity-0 group-hover/header:opacity-100 focus-visible:opacity-100 data-[state=open]:opacity-100"
+          disabled={busy}
+          aria-label={busy ? "Deleting archived pipelines" : "Delete all archived pipelines"}
+          title={busy ? "Deleting archived pipelines" : "Delete all archived pipelines"}
+          className={cn(
+            "absolute right-0 top-1/2 -translate-y-1/2 bg-background focus-visible:opacity-100 data-[state=open]:opacity-100",
+            busy ? "px-2 text-xs tabular-nums text-muted-foreground opacity-100" : "w-6 px-0 opacity-0 group-hover/header:opacity-100",
+          )}
         >
-          <Trash2 className="text-muted-foreground" />
+          {busy ? <LogoLoader className="size-4" label="Deleting" /> : <Trash2 className="text-muted-foreground" />}
+          {progress}
         </Button>
       </AlertDialogTrigger>
       <AlertDialogContent>
@@ -148,7 +167,7 @@ export function DeleteArchivedButton({ onResult }: { onResult: (error: string | 
         </AlertDialogHeader>
         <AlertDialogFooter>
           <AlertDialogCancel>Cancel</AlertDialogCancel>
-          <AlertDialogAction variant="destructive" onClick={async () => onResult(await deleteArchived())}>Delete all</AlertDialogAction>
+          <AlertDialogAction variant="destructive" onClick={async () => onResult(await deleteArchived(setRun))}>Delete all</AlertDialogAction>
         </AlertDialogFooter>
       </AlertDialogContent>
     </AlertDialog>

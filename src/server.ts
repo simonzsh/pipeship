@@ -10,7 +10,7 @@ import { home, listDashboardStates, type Harness } from "./state.ts";
 import { currentHarness, currentVersion, getUpdateInfo, installUpdate, UpdateError, type InstallDeps, type InstallResponse } from "./update.ts";
 import { shouldReload } from "./dashboard/update-info.ts";
 import {
-  anyPreviewStarting, archivePipeline, deleteArchivedPipelines, deletePipeline, isPreviewStarting, PreviewError, processStart, requestPreviewStart, stopPipeline, stopPreviewAndSettle,
+  anyPreviewStarting, archivePipeline, deletePipeline, getDeleteRun, isDeleteRunning, isDeleting, isPreviewStarting, PreviewError, processStart, requestPreviewStart, startDeleteArchived, stopPipeline, stopPreviewAndSettle,
   unarchivePipeline,
 } from "./preview.ts";
 
@@ -99,7 +99,8 @@ export async function serve(port = DEFAULT_PORT, opts: ServeOptions = {}) {
           try {
             const blocker = () =>
               anyPreviewStarting() ? "A preview is starting: wait for it, then update" :
-              isMergeRunning() ? "A merge is running: wait for it, then update" : undefined;
+              isMergeRunning() ? "A merge is running: wait for it, then update" :
+              isDeleteRunning() ? "A delete is running: wait for it, then update" : undefined;
             const result = await installUpdate(opts.harness !== undefined ? opts.harness : currentHarness(), { blocker, ...opts.update });
             if (!result.restarting) return reply({ restarting: false, message: result.message });
             restarting = true;
@@ -111,7 +112,7 @@ export async function serve(port = DEFAULT_PORT, opts: ServeOptions = {}) {
           }
         },
       },
-      "/api/pipelines": () => Response.json(listDashboardStates(isPreviewStarting)),
+      "/api/pipelines": () => Response.json(listDashboardStates(isPreviewStarting, isDeleting)),
       "/api/pipelines/:id/diff": async (req) => {
         // Ids come from slug(): reject anything else before it reaches the filesystem.
         if (!/^[a-z0-9][a-z0-9-]*$/i.test(req.params.id)) {
@@ -195,11 +196,14 @@ export async function serve(port = DEFAULT_PORT, opts: ServeOptions = {}) {
       "/api/pipelines/delete-archived": {
         POST: async () => {
           try {
-            return Response.json(await deleteArchivedPipelines());
+            return Response.json(startDeleteArchived().run, { status: 202 });
           } catch (err) {
-            return Response.json({ error: errorMessage(err) }, { status: 500 });
+            const status = err instanceof PreviewError ? err.status : 500;
+            return Response.json({ error: errorMessage(err) }, { status });
           }
         },
+        GET: async () =>
+          Response.json(getDeleteRun() ?? { running: false, total: 0, deleted: [], failed: [] }, { headers: { "Cache-Control": "no-store" } }),
       },
       "/api/pipelines/:id/delete": {
         POST: async (req) => {
@@ -218,7 +222,7 @@ export async function serve(port = DEFAULT_PORT, opts: ServeOptions = {}) {
         const stream = new ReadableStream({
           start(controller) {
             const push = () => {
-              const data = JSON.stringify(listDashboardStates(isPreviewStarting));
+              const data = JSON.stringify(listDashboardStates(isPreviewStarting, isDeleting));
               if (data !== last) controller.enqueue(`data: ${data}\n\n`);
               last = data;
             };
