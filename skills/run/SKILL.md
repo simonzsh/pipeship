@@ -28,7 +28,8 @@ This skill runs in both. Where they differ:
 
 ```
 pipeship new [--repo <path>]... --title <t> [--source <s>] [--ref <r> --url <u>]... [--name <words>] [--mode quick] [--skip a,b]
-pipeship repo <id> <path>              # add a repo to the pipeline (once per repo); prints its base and whether it is dirty
+pipeship repo <id> <path>              # add a repo (once per repo); prints its base, how it was found, dirty, and the worktree to reuse
+pipeship base <id> <repo> <branch>     # set the repo base (the branch its PR targets); allowed at any time
 pipeship get <id>                      # read state: check stopRequested and skipped steps
 pipeship step <id> <step> running|done|skipped|failed   # running|done|failed need every earlier step done or skipped
 pipeship mode <id> quick|full         # switch the mode after creation; quick skips the pending plan step
@@ -68,8 +69,8 @@ Steps: `explore`, `questions`, `plan`, `implement`, `review`, `preview`.
 
 1. Parse the arguments: an optional mode (`quick` or `full`, default `full`), an optional `--skip a,b`, and the ticket (reference, URL or text) or the work request. If `$ARGUMENTS` is empty or was not replaced, read the user's message: a ticket reference or URL in it is a ticket (read it as in 0.2); otherwise the message plus what the discussion decided is the work request.
 2. **Read the ticket** with whatever tool this session has for its source: an MCP server (Linear, Notion, Jira…), `gh issue view`, or fetching the URL. Plain text is the ticket itself, and a work request without a ticket is the ticket itself: there is nothing to read. A bare reference like `ABC-123` does not name its source: infer it from the tools you have, and ask if unsure. If no tool can read the source, ask the user to paste the ticket.
-3. The repos are the git root of the current directory, plus any repo the user names. If the current directory is not in a git repo, run `new` without `--repo`: the explore step adds the repos. The base branch of each repo is its current branch.
-4. `pipeship new ...` with one `--repo <path>` per repo, the ticket title (for a work request, a short title), the source (`linear`, `notion`, `github`, `jira`, `url`…; omit `--source` for a plain-text ticket or a work request), and one `--ref`/`--url` pair per ticket when the pipeline covers several. `new --repo` and `repo` reduce a path to its git root and refuse a path outside git. Note the `id` and `dir` it prints. It lists each repo with its `base` and `dirty`: tell the user about dirty repos, because their uncommitted changes will not be in the worktrees. Run `pipeship new` from this orchestrator session: it records the session that runs it (harness, id, cwd).
+3. The repos are the git root of the current directory, plus any repo the user names. If the current directory is not in a git repo, run `new` without `--repo`: the explore step adds the repos. `new` and `repo` record the main checkout of each repo, also when the path is a linked worktree. The base is the current branch. In a linked worktree on a feature branch (for example a T3 Code thread worktree), the base is the branch the worktree was created from, else origin's default branch. Step 1 checks the base against the repo convention.
+4. `pipeship new ...` with one `--repo <path>` per repo, the ticket title (for a work request, a short title), the source (`linear`, `notion`, `github`, `jira`, `url`…; omit `--source` for a plain-text ticket or a work request), and one `--ref`/`--url` pair per ticket when the pipeline covers several. `new --repo` and `repo` reduce a path to its main checkout (also from a linked worktree) and refuse a path outside git. Note the `id` and `dir` it prints. It lists each repo with `base`, `baseFrom` (`current`, `reflog`, `origin`) and `dirty`. When the path is a linked worktree on a feature branch, it also gives `worktree` and `branch`: keep them for step 4. Tell the user about dirty repos, because their uncommitted changes will not be in the worktrees. Run `pipeship new` from this orchestrator session: it records the session that runs it (harness, id, cwd).
    - For a plain-text ticket or a work request, pick a 2 or 3 word name that sums it up (`session-link`, `quick-mode`) and pass it with `--name`. Ticket refs win over the name.
 5. Write the full ticket text to `<dir>/ticket.md`. For a work request, write a summary instead: the request, the decisions and constraints of the discussion, and what is out of scope. Later steps read only this file.
 6. Run `pipeship dashboard` and give the user the URL.
@@ -79,6 +80,8 @@ Steps: `explore`, `questions`, `plan`, `implement`, `review`, `preview`.
 Subagent (read-only, model `sonnet`; Claude Code: `Explore` type). Input: `ticket.md` and the repos. Output: `<dir>/explore.md`. Brief: `<skill dir>/prompts/explore.md`.
 
 For each repo listed under `## Repos`, run `pipeship repo <id> <path>` and tell the user about dirty repos.
+
+For each repo, compare its base with the PR target in `explore.md`. If they differ, run `pipeship base <id> <repo> <target>`. If the PR target is ambiguous, ask at step 2.
 
 In `quick` mode, read the brief and do the exploration yourself in the main session: on a small ticket a subagent costs as much as the work. Keep `explore.md` short: only the files to change, the fast checks, the targeted tests, the baseline and how to start the app.
 
@@ -106,6 +109,8 @@ For each chunk, in chunk order:
    - `<ticket>` is the first ticket ref in lowercase (`abc-123`), or the 2 or 3 word `--name` for a plain-text ticket or a work request. Keep chunk names short too (`api`, `ui`, `backfill`): e.g. `abc-123/api`.
    - If the repo has a branch naming convention (see `explore.md`), follow it instead, e.g. `feat/abc-123-api`.
    - If the branch already exists, add `-2`.
+   - **Reuse the session worktree**: `new` or `repo` gave a `worktree` and a `branch` for this repo, the session runs in that worktree, and the repo has one chunk. Do not add a worktree. Use that worktree and branch: `pipeship chunk <id> <chunk> --worktree <worktree> --branch <branch> --status coding`. With several chunks in the repo, add a worktree under `<dir>/worktrees` for each chunk.
+   - A chunk branch is never the repo base: `pipeship chunk` refuses it.
 2. `pipeship chunk <id> <chunk> --worktree <path> --branch <branch> --status coding`. With several repos, add `--repo <name>`.
 
 Then launch **one subagent per chunk (model `sonnet`), started together** so they run in parallel. Brief: `<skill dir>/prompts/implement.md`. Each subagent gets: its worktree path (it works only there), `ticket.md`, `explore.md`, `plan.md` (contracts + its chunk), the fast checks and the targeted tests.
