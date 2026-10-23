@@ -360,7 +360,15 @@ export function listStates(): State[] {
   if (!existsSync(dir)) return [];
   return readdirSync(dir)
     .filter((id) => existsSync(statePath(id)))
-    .map(readState)
+    .flatMap((id) => {
+      // An async delete can remove state.json between the check and the read: skip that pipeline.
+      try {
+        return [readState(id)];
+      } catch (err) {
+        if ((err as NodeJS.ErrnoException).code === "ENOENT") return [];
+        throw err;
+      }
+    })
     .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
 }
 

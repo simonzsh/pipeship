@@ -203,7 +203,7 @@ export async function serve(port = DEFAULT_PORT, opts: ServeOptions = {}) {
           }
         },
         GET: async () =>
-          Response.json(getDeleteRun() ?? { running: false, total: 0, deleted: [], failed: [] }, { headers: { "Cache-Control": "no-store" } }),
+          Response.json(getDeleteRun() ?? { running: false, total: 0, deleted: [], failed: [], startedAt: "" }, { headers: { "Cache-Control": "no-store" } }),
       },
       "/api/pipelines/:id/delete": {
         POST: async (req) => {
