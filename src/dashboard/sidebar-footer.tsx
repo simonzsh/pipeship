@@ -79,7 +79,7 @@ export function SidebarFooter({ live }: { live: boolean }) {
           <Button
             variant="ghost"
             size="icon"
-            className="relative ml-auto size-7"
+            className="relative ml-auto size-7 aria-disabled:cursor-default aria-disabled:opacity-50"
             // aria-disabled keeps the git hint focusable; a disabled button hides it from keyboard users.
             aria-disabled={updating || !info.harness}
             onClick={() => !updating && info.harness && install()}
