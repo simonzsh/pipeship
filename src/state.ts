@@ -360,18 +360,27 @@ export function listStates(): State[] {
   if (!existsSync(dir)) return [];
   return readdirSync(dir)
     .filter((id) => existsSync(statePath(id)))
-    .map(readState)
+    .flatMap((id) => {
+      // An async delete can remove state.json between the check and the read: skip that pipeline.
+      try {
+        return [readState(id)];
+      } catch (err) {
+        if ((err as NodeJS.ErrnoException).code === "ENOENT") return [];
+        throw err;
+      }
+    })
     .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
 }
 
-export type DashboardState = State & { testGuide?: string; previewStarting?: boolean };
+export type DashboardState = State & { testGuide?: string; previewStarting?: boolean; deleting?: boolean };
 
-// The guide and the starting flag are for the API only: they never go into state.json.
-export function listDashboardStates(isStarting: (id: string) => boolean = () => false): DashboardState[] {
+// The guide and the transient flags are for the API only: they never go into state.json.
+export function listDashboardStates(isStarting: (id: string) => boolean = () => false, isDeleting: (id: string) => boolean = () => false): DashboardState[] {
   return listStates().map((s) => {
     const file = join(pipelineDir(s.id), "test.md");
     const d: DashboardState = existsSync(file) ? { ...s, testGuide: readFileSync(file, "utf8") } : { ...s };
     if (isStarting(s.id)) d.previewStarting = true;
+    if (isDeleting(s.id)) d.deleting = true;
     return d;
   });
 }

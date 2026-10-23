@@ -1,5 +1,6 @@
 import { spawn, spawnSync } from "node:child_process";
-import { copyFileSync, existsSync, mkdirSync, openSync, readFileSync, readdirSync, rmSync, closeSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, openSync, readFileSync, closeSync } from "node:fs";
+import { readdir, rm } from "node:fs/promises";
 import { connect, createServer } from "node:net";
 import { createHash } from "node:crypto";
 import { dirname, join } from "node:path";
@@ -663,54 +664,122 @@ export async function archiveIfAllMerged(id: string): Promise<boolean> {
   }
 }
 
-// The worktree folders are flat: try each repo until one owns the worktree.
-function removeWorktree(repos: Repo[], wt: string): void {
-  repos.some((repo) => git(repo.path, "worktree", "remove", "--force", wt).status === 0);
+// git's ref and worktree admin files are locked per repo: two deletes on one repo run their git commands in turn.
+const repoLocks = new Map<string, Promise<void>>();
+async function withRepoLock<T>(path: string, fn: () => Promise<T>): Promise<T> {
+  const run = (repoLocks.get(path) ?? Promise.resolve()).then(fn);
+  const tail = run.then(() => undefined, () => undefined);
+  repoLocks.set(path, tail);
+  try {
+    return await run;
+  } finally {
+    if (repoLocks.get(path) === tail) repoLocks.delete(path);
+  }
 }
+
+// Ids being deleted or waiting for their turn in a batch: the dashboard marks them.
+const deleting = new Set<string>();
+export const isDeleting = (id: string) => deleting.has(id);
+export const isDeleteRunning = () => deleting.size > 0;
 
 // Deletes the worktrees and the pipeline's files, then the local branches of merged chunks.
 // Unmerged branches and the PRs stay: they live in the repo. -D is safe here: a squash merge (old
 // stacks) leaves the branch "unmerged" for git, but GitHub already holds its work.
+// Async all the way: the dashboard shares this event loop and must keep answering.
 export async function deletePipeline(id: string, opts: { force?: boolean } = {}): Promise<void> {
-  const state = readState(id);
-  if (state.status === "running" || state.status === "waiting_for_user") {
-    throw new Error("stop the pipeline before deleting it");
-  }
-  if (mergeRunning(state)) throw new Error("wait for the merge to finish before deleting");
-  await stopPreview(id);
+  deleting.add(id);
+  try {
+    const state = readState(id);
+    if (state.status === "running" || state.status === "waiting_for_user") {
+      throw new Error("stop the pipeline before deleting it");
+    }
+    if (mergeRunning(state)) throw new Error("wait for the merge to finish before deleting");
+    await stopPreview(id);
 
-  const dir = join(pipelineDir(id), "worktrees");
-  const worktrees = existsSync(dir) ? readdirSync(dir).map((name) => join(dir, name)) : [];
-  if (!opts.force) {
-    const dirty = worktrees.filter((wt) => git(wt, "status", "--porcelain").stdout.trim() !== "");
-    if (dirty.length) throw new Error(`uncommitted changes would be lost in: ${dirty.join(", ")}`);
-  }
-  for (const wt of worktrees) removeWorktree(state.repos, wt);
-  // Retries: a state write may create a lock or tmp file during the removal.
-  rmSync(pipelineDir(id), { recursive: true, force: true, maxRetries: 3 });
-  for (const repo of state.repos) git(repo.path, "worktree", "prune");
-  for (const c of state.chunks) {
-    const base = state.repos.find((r) => r.path === c.repo)?.base;
-    if (c.status === MERGED && c.branch && c.branch !== base) git(c.repo, "branch", "-D", c.branch);
+    const dir = join(pipelineDir(id), "worktrees");
+    const worktrees = (await readdir(dir).catch(() => [])).map((name) => join(dir, name));
+    if (!opts.force) {
+      const status = await Promise.all(worktrees.map((wt) => gitAsync(wt, "status", "--porcelain")));
+      const dirty = worktrees.filter((_, i) => status[i]!.stdout.trim() !== "");
+      if (dirty.length) throw new Error(`uncommitted changes would be lost in: ${dirty.join(", ")}`);
+    }
+    // Retries: a state write may create a lock or tmp file during the removal.
+    const remove = (path: string) => rm(path, { recursive: true, force: true, maxRetries: 3 });
+    await Promise.all(worktrees.map(remove));
+    await remove(pipelineDir(id));
+    await Promise.all(state.repos.map((repo) => withRepoLock(repo.path, () => gitAsync(repo.path, "worktree", "prune"))));
+    for (const c of state.chunks) {
+      const base = state.repos.find((r) => r.path === c.repo)?.base;
+      if (c.status === MERGED && c.branch && c.branch !== base) await withRepoLock(c.repo, () => gitAsync(c.repo, "branch", "-D", c.branch!));
+    }
+  } finally {
+    deleting.delete(id);
   }
 }
 
-// One failure never stops the others: a pipeline with uncommitted changes refuses its delete.
-export async function deleteArchivedPipelines(): Promise<{ deleted: string[]; failed: { id: string; error: string }[] }> {
-  const deleted: string[] = [];
-  const failed: { id: string; error: string }[] = [];
-  for (const { id } of listStates().filter((s) => s.status === "archived")) {
-    try {
-      await deletePipeline(id);
-      deleted.push(id);
-    } catch (err) {
-      failed.push({ id, error: err instanceof Error ? err.message : String(err) });
-    }
+export type DeleteRun = {
+  running: boolean;
+  total: number;
+  deleted: string[];
+  failed: { id: string; error: string }[];
+  startedAt: string;
+  finishedAt?: string;
+};
+
+let lastDeleteRun: DeleteRun | undefined;
+export const getDeleteRun = () => lastDeleteRun;
+
+// Deletes every archived pipeline in the background, a few at a time. One failure never stops the others.
+export function startDeleteArchived(opts: { concurrency?: number } = {}): { run: DeleteRun; done: Promise<void> } {
+  if (lastDeleteRun?.running) throw new PreviewError("a delete is already running", 409);
+  const ids = listStates().filter((s) => s.status === "archived").map((s) => s.id);
+  const run: DeleteRun = { running: ids.length > 0, total: ids.length, deleted: [], failed: [], startedAt: new Date().toISOString() };
+  lastDeleteRun = run;
+  if (!ids.length) {
+    run.finishedAt = run.startedAt;
+    return { run, done: Promise.resolve() };
   }
-  return { deleted, failed };
+  ids.forEach((id) => deleting.add(id));
+  const queue = [...ids];
+  const worker = async () => {
+    for (let id = queue.shift(); id; id = queue.shift()) {
+      try {
+        // The batch is a snapshot: a pipeline unarchived since then must stay.
+        if (readState(id).status !== "archived") throw new Error("no longer archived");
+        await deletePipeline(id);
+        run.deleted.push(id);
+      } catch (err) {
+        run.failed.push({ id, error: err instanceof Error ? err.message : String(err) });
+      } finally {
+        deleting.delete(id);
+      }
+    }
+  };
+  const done = Promise.all(Array.from({ length: Math.min(Math.max(opts.concurrency ?? 3, 1), ids.length) }, worker)).then(() => {
+    run.running = false;
+    run.finishedAt = new Date().toISOString();
+  });
+  return { run, done };
+}
+
+export async function deleteArchivedPipelines(): Promise<{ deleted: string[]; failed: { id: string; error: string }[] }> {
+  const { run, done } = startDeleteArchived();
+  await done;
+  return { deleted: run.deleted, failed: run.failed };
 }
 
 export function git(cwd: string, ...args: string[]) {
   const result = spawnSync("git", ["-C", cwd, ...args], { encoding: "utf8" });
   return { status: result.status, stdout: result.stdout ?? "" };
+}
+
+// The async twin of git(), for the paths that must not block the event loop. Like git(), it never throws.
+async function gitAsync(cwd: string, ...args: string[]) {
+  try {
+    const proc = Bun.spawn(["git", "-C", cwd, ...args], { stdout: "pipe", stderr: "ignore" });
+    const [stdout, status] = await Promise.all([new Response(proc.stdout).text(), proc.exited]);
+    return { status, stdout };
+  } catch {
+    return { status: null, stdout: "" };
+  }
 }

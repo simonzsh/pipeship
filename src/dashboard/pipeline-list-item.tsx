@@ -18,6 +18,7 @@ export function PipelineListItem({ p, selected, onSelect }: { p: DashboardState;
         "flex w-full flex-col gap-2 rounded-lg border px-3 py-2.5 text-left outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring/50",
         tint,
         hover,
+        p.deleting && "opacity-50",
         // Selection shows as a border, so the status tint stays visible.
         selected ? "border-foreground/30 shadow-sm ring-1 ring-foreground/10" : "border-transparent",
       )}
@@ -34,6 +35,7 @@ export function PipelineListItem({ p, selected, onSelect }: { p: DashboardState;
               <GitMerge className="size-3.5 text-violet-600 dark:text-violet-400" aria-label="All PRs merged" />
             </span>
           )}
+          {p.deleting && <span className="text-xs text-muted-foreground">Deleting…</span>}
           <StatusBadge status={p.status} />
           <span title={`Updated ${p.updatedAt}`} className="text-xs tabular-nums text-muted-foreground">
             {timeAgoShort(p.updatedAt)}
