@@ -149,8 +149,8 @@ Run the changed code, front end or back end. An API, MCP or engine change needs 
 2. **Verify.** Use the changed behaviour the way its client does, and write what you called and what came back to `<dir>/verify.md`: a UI change in a browser (the preview tools of your harness), an HTTP API with `curl`, an MCP or other protocol with a real client. Cover the main path and one failure path. If you cannot exercise it (no test data, a missing service), say so in the summary. Report as working only what you exercised.
 3. **Update the PRs.** After verify, add the evidence to `<dir>/pr.md` under `## Evidence`: what you called and what came back (curl output, or a description of the screenshot: `gh` cannot upload images). `pipeship pr` ignores the body of an open PR, so update each open PR yourself:
    - read the body: `gh api repos/<owner>/<repo>/pulls/<n> --jq .body`;
-   - replace the part before `\n## Chunks\n` with the new `pr.md`, and keep the rest (the chunks, and the related PRs);
-   - write it back: `gh api -X PATCH repos/<owner>/<repo>/pulls/<n> -f body=<new body>`.
+   - replace the part before the line `## Chunks` with the new `pr.md`, and keep the rest (the chunks, and the related PRs). Save the result to a file, for example `<dir>/pr-body.md`;
+   - write it back: `gh api -X PATCH repos/<owner>/<repo>/pulls/<n> -F body=@<dir>/pr-body.md`.
 4. **Fix.** If verification fails, fix the code in the worktree of the chunk that owns it, commit, restack and re-run the checks for the diff of the fix. If step 5 opened PRs, run `pipeship pr <id>` again: it pushes the top branch of each repo.
 5. **Test guide.** After verify, write `<dir>/test.md` for the user, in the user's language. The dashboard shows it in the pipeline's Test tab, so the user can test without leaving the dashboard. `verify.md` stays your evidence; `test.md` is the user's guide. Keep it short:
    - the direct URL of the changed page, not only the root;
