@@ -18,7 +18,7 @@ import {
 const USAGE = `pipeship — state, test environments and dashboard for the /pipeship:run skill
 
   new [--repo <path>]... --title <text> [--source <name>] [--ref <id> [--url <url>]]... [--name <words>] [--mode full|quick] [--skip a,b]
-                               records the calling agent session (harness, id, cwd) when one is found, and each repo with its base branch
+                               records the calling agent session (harness, id, cwd) when one is found, and each repo with its main checkout and base branch
                                repeat --repo for each repo the ticket touches; none is fine: add them later with "repo"
                                repeat --ref/--url for each ticket; the nth --url belongs to the nth --ref
                                --name: a 2 or 3 word id for a plain-text ticket or a work request; refs win
@@ -28,9 +28,11 @@ const USAGE = `pipeship — state, test environments and dashboard for the /pipe
   mode <id> quick|full         switch the mode; quick also skips the pending steps quick skips
   wait <id> <step> [--reason <text>]   pause for the user on this step: the step runs, the pipeline waits;
                                --reason is the question, shown on the dashboard card
-  repo <id> <path>             add a repo and record its base (its current branch); does nothing if it is already there
+  repo <id> <path>             add a repo and record its base: its current branch; in a linked worktree on a feature branch, the branch it was
+                               created from, else origin's default branch; prints worktree/branch for reuse; does nothing if it is already there
+  base <id> <repo> <branch>    set the repo base (the PR target), at any time; changes only the local state (diff base, next PR)
   chunk <id> <name> [--repo r] [--worktree p] [--branch b] [--status s] [--pr url]
-                               --repo (name or path) is required for a new chunk when the pipeline has several repos
+                               --repo (name or path) is required for a new chunk when the pipeline has several repos; a --branch equal to the repo base is refused
   pr <id> [--title <text>] [--body-file <file>]   per repo: push the top chunk branch (--force-with-lease) and open its PR
                                on the repo base, recorded on the top chunk; an open PR is only pushed; a repo with no remote is skipped;
                                the body gets a "Chunks" list, and a "Related PRs" list with several repos; prints the PR URLs
