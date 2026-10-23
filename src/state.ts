@@ -13,8 +13,8 @@ export type Status = (typeof STATUSES)[number];
 export type Mode = "full" | "quick";
 
 export interface Repo {
-  path: string; // git toplevel of the repo, absolute
-  base?: string; // branch checked out when the repo was added; unset on a detached HEAD or outside git
+  path: string; // main checkout of the repo, absolute; a linked worktree is reduced to it
+  base?: string; // branch its PRs target: detected when added, fixed with `pipeship base`; unset when unknown
 }
 
 export interface Chunk {
@@ -457,6 +457,19 @@ export function addRepo(id: string, repo: Repo): { state: State; added: boolean 
   return { state, added };
 }
 
+// Changes only the local state: the diff base and the next PR. An open PR keeps its GitHub base.
+export function setBase(id: string, ref: string, branch: string): { repo: Repo; previous?: string } {
+  let out!: { repo: Repo; previous?: string };
+  updateState(id, (s) => {
+    const repo = lookupRepo(s, ref);
+    const chunk = chunksOf(s, repo.path).find((c) => c.branch === branch);
+    if (chunk) throw new Error(`${branch} is the branch of chunk "${chunk.name}": the base is the branch the PR targets`);
+    out = { repo, previous: repo.base };
+    repo.base = branch;
+  });
+  return out;
+}
+
 function newChunkRepo(s: State, chunk: ChunkInput): string {
   if (chunk.repo) return lookupRepo(s, chunk.repo).path;
   if (s.repos.length === 1) return s.repos[0]!.path;
@@ -464,15 +477,24 @@ function newChunkRepo(s: State, chunk: ChunkInput): string {
   throw new Error(`chunk "${chunk.name}": --repo is required (repos: ${s.repos.map((r) => repoName(r.path)).join(", ")})`);
 }
 
+function assertNotBase(s: State, name: string, repoPath: string, branch?: string) {
+  if (branch && branch === s.repos.find((r) => r.path === repoPath)?.base) {
+    throw new Error(`chunk "${name}": branch ${branch} is the base of ${repoName(repoPath)}; give the chunk its own branch, or fix the base with pipeship base ${s.id} <repo> <branch>`);
+  }
+}
+
 export function upsertChunk(id: string, chunk: ChunkInput): State {
   return updateState(id, (s) => {
     const existing = s.chunks.find((c) => c.name === chunk.name);
     if (!existing) {
-      s.chunks.push({ ...chunk, repo: newChunkRepo(s, chunk) });
+      const repo = newChunkRepo(s, chunk);
+      assertNotBase(s, chunk.name, repo, chunk.branch);
+      s.chunks.push({ ...chunk, repo });
       return;
     }
     const repo = chunk.repo ? lookupRepo(s, chunk.repo).path : existing.repo;
     if (repo !== existing.repo) throw new Error(`chunk "${chunk.name}" belongs to ${repoName(existing.repo)}`);
+    assertNotBase(s, chunk.name, repo, chunk.branch);
     Object.assign(existing, chunk, { repo });
   });
 }

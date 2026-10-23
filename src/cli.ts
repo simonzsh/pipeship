@@ -2,14 +2,15 @@
 import { readFileSync, rmSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { parseArgs } from "node:util";
-import { archivePipeline, deletePipeline, findRecipe, git, isAlive, killGroup, loadRecipe, previewLines, startPreview, stopPipeline, unarchivePipeline } from "./preview.ts";
+import { archivePipeline, deletePipeline, findRecipe, isAlive, killGroup, loadRecipe, previewLines, startPreview, stopPipeline, unarchivePipeline } from "./preview.ts";
 import { openPrs } from "./pr.ts";
 import { repoName } from "./repos.ts";
+import { branchExists, repoInfo, type RepoInfo } from "./repo-info.ts";
 import { detectSession, findT3Thread } from "./session.ts";
 import { DEFAULT_PORT, isDashboardUp, requestDashboardUpdate, readDashboardPid, serve, spawnDashboard } from "./server.ts";
 import { getUpdateInfo, updateInPlace } from "./update.ts";
 import {
-  STEPS, addRepo, createPipeline, home, listStates, pipelineDir, readState, refreshSessionId, setMode, setStep, updateState, upsertChunk,
+  STEPS, addRepo, createPipeline, home, listStates, lookupRepo, pipelineDir, readState, refreshSessionId, setBase, setMode, setStep, updateState, upsertChunk,
   waitForUser,
   type ChunkInput, type Mode, type StepName, type StepStatus,
 } from "./state.ts";
@@ -63,17 +64,15 @@ function need(value: string | undefined, name: string): string {
   return value;
 }
 
-// The repo is its git root, so a subfolder never makes a second repo. Base is empty on a detached HEAD.
-function repoInfo(input: string): { path: string; base?: string; dirty: boolean } {
-  const top = git(input, "rev-parse", "--show-toplevel");
-  if (top.status !== 0) throw new Error(`not a git repo: ${input}`);
-  const path = top.stdout.trim();
-  const base = git(path, "branch", "--show-current").stdout.trim();
-  const status = git(path, "status", "--porcelain");
-  return { path, ...(base && { base }), dirty: status.status === 0 && status.stdout.trim() !== "" };
-}
-
-const repoReport = (path: string, base?: string, dirty = false) => ({ path, name: repoName(path), base: base ?? null, dirty });
+const repoReport = (info: RepoInfo, storedBase?: string) => ({
+  path: info.path,
+  name: repoName(info.path),
+  base: storedBase ?? info.base ?? null,
+  baseFrom: storedBase ? "state" : info.baseFrom ?? null,
+  worktree: info.worktree ?? null,
+  branch: info.branch ?? null,
+  dirty: info.dirty,
+});
 
 async function startDashboard(): Promise<string> {
   const url = `http://localhost:${port}`;
@@ -100,9 +99,8 @@ async function main() {
     case "new": {
       const all = (values.repo ?? []).map((p) => repoInfo(resolve(p)));
       const infos = all.filter((r, i) => all.findIndex((o) => o.path === r.path) === i);
-      const paths = infos.map((r) => r.path);
       const state = createPipeline({
-        repos: paths.map((path, i) => ({ path, ...(infos[i]!.base && { base: infos[i]!.base }) })),
+        repos: infos.map((r) => ({ path: r.path, ...(r.base && { base: r.base }) })),
         title: need(values.title, "--title"),
         name: values.name,
         source: values.source,
@@ -111,15 +109,23 @@ async function main() {
         skip: values.skip?.split(",").map((s) => s.trim()) as StepName[] | undefined,
         session: detectSession(),
       });
-      const repos = paths.map((path, i) => repoReport(path, infos[i]!.base, infos[i]!.dirty));
+      const repos = infos.map((r) => repoReport(r));
       return print({ id: state.id, dir: pipelineDir(state.id), steps: state.steps.map((s) => `${s.name}:${s.status}`), session: state.session ?? null, repos });
     }
     case "repo": {
       const info = repoInfo(resolve(need(args[1], "<path>")));
-      const { path } = info;
-      const { state, added } = addRepo(need(args[0], "<id>"), { path, ...(info.base && { base: info.base }) });
-      const stored = state.repos.find((r) => r.path === path)!;
-      return print({ ...repoReport(path, stored.base, info.dirty), added });
+      const { state, added } = addRepo(need(args[0], "<id>"), { path: info.path, ...(info.base && { base: info.base }) });
+      const stored = state.repos.find((r) => r.path === info.path)!;
+      return print({ ...repoReport(info, added ? undefined : stored.base), added });
+    }
+    case "base": {
+      const id = need(args[0], "<id>");
+      const repo = lookupRepo(readState(id), need(args[1], "<repo>"));
+      const branch = need(args[2], "<branch>").replace(/^origin\//, "");
+      const name = repoName(repo.path);
+      if (!branchExists(repo.path, branch)) throw new Error(`unknown branch ${branch} in ${name}: no local branch and no origin/${branch}`);
+      const { previous } = setBase(id, repo.path, branch);
+      return print({ path: repo.path, name, base: branch, previous: previous ?? null });
     }
     case "get":
       return print(readState(need(args[0], "<id>")));

@@ -3,7 +3,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync, existsSync, readFileSync
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
-  addRepo, markRepoMerged, createPipeline, listStates, pipelineDir, pipelineStatus, readState, refreshSessionId, setMode, setStep, updateState, upsertChunk, waitForUser, type State,
+  addRepo, markRepoMerged, createPipeline, listStates, pipelineDir, pipelineStatus, readState, refreshSessionId, setBase, setMode, setStep, updateState, upsertChunk, waitForUser, type State,
 } from "../src/state.ts";
 import { chunksOf, diffRange, holdingPr, openPrChunks, repoName, repoChunks, sharesRepo, stackRefusal, topChunk } from "../src/repos.ts";
 import {
@@ -1857,8 +1857,8 @@ test("cli: new takes several --repo or none, and repo adds one with its base", (
   const b = gitRepo("back", "develop");
   const made = JSON.parse(cli("new", "--repo", a, "--repo", b, "--title", "t", "--name", "two-repos").out);
   expect(made.repos).toEqual([
-    { path: a, name: "front", base: "main", dirty: false },
-    { path: b, name: "back", base: "develop", dirty: false },
+    { path: a, name: "front", base: "main", baseFrom: "current", worktree: null, branch: null, dirty: false },
+    { path: b, name: "back", base: "develop", baseFrom: "current", worktree: null, branch: null, dirty: false },
   ]);
   expect(readState(made.id).repos).toEqual([{ path: a, base: "main" }, { path: b, base: "develop" }]);
 
@@ -1868,9 +1868,72 @@ test("cli: new takes several --repo or none, and repo adds one with its base", (
 
   writeFileSync(join(a, "untracked.txt"), "x");
   const first = JSON.parse(cli("repo", none.id, a).out);
-  expect(first).toEqual({ path: a, name: "front", base: "main", dirty: true, added: true });
+  expect(first).toEqual({ path: a, name: "front", base: "main", baseFrom: "current", worktree: null, branch: null, dirty: true, added: true });
   expect(JSON.parse(cli("repo", none.id, a).out)).toMatchObject({ base: "main", added: false });
   expect(readState(none.id).repos).toEqual([{ path: a, base: "main" }]);
+});
+
+// Bare origin (main + develop) and a clone, to add linked worktrees to.
+function linkedRepo() {
+  const dir = mkdtempSync(join(root, "linked-"));
+  const origin = join(dir, "origin.git");
+  const clone = join(dir, "backend");
+  sh(dir, "init", "-q", "--bare", "-b", "main", origin);
+  sh(dir, "clone", "-q", origin, clone);
+  commitFile(clone, "base.txt", "base\n", "initial");
+  sh(clone, "push", "-q", "origin", "main", "main:develop");
+  sh(clone, "fetch", "-q", "origin");
+  sh(clone, "remote", "set-head", "origin", "main");
+  return { dir, origin, clone, wt: (name: string) => join(dir, name) };
+}
+
+const newJson = (name: string, repo: string) => JSON.parse(cli("new", "--repo", repo, "--title", "t", "--name", name).out);
+
+test("cli: a linked worktree gives the main checkout, the branch it was created from, and the worktree to reuse", () => {
+  const { clone, wt } = linkedRepo();
+  sh(clone, "worktree", "add", "-q", "-b", "feat", wt("t3"), "origin/main");
+  const made = newJson("linked", wt("t3"));
+  expect(made.repos).toEqual([
+    { path: clone, name: "backend", base: "main", baseFrom: "reflog", worktree: wt("t3"), branch: "feat", dirty: false },
+  ]);
+  expect(readState(made.id).repos).toEqual([{ path: clone, base: "main" }]);
+});
+
+test("cli: base fallbacks for worktrees that are not a plain feature branch", () => {
+  const { clone, dir, wt } = linkedRepo();
+  const sha = sh(clone, "rev-parse", "HEAD");
+  sh(clone, "worktree", "add", "-q", "-b", "f2", wt("head"));
+  sh(clone, "worktree", "add", "-q", "-b", "f3", wt("sha"), sha);
+  sh(clone, "worktree", "add", "-q", "-b", "develop", wt("dev"), "origin/develop");
+  sh(clone, "worktree", "add", "-q", "--detach", wt("det"));
+  const base = (name: string) => newJson(`fb-${name}`, wt(name)).repos[0];
+  expect(base("head")).toMatchObject({ base: "main", baseFrom: "origin", worktree: wt("head"), branch: "f2" });
+  expect(base("sha")).toMatchObject({ base: "main", baseFrom: "origin", branch: "f3" });
+  expect(base("dev")).toMatchObject({ base: "develop", baseFrom: "current", worktree: null, branch: null });
+  expect(base("det")).toMatchObject({ base: "main", baseFrom: "origin", worktree: null, branch: null });
+
+  const plain = gitRepo("plain");
+  sh(plain, "worktree", "add", "-q", "-b", "feat", join(dir, "plain-wt"));
+  expect(newJson("fb-plain", join(dir, "plain-wt")).repos[0]).toMatchObject({
+    path: plain, base: null, baseFrom: null, worktree: join(dir, "plain-wt"), branch: "feat",
+  });
+});
+
+test("cli: new dedupes a main checkout and its worktree, and repo on a known path keeps the stored base", () => {
+  const { clone, wt } = linkedRepo();
+  sh(clone, "worktree", "add", "-q", "-b", "feat", wt("t3"), "origin/main");
+  const made = JSON.parse(cli("new", "--repo", clone, "--repo", wt("t3"), "--title", "t", "--name", "dedupe").out);
+  expect(made.repos).toHaveLength(1);
+  const again = JSON.parse(cli("repo", made.id, wt("t3")).out);
+  expect(again).toMatchObject({ added: false, base: "main", baseFrom: "state", worktree: wt("t3"), branch: "feat" });
+});
+
+test("cli: a linked worktree of a bare main repo keeps its own path", () => {
+  const { dir, origin, wt } = linkedRepo();
+  const bare = join(dir, "bare.git");
+  sh(dir, "clone", "-q", "--bare", origin, bare);
+  sh(bare, "worktree", "add", "-q", "-b", "feat", wt("bw"), "main");
+  expect(newJson("bare-main", wt("bw")).repos[0]).toMatchObject({ path: wt("bw"), branch: "feat" });
 });
 
 test("cli: repo paths are reduced to the git root, and a non-git path fails", () => {
@@ -1913,6 +1976,44 @@ test("upsertChunk fills the repo for one repo, and asks for it with several", ()
   expect(cli("chunk", id, "c1").err).toContain("--repo is required");
   expect(cli("chunk", id, "c1", "--repo", "back").code).toBe(0);
   expect(readState(id).chunks).toEqual([{ name: "c1", repo: b }]);
+});
+
+test("upsertChunk refuses a chunk branch equal to the repo base, but lets legacy chunks update", () => {
+  const { id } = createPipeline({ repos: [{ path: "/x/app", base: "main" }], title: "t", name: "chunk-base" });
+  expect(() => upsertChunk(id, { name: "c1", branch: "main" })).toThrow(
+    `chunk "c1": branch main is the base of app; give the chunk its own branch, or fix the base with pipeship base ${id} <repo> <branch>`,
+  );
+  upsertChunk(id, { name: "c1", branch: "feat" });
+  expect(() => upsertChunk(id, { name: "c1", branch: "main" })).toThrow("branch main is the base of app");
+  updateState(id, (s) => void s.chunks.push({ name: "old", repo: "/x/app", branch: "main" }));
+  upsertChunk(id, { name: "old", status: "done" });
+  expect(readState(id).chunks.find((c) => c.name === "old")).toMatchObject({ branch: "main", status: "done" });
+
+  const cliId = JSON.parse(cli("new", "--repo", gitRepo("app2"), "--title", "t", "--name", "chunk-base-cli").out).id;
+  const bad = cli("chunk", cliId, "c1", "--branch", "main");
+  expect(bad.code).not.toBe(0);
+  expect(bad.err).toContain("branch main is the base of app2");
+});
+
+test("setBase changes the repo base, also with a PR, and refuses a chunk branch", () => {
+  const { id } = createPipeline({ repos: [{ path: "/x/app", base: "main" }], title: "t", name: "set-base" });
+  upsertChunk(id, { name: "c1", branch: "feat", pr: "https://github.com/o/r/pull/1" });
+  expect(setBase(id, "app", "develop")).toEqual({ repo: { path: "/x/app", base: "develop" }, previous: "main" });
+  expect(readState(id).repos).toEqual([{ path: "/x/app", base: "develop" }]);
+  expect(() => setBase(id, "/x/app", "feat")).toThrow('feat is the branch of chunk "c1": the base is the branch the PR targets');
+  expect(() => setBase(id, "nope", "main")).toThrow("unknown repo: nope");
+});
+
+test("cli: base sets the PR target by name or path, and checks the branch exists", () => {
+  const { clone, wt } = linkedRepo();
+  sh(clone, "worktree", "add", "-q", "-b", "feat", wt("t3"), "origin/main");
+  const { id } = newJson("base-cli", wt("t3"));
+  expect(JSON.parse(cli("base", id, "backend", "origin/develop").out)).toEqual({ path: clone, name: "backend", base: "develop", previous: "main" });
+  expect(JSON.parse(cli("base", id, clone, "main").out)).toEqual({ path: clone, name: "backend", base: "main", previous: "develop" });
+  const bad = cli("base", id, "backend", "nope");
+  expect(bad.code).not.toBe(0);
+  expect(bad.err).toContain("unknown branch nope in backend: no local branch and no origin/nope");
+  expect(readState(id).repos[0]!.base).toBe("main");
 });
 
 test("repo helpers", () => {
