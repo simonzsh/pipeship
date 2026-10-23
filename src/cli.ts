@@ -66,11 +66,12 @@ function need(value: string | undefined, name: string): string {
   return value;
 }
 
-const repoReport = (info: RepoInfo, storedBase?: string) => ({
+// stored: the repo was already in the pipeline, so its stored base wins, even when unset.
+const repoReport = (info: RepoInfo, stored?: { base?: string }) => ({
   path: info.path,
   name: repoName(info.path),
-  base: storedBase ?? info.base ?? null,
-  baseFrom: storedBase ? "state" : info.baseFrom ?? null,
+  base: stored ? stored.base ?? null : info.base ?? null,
+  baseFrom: stored ? "state" : info.baseFrom ?? null,
   worktree: info.worktree ?? null,
   branch: info.branch ?? null,
   dirty: info.dirty,
@@ -118,7 +119,7 @@ async function main() {
       const info = repoInfo(resolve(need(args[1], "<path>")));
       const { state, added } = addRepo(need(args[0], "<id>"), { path: info.path, ...(info.base && { base: info.base }) });
       const stored = state.repos.find((r) => r.path === info.path)!;
-      return print({ ...repoReport(info, added ? undefined : stored.base), added });
+      return print({ ...repoReport(info, added ? undefined : stored), added });
     }
     case "base": {
       const id = need(args[0], "<id>");

@@ -14,12 +14,14 @@ export interface RepoInfo {
 export const branchExists = (cwd: string, b: string) =>
   ["refs/heads/", "refs/remotes/origin/"].some((ref) => git(cwd, "show-ref", "--verify", "--quiet", ref + b).status === 0);
 
-// The reflog's oldest entry names the branch a worktree branch was created from (a sha, tag or HEAD is no branch).
-function createdFrom(cwd: string, branch: string): string | undefined {
+// The reflog's oldest entry names the branch a worktree branch was created from.
+// undefined: no creation entry (expired reflog); null: created from no branch (a sha, a tag or HEAD).
+function createdFrom(cwd: string, branch: string): string | null | undefined {
   const lines = git(cwd, "reflog", "show", "--format=%gs", `refs/heads/${branch}`).stdout.split("\n").filter(Boolean);
   const m = lines.at(-1)?.match(/^branch: Created from (.+)$/);
-  const src = m?.[1]?.replace(/^refs\/(heads|remotes)\//, "").replace(/^origin\//, "");
-  return src && src !== "HEAD" && branchExists(cwd, src) ? src : undefined;
+  if (!m) return undefined;
+  const src = m[1]!.replace(/^refs\/(heads|remotes)\//, "").replace(/^origin\//, "");
+  return src !== "HEAD" && branchExists(cwd, src) ? src : null;
 }
 
 const real = (p: string) => {
@@ -42,9 +44,12 @@ export function repoInfo(input: string): RepoInfo {
     if (main && !first.includes("bare")) path = main;
   }
   const dflt = git(top, "symbolic-ref", "--quiet", "--short", "refs/remotes/origin/HEAD").stdout.trim().replace(/^origin\//, "");
-  const src = linked && current ? createdFrom(top, current) : undefined;
+  const src = linked && current ? createdFrom(top, current) : null;
+  // With no creation entry (reflog older than 90 days), a branch also on origin is a shared one (develop, staging).
+  const shared = !linked || current === dflt || src === current
+    || (src === undefined && git(top, "show-ref", "--verify", "--quiet", `refs/remotes/origin/${current}`).status === 0);
   const found: [string, BaseFrom] | undefined =
-    (!linked || current === dflt || src === current) && current ? [current, "current"]
+    shared && current ? [current, "current"]
     : src ? [src, "reflog"]
     : dflt ? [dflt, "origin"]
     : undefined;

@@ -1912,6 +1912,12 @@ test("cli: base fallbacks for worktrees that are not a plain feature branch", ()
   expect(base("dev")).toMatchObject({ base: "develop", baseFrom: "current", worktree: null, branch: null });
   expect(base("det")).toMatchObject({ base: "main", baseFrom: "origin", worktree: null, branch: null });
 
+  // An old shared branch: its reflog lost the creation entry, but origin has it.
+  sh(clone, "worktree", "add", "-q", "-b", "staging", wt("old"), "origin/main");
+  sh(clone, "push", "-q", "origin", "staging");
+  sh(clone, "reflog", "expire", "--expire=now", "--all");
+  expect(base("old")).toMatchObject({ base: "staging", baseFrom: "current", worktree: null, branch: null });
+
   const plain = gitRepo("plain");
   sh(plain, "worktree", "add", "-q", "-b", "feat", join(dir, "plain-wt"));
   expect(newJson("fb-plain", join(dir, "plain-wt")).repos[0]).toMatchObject({
@@ -1926,6 +1932,13 @@ test("cli: new dedupes a main checkout and its worktree, and repo on a known pat
   expect(made.repos).toHaveLength(1);
   const again = JSON.parse(cli("repo", made.id, wt("t3")).out);
   expect(again).toMatchObject({ added: false, base: "main", baseFrom: "state", worktree: wt("t3"), branch: "feat" });
+
+  // A repo stored with no base keeps showing none, not the base detected now.
+  const plain = gitRepo("nobase");
+  sh(plain, "checkout", "-q", "--detach");
+  const bare = JSON.parse(cli("new", "--repo", plain, "--title", "t", "--name", "nobase").out);
+  sh(plain, "checkout", "-q", "-");
+  expect(JSON.parse(cli("repo", bare.id, plain).out)).toMatchObject({ added: false, base: null, baseFrom: "state" });
 });
 
 test("cli: a linked worktree of a bare main repo keeps its own path", () => {
