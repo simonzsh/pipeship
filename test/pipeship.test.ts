@@ -12,7 +12,7 @@ import {
 } from "../src/preview.ts";
 import { diffTotals, parseDiff } from "../src/diff.ts";
 import { baseRef, DiffError, gitDiff, headRef, pipelineDiff, resetFetchCache } from "../src/diff-git.ts";
-import { DEFAULT_PORT, readDashboardPid, requestDashboardUpdate, serve, spawnDashboard } from "../src/server.ts";
+import { DEFAULT_PORT, isDashboardUp, readDashboardPid, requestDashboardUpdate, serve, spawnDashboard } from "../src/server.ts";
 import {
   classifyPr, defaultRunner, DEFAULT_LIMITS, failStaleMerges, forceMerge, isMergeRunning, mergeRepo, MergeError, resolveMergeRepo, startMerge, type MergeDeps, type PrView, type Runner, type RunResult,
 } from "../src/merge.ts";
@@ -3580,7 +3580,7 @@ describe("requestDashboardUpdate", () => {
 
   test("waits for the restarted dashboard to report a new version", async () => {
     const deps = fakeDashboard({ body: { restarting: true, from: "1.0.0" } }, ["1.0.0", "2.0.0"]);
-    expect(await requestDashboardUpdate(4400, deps)).toBe("Updated from 1.0.0 to 2.0.0: the dashboard restarted on http://localhost:4400");
+    expect(await requestDashboardUpdate(4400, deps)).toBe("Updated from 1.0.0 to 2.0.0: the dashboard restarted on http://127.0.0.1:4400");
   });
 
   test("relays a message and an error", async () => {
@@ -3592,6 +3592,31 @@ describe("requestDashboardUpdate", () => {
   test("fails when the dashboard does not come back", async () => {
     const deps = fakeDashboard({ body: { restarting: true, from: "1.0.0" } });
     await expect(requestDashboardUpdate(4400, { ...deps, waitMs: 5 })).rejects.toThrow("did not come back");
+  });
+});
+
+describe("serve host", () => {
+  test("listens on 127.0.0.1 by default and answers there", async () => {
+    const server = await serve(0);
+    try {
+      expect(server.hostname).toBe("127.0.0.1");
+      expect((await fetch(`http://127.0.0.1:${server.port}/api/health`)).status).toBe(200);
+      expect(await isDashboardUp(server.port)).toBe(true);
+    } finally {
+      server.stop(true);
+    }
+  });
+
+  test("honours an explicit host", async () => {
+    const server = await serve(0, { host: "::1" });
+    try {
+      expect(server.hostname).toBe("::1");
+      expect((await fetch(`http://[::1]:${server.port}/api/health`)).status).toBe(200);
+      expect(await isDashboardUp(server.port, "::1")).toBe(true);
+      expect(await isDashboardUp(server.port)).toBe(false);
+    } finally {
+      server.stop(true);
+    }
   });
 });
 

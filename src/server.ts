@@ -15,6 +15,13 @@ import {
 } from "./preview.ts";
 
 export const DEFAULT_PORT = 4400;
+export const DEFAULT_HOST = "127.0.0.1"; // the dashboard has no authentication: stay on loopback unless asked
+
+// The URL a local client uses to reach a server bound to `host` (a wildcard address is reached on loopback).
+export function dashboardUrl(port: number, host = DEFAULT_HOST): string {
+  const h = host === "0.0.0.0" || host === "::" ? DEFAULT_HOST : host;
+  return `http://${h.includes(":") ? `[${h}]` : h}:${port}`;
+}
 
 // Build the React page in memory at startup: no build step, and it works from any cwd
 // (Bun's HTML imports would read the Tailwind plugin from the cwd's bunfig.toml).
@@ -66,16 +73,17 @@ export function readDashboardPid(): { pid: number; startedAt?: string } | undefi
   return { pid: Number(pid), ...(startedAt?.trim() && { startedAt: startedAt.trim() }) };
 }
 
-export interface ServeOptions { prSync?: boolean; retryMs?: number; harness?: Harness | null; update?: Partial<InstallDeps> }
+export interface ServeOptions { host?: string; prSync?: boolean; retryMs?: number; harness?: Harness | null; update?: Partial<InstallDeps> }
 
 export async function serve(port = DEFAULT_PORT, opts: ServeOptions = {}) {
   let sync: ReturnType<typeof startPrSync> | undefined;
   const assets = await buildDashboard();
   let restarting = false;
   // Start the new version's launcher first (it retries the bind), then free the port and leave. Previews are detached.
+  const host = opts.host ?? DEFAULT_HOST;
   const handoff = (launcher: string) => {
     try {
-      spawnDashboard(launcher, ["serve", "--port", String(server.port)]);
+      spawnDashboard(launcher, ["serve", "--port", String(server.port), "--host", host]);
     } catch (err) {
       restarting = false;
       console.error(`restart failed: ${errorMessage(err)}`);
@@ -87,6 +95,7 @@ export async function serve(port = DEFAULT_PORT, opts: ServeOptions = {}) {
   };
   const server = await listen({
     port,
+    hostname: host,
     idleTimeout: 0, // keep SSE connections open
     routes: {
       ...assets,
@@ -246,9 +255,9 @@ export async function serve(port = DEFAULT_PORT, opts: ServeOptions = {}) {
 }
 
 // The version of the pipeship dashboard on this port, or undefined when none answers.
-export async function dashboardVersion(port = DEFAULT_PORT, doFetch: typeof fetch = fetch): Promise<string | undefined> {
+export async function dashboardVersion(port = DEFAULT_PORT, doFetch: typeof fetch = fetch, host = DEFAULT_HOST): Promise<string | undefined> {
   try {
-    const res = await doFetch(`http://localhost:${port}/api/health`, { signal: AbortSignal.timeout(1000) });
+    const res = await doFetch(`${dashboardUrl(port, host)}/api/health`, { signal: AbortSignal.timeout(1000) });
     const body = (await res.json()) as { app?: string; version?: string };
     return body.app === "pipeship" ? (body.version ?? "") : undefined;
   } catch {
@@ -256,19 +265,19 @@ export async function dashboardVersion(port = DEFAULT_PORT, doFetch: typeof fetc
   }
 }
 
-export const isDashboardUp = async (port = DEFAULT_PORT) => (await dashboardVersion(port)) !== undefined;
+export const isDashboardUp = async (port = DEFAULT_PORT, host = DEFAULT_HOST) => (await dashboardVersion(port, fetch, host)) !== undefined;
 
 // `pipeship update` with a dashboard: it owns the blockers and restarts itself, so ask it and wait for the new version.
-export async function requestDashboardUpdate(port: number, deps: { fetch?: typeof fetch; sleep?: (ms: number) => Promise<unknown>; waitMs?: number } = {}): Promise<string> {
-  const { fetch: doFetch = fetch, sleep = Bun.sleep, waitMs = 30_000 } = deps;
-  const base = `http://localhost:${port}`;
+export async function requestDashboardUpdate(port: number, deps: { host?: string; fetch?: typeof fetch; sleep?: (ms: number) => Promise<unknown>; waitMs?: number } = {}): Promise<string> {
+  const { host = DEFAULT_HOST, fetch: doFetch = fetch, sleep = Bun.sleep, waitMs = 30_000 } = deps;
+  const base = dashboardUrl(port, host);
   const res = await doFetch(`${base}/api/update/install`, { method: "POST" });
   const body = (await res.json()) as InstallResponse;
   if ("error" in body) throw new Error(body.error);
   if (!body.restarting) return body.message;
   for (const deadline = Date.now() + waitMs; Date.now() < deadline; ) {
     await sleep(500);
-    const version = await dashboardVersion(port, doFetch);
+    const version = await dashboardVersion(port, doFetch, host);
     if (shouldReload(body.from, version)) return `Updated from ${body.from} to ${version}: the dashboard restarted on ${base}`;
   }
   throw new Error(`Updated, but the dashboard did not come back on ${base} within ${waitMs / 1000}s: see ${join(home(), "dashboard.log")}`);
