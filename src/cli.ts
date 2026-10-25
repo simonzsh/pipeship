@@ -7,7 +7,7 @@ import { openPrs } from "./pr.ts";
 import { repoName } from "./repos.ts";
 import { branchExists, repoInfo, type RepoInfo } from "./repo-info.ts";
 import { detectSession, findT3Thread } from "./session.ts";
-import { DEFAULT_PORT, isDashboardUp, requestDashboardUpdate, readDashboardPid, serve, spawnDashboard } from "./server.ts";
+import { DEFAULT_HOST, DEFAULT_PORT, dashboardUrl, isDashboardUp, requestDashboardUpdate, readDashboardPid, serve, spawnDashboard } from "./server.ts";
 import { getUpdateInfo, updateInPlace } from "./update.ts";
 import {
   STEPS, addRepo, createPipeline, home, listStates, lookupRepo, pipelineDir, readState, refreshSessionId, setBase, setMode, setStep, updateState, upsertChunk,
@@ -43,10 +43,11 @@ const USAGE = `pipeship — state, test environments and dashboard for the /pipe
   archive <id>                 archive a done, failed or stopped pipeline (its preview stops)
   unarchive <id>               unarchive an archived pipeline; its preview stays stopped
   delete <id> [--force]        delete its worktrees and files (local branches of merged PRs go; other branches and PRs stay); --force drops uncommitted changes
-  update [--check] [--port n]  update the plugin in every harness (Claude Code, Codex) that installed it;
+  update [--check] [--port n] [--host addr]  update the plugin in every harness (Claude Code, Codex) that installed it;
                                a running dashboard does it and restarts; --check only prints the versions
-  dashboard [start|stop] [--port n]   start the dashboard in the background (default) or stop it
-  serve [--port n]             run the dashboard in the foreground`;
+  dashboard [start|stop] [--port n] [--host addr]   start the dashboard in the background (default) or stop it
+  serve [--port n] [--host addr]   run the dashboard in the foreground
+                               --host (or PIPESHIP_HOST) picks the interface; default 127.0.0.1, this machine only`;
 
 const { positionals, values } = parseArgs({
   allowPositionals: true,
@@ -54,11 +55,12 @@ const { positionals, values } = parseArgs({
     repo: { type: "string", multiple: true }, title: { type: "string" }, name: { type: "string" }, source: { type: "string" },
     ref: { type: "string", multiple: true }, url: { type: "string", multiple: true }, mode: { type: "string" }, skip: { type: "string" },
     "body-file": { type: "string" }, worktree: { type: "string" }, branch: { type: "string" }, status: { type: "string" }, pr: { type: "string" },
-    port: { type: "string" }, recipe: { type: "string" }, reason: { type: "string" }, force: { type: "boolean" }, check: { type: "boolean" }, help: { type: "boolean", short: "h" },
+    port: { type: "string" }, host: { type: "string" }, recipe: { type: "string" }, reason: { type: "string" }, force: { type: "boolean" }, check: { type: "boolean" }, help: { type: "boolean", short: "h" },
   },
 });
 const [command, ...args] = positionals;
 const port = values.port ? Number(values.port) : DEFAULT_PORT;
+const host = values.host || process.env.PIPESHIP_HOST || DEFAULT_HOST;
 const print = (data: unknown) => console.log(typeof data === "string" ? data : JSON.stringify(data, null, 2));
 
 function need(value: string | undefined, name: string): string {
@@ -78,11 +80,11 @@ const repoReport = (info: RepoInfo, stored?: { base?: string }) => ({
 });
 
 async function startDashboard(): Promise<string> {
-  const url = `http://localhost:${port}`;
-  if (await isDashboardUp(port)) return url;
-  spawnDashboard(process.execPath, [import.meta.path, "serve", "--port", String(port)]);
+  const url = dashboardUrl(port, host);
+  if (await isDashboardUp(port, host)) return url;
+  spawnDashboard(process.execPath, [import.meta.path, "serve", "--port", String(port), "--host", host]);
   for (let i = 0; i < 100; i++) {
-    if (await isDashboardUp(port)) return url;
+    if (await isDashboardUp(port, host)) return url;
     await Bun.sleep(100);
   }
   throw new Error(`dashboard did not start, see ${join(home(), "dashboard.log")}`);
@@ -188,12 +190,12 @@ async function main() {
       return print("deleted");
     case "update":
       if (values.check) return print(await getUpdateInfo());
-      return print((await isDashboardUp(port)) ? await requestDashboardUpdate(port) : await updateInPlace());
+      return print((await isDashboardUp(port, host)) ? await requestDashboardUpdate(port, { host }) : await updateInPlace());
     case "dashboard":
       return print(args[0] === "stop" ? await stopDashboard() : await startDashboard());
     case "serve":
-      await serve(port, { prSync: true, retryMs: 8000 });
-      return console.log(`pipeship dashboard on http://localhost:${port}`);
+      await serve(port, { host, prSync: true, retryMs: 8000 });
+      return console.log(`pipeship dashboard on ${dashboardUrl(port, host)}`);
     default:
       print(USAGE);
       if (command && !values.help) process.exit(1);
