@@ -18,6 +18,7 @@ This skill runs in both. Where they differ:
 - **Arguments**: Claude Code fills `$ARGUMENTS`. Codex leaves it as is: take the ticket and the options from the user's message.
 - **Subagents**: use your harness's subagent tool (Claude Code: `Agent`; Codex: spawn sub-agents). To run subagents in parallel, start them together. If you have none, run the step yourself.
 - **Models**: `opus` and `sonnet` below are Claude Code model names. In another harness, use your strongest model for `opus` steps and your default model for `sonnet` steps.
+- **Questions**: ask with your harness's question form (Claude Code: `AskUserQuestion`; Codex: `request_user_input`), not in plain text. The form puts the conversation in a waiting state, so the user sees that the agent waits for them. One call takes up to 4 questions (Codex: 3): split a longer batch into several calls in a row. If the tool is not available, ask in plain text and end your turn.
 - **Codex sandbox**: pipeship writes outside the repo (`~/.pipeship`), starts background servers and pushes branches. If the sandbox blocks a command, ask the user to approve it or to relax the sandbox.
 
 ## Helper
@@ -58,7 +59,7 @@ Steps: `explore`, `questions`, `plan`, `implement`, `review`, `preview`.
 - **The checks** are the **fast checks** (typecheck, lint, format, repo rule scripts: they run in full) plus the **targeted tests** for the diff: test files added or changed, tests of the changed modules, and cross-cutting tests the diff can break (infra, env, routes, imports). Do not run the full suite: CI runs it on each PR. Exception: if CI does not run the full suite on PRs, or the user asks for it, run it once only, on the top of each repo, at the end of step 5, before `pipeship pr`.
 - **Report the tests.** Every report that mentions checks lists the tests that ran and says that CI covers the rest. If the full suite ran locally instead, say so.
 - **One test suite at a time on the machine.** Never run two suites in parallel (several subagents, several worktrees). Subagents that run together run only their targeted tests.
-- **Every pause for the user names its step**: `pipeship wait <id> <step> --reason "<the question, in one short line>"`, then stop. This covers the questions of step 2 and any decision you cannot make. The step shows amber on the dashboard and the card shows the question. When the user answers, the next `step` call ends the wait.
+- **Every pause for the user names its step**: `pipeship wait <id> <step> --reason "<the question, in one short line>"`, then ask with the question form (see **Questions** above). This covers the questions of step 2 and any decision you cannot make. The step shows amber on the dashboard and the card shows the question. When the user answers, the next `step` call ends the wait.
 - **Within a step that needs a decision, do the work that does not depend on it first, then run `wait` last and ask once.** Later steps are refused until this step is done or skipped.
 - While this pipeline runs, it replaces process skills such as brainstorming, writing-plans, using-git-worktrees, subagent-driven-development and finishing-a-development-branch. The only skills it uses are `simplify` and `code-review`, in step 5.
 - If the dashboard shows *Agent stopped*, the user can resume with the command copied from the agent logo in the pipeline header, then continue from the first step that is not done or skipped (`pipeship get <id>`). Marking that step `running` clears `stopRequested`.
@@ -88,9 +89,9 @@ In `quick` mode, read the brief and do the exploration yourself in the main sess
 ## Step 2 — questions (human pause)
 
 1. Compare `ticket.md` with `explore.md`. List what is missing or ambiguous. With several repos, ask the user to confirm the repo list. The plan and the chunks start only once the list is fixed.
-2. Ask **all questions in one batch**, numbered. Format: "Today the code does X. Question: … Recommended: …". The user answers in one word or corrects.
-3. In `full` mode, if the ticket is small (one coherent change), also propose switching to `quick`. When the user accepts, run `pipeship mode <id> quick` so the dashboard shows the badge.
-4. `pipeship wait <id> questions --reason "<n> questions to answer"`, then **stop and wait** for the answers.
+2. Prepare **all questions as one batch**. For each one: the question text says what the code does today ("Today the code does X. …?"), and each option is an answer. Put the recommended answer first, with "(Recommended)" at the end of its label. The user can always type another answer.
+3. In `full` mode, if the ticket is small (one coherent change), also add a question that proposes switching to `quick`. When the user accepts, run `pipeship mode <id> quick` so the dashboard shows the badge.
+4. `pipeship wait <id> questions --reason "<n> questions to answer"`, then ask the batch with the question form and **wait** for the answers.
 5. When the user answers: append the answers to `ticket.md` under `## Answers`, then `pipeship step <id> questions done`.
 
 In `quick` mode, ask only **blocking** questions. When the explore step added repos, the repo list is a blocking question. If there are none, mark the step done and continue without a pause.
