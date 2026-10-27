@@ -18,6 +18,13 @@ const REFS: Record<string, string[]> = {
 const resolveRef = (ref: string, dir: string) =>
   ref.replace("<skill dir>", dir).replace("<run dir>", join(skillsRoot, "run"));
 
+// A plain-text question leaves the T3 Code thread in "running"; the form tools set it to waiting.
+test("the run skill asks through the native question tools", () => {
+  const skill = readFileSync(join(skillsRoot, "run/SKILL.md"), "utf8");
+  expect(skill).toContain("`AskUserQuestion`");
+  expect(skill).toContain("`request_user_input`");
+});
+
 test("the run skill exists and ship is gone", () => {
   expect(folders).toContain("run");
   expect(folders).not.toContain("ship");
