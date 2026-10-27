@@ -81,6 +81,7 @@ export interface State {
   status: Status; // derived by pipelineStatus on every write; never set by hand
   waiting?: { step: StepName; reason?: string }; // set by `pipeship wait`: the step that needs the user and why
   archivedAt?: string;
+  dashboard?: boolean; // false: nobody marks the steps (see closeSteps); absent means on
   step: StepName;
   steps: { name: StepName; status: StepStatus; startedAt?: string; endedAt?: string }[];
   chunks: Chunk[];
@@ -102,6 +103,8 @@ export function pipelineStatus(s: Pick<State, "archivedAt" | "steps" | "stopRequ
   if (s.steps.every((x) => x.status === "done" || x.status === "skipped")) return s.preview ? "ready" : "done";
   return "running";
 }
+
+export const dashboardOn = (s: Pick<State, "dashboard">) => s.dashboard !== false;
 
 export interface PreviewService {
   name: string;
@@ -146,6 +149,7 @@ export function createPipeline(opts: {
   mode?: Mode;
   skip?: StepName[];
   session?: Session;
+  dashboard?: boolean;
 }): State {
   const repos: Repo[] = [];
   for (const r of opts.repos ?? []) {
@@ -174,6 +178,7 @@ export function createPipeline(opts: {
     steps: STEPS.map((name) => ({ name, status: skipped.has(name) ? "skipped" : "pending" })),
     chunks: [],
     ...(opts.session && { session: opts.session }),
+    dashboard: opts.dashboard ?? true,
     stopRequested: false,
     createdAt: now,
     updatedAt: now,
@@ -392,6 +397,20 @@ export function setMode(id: string, mode: Mode): State {
     s.mode = mode;
     if (mode !== "quick") return;
     for (const step of s.steps) if (QUICK_SKIPS.includes(step.name) && step.status === "pending") step.status = "skipped";
+  });
+}
+
+// Dashboard off: nobody marks the steps, so `pipeship pr` ends them. Skipped and done steps stay as they are.
+export function closeSteps(id: string): State {
+  return updateState(id, (s) => {
+    const now = new Date().toISOString();
+    for (const step of s.steps) {
+      if (step.status === "done" || step.status === "skipped") continue;
+      step.status = "done";
+      step.startedAt ??= now;
+      step.endedAt = now;
+    }
+    delete s.waiting;
   });
 }
 

@@ -38,6 +38,14 @@ describe("pendingPipelines", () => {
     expect(pendingPipelines([fixture("a", "running", null)], { session_id: "s1" }, {})).toEqual([]);
   });
 
+  test("ignores a pipeline with the dashboard off, by session id and by folder", () => {
+    const off = { ...fixture("off", "running"), dashboard: false };
+    const on = fixture("on", "running");
+    expect(pendingPipelines([off, on], { session_id: "s1" }, {}).map((s) => s.id)).toEqual(["on"]);
+    expect(pendingPipelines([off], { session_id: "new", source: "clear", cwd: "/work" }, {})).toEqual([]);
+    expect(pendingPipelines([on], { session_id: "new", source: "clear", cwd: "/work" }, {})).toHaveLength(1);
+  });
+
   test("uses CLAUDE_CODE_SESSION_ID when the input has no session id, and nothing without any id", () => {
     const states = [fixture("a", "running")];
     expect(pendingPipelines(states, {}, { CLAUDE_CODE_SESSION_ID: "s1" })).toHaveLength(1);

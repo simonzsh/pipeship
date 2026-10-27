@@ -3,6 +3,7 @@ import { readFileSync, rmSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { parseArgs } from "node:util";
 import { archivePipeline, deletePipeline, findRecipe, isAlive, killGroup, loadRecipe, previewLines, startPreview, stopPipeline, unarchivePipeline } from "./preview.ts";
+import { configPath, readConfig, setDashboard } from "./config.ts";
 import { openPrs } from "./pr.ts";
 import { repoName } from "./repos.ts";
 import { branchExists, repoInfo, type RepoInfo } from "./repo-info.ts";
@@ -10,7 +11,7 @@ import { detectSession, findT3Thread } from "./session.ts";
 import { DEFAULT_HOST, DEFAULT_PORT, dashboardUrl, isDashboardUp, requestDashboardUpdate, readDashboardPid, serve, spawnDashboard } from "./server.ts";
 import { getUpdateInfo, updateInPlace } from "./update.ts";
 import {
-  STEPS, addRepo, createPipeline, home, listStates, lookupRepo, pipelineDir, readState, refreshSessionId, setBase, setMode, setStep, updateState, upsertChunk,
+  STEPS, addRepo, createPipeline, dashboardOn, home, listStates, lookupRepo, pipelineDir, readState, refreshSessionId, setBase, setMode, setStep, updateState, upsertChunk,
   waitForUser,
   type ChunkInput, type Mode, type StepName, type StepStatus,
 } from "./state.ts";
@@ -22,6 +23,7 @@ const USAGE = `pipeship — state, test environments and dashboard for the /pipe
                                repeat --repo for each repo the ticket touches; none is fine: add them later with "repo"
                                repeat --ref/--url for each ticket; the nth --url belongs to the nth --ref
                                --name: a 2 or 3 word id for a plain-text ticket or a work request; refs win
+  config [dashboard on|off]    global settings in ~/.pipeship/config.json; dashboard off: the run skill does not start or update the dashboard (new pipelines only); default on
   get <id>                     print the state (JSON)
   list                         list pipelines
   step <id> <step> <status>    steps: ${STEPS.join(", ")}; status: pending, running, done, skipped, failed
@@ -113,9 +115,18 @@ async function main() {
         mode: (values.mode as Mode) ?? "full",
         skip: values.skip?.split(",").map((s) => s.trim()) as StepName[] | undefined,
         session: detectSession(),
+        dashboard: readConfig().dashboard,
       });
       const repos = infos.map((r) => repoReport(r));
-      return print({ id: state.id, dir: pipelineDir(state.id), steps: state.steps.map((s) => `${s.name}:${s.status}`), session: state.session ?? null, repos });
+      return print({ id: state.id, dir: pipelineDir(state.id), dashboard: dashboardOn(state) ? "on" : "off", steps: state.steps.map((s) => `${s.name}:${s.status}`), session: state.session ?? null, repos });
+    }
+    case "config": {
+      if (args[0] !== undefined && args[0] !== "dashboard") throw new Error(`unknown setting: ${args[0]} (expected dashboard)`);
+      if (args[0]) {
+        if (args[1] !== "on" && args[1] !== "off") throw new Error("expected on or off");
+        setDashboard(args[1] === "on");
+      }
+      return print({ dashboard: readConfig().dashboard ? "on" : "off", path: configPath() });
     }
     case "repo": {
       const info = repoInfo(resolve(need(args[1], "<path>")));

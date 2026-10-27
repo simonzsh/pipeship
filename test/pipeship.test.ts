@@ -3,7 +3,7 @@ import { mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync, existsSync,
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
-  addRepo, markRepoMerged, createPipeline, listDashboardStates, listStates, pipelineDir, pipelineStatus, readState, refreshSessionId, setBase, setMode, setStep, updateState, upsertChunk, waitForUser, type State,
+  addRepo, closeSteps, dashboardOn, markRepoMerged, createPipeline, listDashboardStates, listStates, pipelineDir, pipelineStatus, readState, refreshSessionId, setBase, setMode, setStep, updateState, upsertChunk, waitForUser, type State,
 } from "../src/state.ts";
 import { chunksOf, diffRange, holdingPr, openPrChunks, repoName, repoChunks, sharesRepo, stackRefusal, topChunk } from "../src/repos.ts";
 import {
@@ -61,6 +61,27 @@ test("quick mode and --skip mark steps as skipped", () => {
 
   const custom = createPipeline({ repos: [{ path: repo }], title: "x", source: "linear", links: [{ ref: "ABC-1" }], skip: ["questions", "review"] });
   expect(custom.steps.filter((s) => s.status === "skipped").map((s) => s.name)).toEqual(["questions", "review"]);
+});
+
+test("dashboard: createPipeline stores it, and an absent field means on", () => {
+  expect(createPipeline({ repos: [{ path: repo }], title: "x" }).dashboard).toBe(true);
+  expect(createPipeline({ repos: [{ path: repo }], title: "x", dashboard: false }).dashboard).toBe(false);
+  expect(dashboardOn({})).toBe(true);
+  expect(dashboardOn({ dashboard: false })).toBe(false);
+});
+
+test("closeSteps ends every step but the skipped ones, and clears the wait", () => {
+  const { id } = createPipeline({ repos: [{ path: repo }], title: "x", skip: ["questions"] });
+  setStep(id, "explore", "done");
+  setStep(id, "questions", "skipped");
+  setStep(id, "plan", "running");
+  waitForUser(id, "plan", "which one?");
+  updateState(id, (s) => void (s.steps.find((x) => x.name === "implement")!.status = "failed"));
+  const s = closeSteps(id);
+  expect(s.steps.map((x) => x.status)).toEqual(["done", "skipped", "done", "done", "done", "done"]);
+  expect(s.steps.every((x) => x.status === "skipped" || x.endedAt)).toBe(true);
+  expect(s.waiting).toBeUndefined();
+  expect(s.status).toBe("done");
 });
 
 test("--skip refuses a name that is not a step, and names the valid ones", () => {
@@ -1355,6 +1376,24 @@ test("pr: one repo pushes the top branch, opens one PR on the base and records i
   expect(gh.calls).toEqual(["pr create", "create c2 -> main"]);
   expect(readState(stack.id).chunks.map((c) => c.pr)).toEqual([undefined, "https://github.com/o/repo/pull/10"]);
   expect(gh.bodies["repos/o/repo/pulls/10"]).toBe("What it does.\n\n## Chunks\n\n- `c1` (`c1`)\n  - f1 step 0\n- `c2` (`c2`)\n  - f2 step 0\n  - more work");
+});
+
+test("pr: with the dashboard off the steps end, with it on they stay", async () => {
+  for (const on of [false, true]) {
+    const stack = makeFeature(1);
+    if (!on) updateState(stack.id, (s) => void (s.dashboard = false));
+    await openPrs(stack.id, {}, prGh().run);
+    const done = readState(stack.id).steps.every((x) => x.status === "done");
+    expect(done).toBe(!on);
+  }
+});
+
+test("pr: a failed pr closes no step on a pipeline with the dashboard off", async () => {
+  const stack = makeFeature(1);
+  updateState(stack.id, (s) => void (s.dashboard = false));
+  upsertChunk(stack.id, { name: "c1", pr: undefined });
+  await expect(openPrs(stack.id, {}, prGh().run)).rejects.toThrow("needs --title");
+  expect(readState(stack.id).steps.some((x) => x.status === "done")).toBe(false);
 });
 
 test("pr: an open PR is only pushed, without a title", async () => {
