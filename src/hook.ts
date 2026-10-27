@@ -1,6 +1,6 @@
 import { existsSync, readdirSync } from "node:fs";
 import { join, resolve } from "node:path";
-import { home, pipelineDir, readState, type State, type Status } from "./state.ts";
+import { dashboardOn, home, pipelineDir, readState, type State, type Status } from "./state.ts";
 
 // Statuses that still need the agent. ready, done, failed and archived do not.
 export const UNFINISHED: readonly Status[] = ["running", "waiting_for_user", "stopped"];
@@ -30,11 +30,11 @@ const ACTIVE: readonly Status[] = ["running", "waiting_for_user"];
 export function matchPipelines(states: State[], input: HookInput, env: Env = process.env): { states: State[]; byFolder: boolean } {
   const id = input.session_id ?? env.CLAUDE_CODE_SESSION_ID ?? env.CODEX_THREAD_ID;
   if (!id) return { states: [], byFolder: false };
-  const byId = states.filter((s) => UNFINISHED.includes(s.status) && s.session?.id === id);
+  const byId = states.filter((s) => dashboardOn(s) && UNFINISHED.includes(s.status) && s.session?.id === id);
   if (byId.length > 0 || input.source !== "clear" || !input.cwd) return { states: byId, byFolder: false };
   // Same order as the id above; env vars leak into nested agents, so Claude wins when both are set.
   const harness = !env.CLAUDE_CODE_SESSION_ID && env.CODEX_THREAD_ID ? "codex" : "claude";
-  const byCwd = states.filter((s) => ACTIVE.includes(s.status) && s.session?.harness === harness && s.session.cwd === input.cwd);
+  const byCwd = states.filter((s) => dashboardOn(s) && ACTIVE.includes(s.status) && s.session?.harness === harness && s.session.cwd === input.cwd);
   return { states: byCwd, byFolder: byCwd.length > 0 };
 }
 

@@ -1,7 +1,7 @@
 import { defaultRunner, errorMessage, parsePrUrl, prState, type Runner } from "./merge.ts";
 import { GH_TIMEOUT_MS } from "./pr-sync.ts";
 import { chunksOf, repoName, topChunk } from "./repos.ts";
-import { readState, upsertChunk, type Chunk, type Repo, type State } from "./state.ts";
+import { closeSteps, dashboardOn, readState, upsertChunk, type Chunk, type Repo, type State } from "./state.ts";
 
 export interface PrOptions {
   title?: string;
@@ -103,6 +103,7 @@ export async function openPrs(id: string, opts: PrOptions = {}, run: Runner = de
     // The PRs opened before the failure are recorded, but the caller must still see their URLs.
     throw new Error([...out, errorMessage(err)].join("\n"));
   }
+  if (!dashboardOn(s)) closeSteps(id);
   return out;
 }
 
