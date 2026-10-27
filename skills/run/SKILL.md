@@ -23,7 +23,7 @@ This skill runs in both. Where they differ:
 
 ## Helper
 
-`pipeship` below means `"$(realpath <this skill's base directory>)/../../scripts/pipeship"` (`realpath` matters when the skill is a symlink). On first use it installs its dependencies, which takes a few seconds. It owns the state file `~/.pipeship/pipelines/<id>/state.json`, which the dashboard displays: the user follows the pipeline there.
+`pipeship` below means `"$(realpath <this skill's base directory>)/../../scripts/pipeship"` (`realpath` matters when the skill is a symlink). On first use it installs its dependencies, which takes a few seconds. It owns the state file `~/.pipeship/pipelines/<id>/state.json`, which the dashboard displays when it is on: the user follows the pipeline there.
 
 `<skill dir>` below means `$(realpath <this skill's base directory>)`. Next to this file: `recipe.md` (recipe format) and `prompts/<name>.md` (subagent briefs: `explore`, `plan`, `implement`, `global-review`, `cleanup`). Do not confuse `<skill dir>/recipe.md` (format doc) with `<dir>/recipe.json` (draft recipe).
 
@@ -42,9 +42,24 @@ pipeship pr <id> [--title <t>] [--body-file <file>]   # per repo: push the top c
 pipeship recipe <repo>...              # the saved recipe to start the app for these repos, or "none"
 pipeship preview <id> [<worktree>] [--recipe file]   # starts the app, prints the URL(s); each service runs from the top worktree of its repo
 pipeship dashboard                     # starts the dashboard if needed, prints its URL
+pipeship config [dashboard on|off]     # the user's global setting; never change it yourself
 ```
 
 Steps: `explore`, `questions`, `plan`, `implement`, `review`, `preview`.
+
+## Dashboard off
+
+`pipeship new` prints `dashboard: on|off`. The user sets it for every new pipeline with `pipeship config dashboard on|off`. On is the default, and the rest of this skill applies as written.
+
+When it is `off`, nobody watches the state:
+- Do not run `pipeship dashboard` (step 0.6).
+- Do not run `pipeship step`, `wait`, `mode`, `get` (no `stopRequested` checks) or `chunk --status`.
+- The rules that call them do not apply: **Each step**, **Each chunk**, **Before each step**, the state side of **Steps run in order**, and the `failed` step on failure. Steps still run in order. Follow the user's skips yourself.
+- Keep `new`, `repo`, `base`, `chunk <id> <name> --worktree <p> --branch <b> [--repo r]` (`pr` and `preview` read them), `recipe`, `pr` and `preview`.
+- **Pauses**: ask with the question tool as usual, without `wait`, then stop.
+- `pipeship pr` marks the remaining steps done by itself. `pipeship preview` still marks `preview` done.
+- **End**: give the test guide (the content of `test.md`) in the final summary. The test servers keep running; `pipeship stop <id>` stops them.
+- **Feedback after the pipeline**: same flow, without `step` and `chunk --status`.
 
 ## Rules
 
@@ -59,7 +74,7 @@ Steps: `explore`, `questions`, `plan`, `implement`, `review`, `preview`.
 - **The checks** are the **fast checks** (typecheck, lint, format, repo rule scripts: they run in full) plus the **targeted tests** for the diff: test files added or changed, tests of the changed modules, and cross-cutting tests the diff can break (infra, env, routes, imports). Do not run the full suite: CI runs it on each PR. Exception: if CI does not run the full suite on PRs, or the user asks for it, run it once only, on the top of each repo, at the end of step 5, before `pipeship pr`.
 - **Report the tests.** Every report that mentions checks lists the tests that ran and says that CI covers the rest. If the full suite ran locally instead, say so.
 - **One test suite at a time on the machine.** Never run two suites in parallel (several subagents, several worktrees). Subagents that run together run only their targeted tests.
-- **Every pause for the user names its step**: `pipeship wait <id> <step> --reason "<the question, in one short line>"`, then ask with the question tool (see **Questions** above) and stop. This covers the questions of step 2 and any decision you cannot make. The step shows amber on the dashboard and the card shows the question. When the user answers, the next `step` call ends the wait.
+- **Every pause for the user names its step** (with the dashboard off, skip `wait`: see **Dashboard off**): `pipeship wait <id> <step> --reason "<the question, in one short line>"`, then ask with the question tool (see **Questions** above) and stop. This covers the questions of step 2 and any decision you cannot make. The step shows amber on the dashboard and the card shows the question. When the user answers, the next `step` call ends the wait.
 - **Within a step that needs a decision, do the work that does not depend on it first, then run `wait` last and ask once.** Later steps are refused until this step is done or skipped.
 - While this pipeline runs, it replaces process skills such as brainstorming, writing-plans, using-git-worktrees, subagent-driven-development and finishing-a-development-branch. The only skills it uses are `simplify` and `code-review`, in step 5.
 - If the dashboard shows *Agent stopped*, the user can resume with the command copied from the agent logo in the pipeline header, then continue from the first step that is not done or skipped (`pipeship get <id>`). Marking that step `running` clears `stopRequested`.
@@ -74,7 +89,7 @@ Steps: `explore`, `questions`, `plan`, `implement`, `review`, `preview`.
 4. `pipeship new ...` with one `--repo <path>` per repo, the ticket title (for a work request, a short title), the source (`linear`, `notion`, `github`, `jira`, `url`…; omit `--source` for a plain-text ticket or a work request), and one `--ref`/`--url` pair per ticket when the pipeline covers several. `new --repo` and `repo` reduce a path to its main checkout (also from a linked worktree) and refuse a path outside git. Note the `id` and `dir` it prints. It lists each repo with `base`, `baseFrom` (`current`, `reflog`, `origin`) and `dirty`. When the path is a linked worktree on a feature branch, it also gives `worktree` and `branch`: keep them for step 4. Tell the user about dirty repos, because their uncommitted changes will not be in the worktrees. Run `pipeship new` from this orchestrator session: it records the session that runs it (harness, id, cwd).
    - For a plain-text ticket or a work request, pick a 2 or 3 word name that sums it up (`session-link`, `quick-mode`) and pass it with `--name`. Ticket refs win over the name.
 5. Write the full ticket text to `<dir>/ticket.md`. For a work request, write a summary instead: the request, the decisions and constraints of the discussion, and what is out of scope. Later steps read only this file.
-6. Run `pipeship dashboard` and give the user the URL.
+6. Dashboard on only: run `pipeship dashboard` and give the user the URL.
 
 ## Step 1 — explore
 
@@ -90,7 +105,7 @@ In `quick` mode, read the brief and do the exploration yourself in the main sess
 
 1. Compare `ticket.md` with `explore.md`. List what is missing or ambiguous. With several repos, ask the user to confirm the repo list. The plan and the chunks start only once the list is fixed.
 2. Prepare **all questions as one batch**. For each: what the code does today, the question, and 2 to 4 answers with the recommended one first, labelled "(Recommended)". The user picks an answer or types a correction.
-3. In `full` mode, if the ticket is small (one coherent change), also propose switching to `quick`. When the user accepts, run `pipeship mode <id> quick` so the dashboard shows the badge.
+3. In `full` mode, if the ticket is small (one coherent change), also propose switching to `quick`. When the user accepts, run `pipeship mode <id> quick` (dashboard on) so the dashboard shows the badge.
 4. `pipeship wait <id> questions --reason "<n> questions to answer"`, then ask the batch in one call of the question tool and **stop and wait** for the answers. Put "Today the code does X." in the question text. The tool takes at most 4 questions per call (Codex: 3): with more, ask them in several calls, one after the other. Without the tool, write them as a numbered list in the format "Today the code does X. Question: … Recommended: …".
 5. When the user answers: append the answers to `ticket.md` under `## Answers`, then `pipeship step <id> questions done`.
 
@@ -158,7 +173,7 @@ Run the changed code, front end or back end. An API, MCP or engine change needs 
    - read the body: `gh api repos/<owner>/<repo>/pulls/<n> --jq .body`;
    - replace the part before the line `## Chunks` with the new `pr.md`, and keep the rest (the chunks, and the related PRs). Save the result to a file, for example `<dir>/pr-body.md`;
    - write it back: `gh api -X PATCH repos/<owner>/<repo>/pulls/<n> -F body=@<dir>/pr-body.md`.
-5. **Test guide.** After verify, write `<dir>/test.md` for the user, in the user's language. The dashboard shows it in the pipeline's Test tab, so the user can test without leaving the dashboard. `verify.md` stays your evidence; `test.md` is the user's guide. Keep it short:
+5. **Test guide.** After verify, write `<dir>/test.md` for the user, in the user's language. With the dashboard on, it shows in the pipeline's Test tab, so the user can test without leaving the dashboard. With it off, the guide goes into the final summary. `verify.md` stays your evidence; `test.md` is the user's guide. Keep it short:
    - the direct URL of the changed page, not only the root;
    - how to log in if the app needs it: which local account, and where its credentials live;
    - 3 to 5 steps, each with its expected result;
@@ -172,7 +187,9 @@ If the preview fails to start, it prints the log tail: diagnose, fix the recipe 
 
 ## End
 
-Give the user a short summary: the test URL, the PR of each repo, what the verification covered (or why it was skipped), the tests that ran (CI covers the rest), and anything to check by hand. Point to the test guide: the user finds it in the pipeline's Test tab. The test servers keep running on purpose; the user stops them with the dashboard's "Stop preview" button and starts them again with "Start preview".
+Give the user a short summary: the test URL, the PR of each repo, what the verification covered (or why it was skipped), the tests that ran (CI covers the rest), and anything to check by hand. The test servers keep running on purpose.
+- **Dashboard on**: point to the test guide in the pipeline's Test tab. The user stops the servers with the dashboard's "Stop preview" button and starts them again with "Start preview".
+- **Dashboard off**: give the test guide in the summary, and tell the user that `pipeship stop <id>` stops the servers.
 
 ## Feedback after the pipeline
 

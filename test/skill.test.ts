@@ -25,6 +25,12 @@ test("the run skill asks through the native question tools", () => {
   expect(skill).toContain("`request_user_input`");
 });
 
+test("the run skill documents the dashboard setting", () => {
+  const skill = readFileSync(join(skillsRoot, "run/SKILL.md"), "utf8");
+  expect(skill).toContain("pipeship config dashboard");
+  expect(skill).toContain("## Dashboard off");
+});
+
 test("the run skill exists and ship is gone", () => {
   expect(folders).toContain("run");
   expect(folders).not.toContain("ship");
