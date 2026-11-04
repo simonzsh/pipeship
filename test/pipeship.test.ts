@@ -7,7 +7,7 @@ import {
 } from "../src/state.ts";
 import { chunksOf, diffRange, holdingPr, openPrChunks, repoName, repoChunks, sharesRepo, stackRefusal, topChunk } from "../src/repos.ts";
 import {
-  archiveIfAllMerged, archivePipeline, DASHBOARD_PORT, deleteArchivedPipelines, deletePipeline, findRecipe, getDeleteRun, isAlive, isDeleting, killGroup, mainService, normalizeRecipe, pickPorts, previewLines, processStart, resolveEnv,
+  archiveIfAllMerged, archivePipeline, DASHBOARD_PORT, deleteArchivedPipelines, deletePipeline, findRecipe, getDeleteRun, INSTALL_STAMP, installStamp, isAlive, isDeleting, killGroup, mainService, normalizeRecipe, pickPorts, previewLines, previewLockPath, processStart, resolveEnv,
   requestPreviewStart, savedRecipePath, startDeleteArchived, startOrder, startPreview, stopPipeline, stopPreview, stopPreviewAndSettle, type Service, unarchivePipeline, waitReady,
 } from "../src/preview.ts";
 import { diffTotals, parseDiff } from "../src/diff.ts";
@@ -19,6 +19,7 @@ import {
 import { startPrSync, syncPrStatuses } from "../src/pr-sync.ts";
 import { openPrs } from "../src/pr.ts";
 import { spawn, spawnSync } from "node:child_process";
+import { createServer, type AddressInfo } from "node:net";
 import { Database } from "bun:sqlite";
 import { detectSession, findT3Thread, type ReadProc } from "../src/session.ts";
 import { groupByStatus } from "../src/dashboard/groups.ts";
@@ -383,6 +384,8 @@ test("preview starts the app, copies local files, and stop kills it", async () =
   expect(stopped.stopRequested).toBe(true);
   expect(isAlive(pid)).toBe(false);
 
+  expect(readState(id).lastPorts).toEqual({ app: port });
+
   // A done pipeline can start its test environment again.
   const again = await startPreview(id, worktree);
   expect(await (await fetch(again.preview!.url)).text()).toBe("hello");
@@ -425,6 +428,133 @@ test("the same install command runs once per worktree", async () => {
   const { id } = createPipeline({ repos: [{ path: repo }], title: "t", source: "text" });
   await startPreview(id, wt).catch(() => undefined);
   expect(readFileSync(join(wt, "count"), "utf8").trim().split("\n")).toHaveLength(1);
+}, 30_000);
+
+// A recipe whose install counts its runs and whose start exits at once: only the install matters.
+function installRecipe(extra: Record<string, unknown> = {}) {
+  writeFileSync(join(repo, ".pipeship.json"), JSON.stringify({ install: "mkdir -p node_modules && echo x >> count", start: "exit 1", ...extra }));
+  const wt = mkdtempSync(join(root, "wt-"));
+  writeFileSync(join(wt, "package-lock.json"), "{}");
+  const { id } = createPipeline({ repos: [{ path: repo }], title: "t", source: "text" });
+  const start = (reinstall = false) => startPreview(id, wt, undefined, { reinstall }).catch(() => undefined);
+  const runs = () => (existsSync(join(wt, "count")) ? readFileSync(join(wt, "count"), "utf8").trim().split("\n").length : 0);
+  return { id, wt, start, runs };
+}
+
+test("an install is skipped when the dependencies are unchanged", async () => {
+  const { id, wt, start, runs } = installRecipe();
+  await start();
+  expect(runs()).toBe(1);
+  expect(existsSync(join(wt, INSTALL_STAMP))).toBe(true);
+  await start();
+  expect(runs()).toBe(1);
+  expect(readFileSync(join(pipelineDir(id), "preview.log"), "utf8")).toContain("install skipped (dependencies unchanged): mkdir -p node_modules && echo x >> count");
+  await start(true);
+  expect(runs()).toBe(2);
+}, 30_000);
+
+test("an install runs again when its inputs change", async () => {
+  const { wt, start, runs } = installRecipe();
+  await start();
+  writeFileSync(join(wt, "package-lock.json"), '{"changed":true}');
+  await start();
+  expect(runs()).toBe(2);
+  writeFileSync(join(wt, "package.json"), "{}");
+  await start();
+  expect(runs()).toBe(3);
+  rmSync(join(wt, "node_modules"), { recursive: true });
+  await start();
+  expect(runs()).toBe(4);
+}, 30_000);
+
+test("an install with no lockfile runs every time", async () => {
+  const { wt, start, runs } = installRecipe();
+  rmSync(join(wt, "package-lock.json"));
+  await start();
+  await start();
+  expect(runs()).toBe(2);
+  expect(existsSync(join(wt, INSTALL_STAMP))).toBe(false);
+}, 30_000);
+
+test("a failed install writes no stamp", async () => {
+  const { wt, start } = installRecipe({ install: "mkdir -p node_modules && exit 1" });
+  await start();
+  expect(existsSync(join(wt, INSTALL_STAMP))).toBe(false);
+}, 30_000);
+
+test("a failed install after a change leaves no old stamp to match", async () => {
+  const { wt, start, runs } = installRecipe({ install: "mkdir -p node_modules && echo x >> count && test ! -f broken" });
+  await start();
+  expect(runs()).toBe(1);
+  writeFileSync(join(wt, "package-lock.json"), '{"v":2}');
+  writeFileSync(join(wt, "broken"), "");
+  await start();
+  expect(runs()).toBe(2);
+  // Back to the first lockfile: the old stamp must not skip over the half-done node_modules.
+  writeFileSync(join(wt, "package-lock.json"), "{}");
+  rmSync(join(wt, "broken"));
+  await start();
+  expect(runs()).toBe(3);
+}, 30_000);
+
+test("a new start kills an install left running by a killed CLI", async () => {
+  const { id, wt } = installRecipe();
+  // Own process group, like a real install.
+  const orphan = spawn("sleep", ["60"], { detached: true, stdio: "ignore" });
+  const exited = new Promise((resolve) => orphan.on("exit", resolve));
+  try {
+    updateState(id, (s) => {
+      s.preview = { url: "http://localhost:1", port: 1, log: "x", services: [], install: { pid: orphan.pid! } };
+    });
+    await startPreview(id, wt).catch(() => undefined);
+    await exited;
+    expect(isAlive(orphan.pid!)).toBe(false);
+  } finally {
+    orphan.kill("SIGKILL");
+  }
+}, 30_000);
+
+const until = async (ok: () => boolean) => {
+  for (let i = 0; i < 200 && !ok(); i++) await Bun.sleep(50);
+  expect(ok()).toBe(true);
+};
+
+test("services sharing one install log one skip", async () => {
+  const install = "mkdir -p node_modules && echo x >> count";
+  const { id, start, runs } = installRecipe({
+    install: undefined,
+    start: undefined,
+    services: [
+      { name: "a", kind: "back", start: "exit 1", install },
+      { name: "b", kind: "back", start: "exit 1", install },
+    ],
+  });
+  await start();
+  await start();
+  expect(runs()).toBe(1);
+  expect(readFileSync(join(pipelineDir(id), "preview.log"), "utf8").match(/install skipped/g)).toHaveLength(1);
+}, 30_000);
+
+test("installStamp depends on the command and the dependency files", () => {
+  const dir = mkdtempSync(join(root, "stamp-"));
+  expect(installStamp("npm ci", dir)).toBeUndefined();
+  writeFileSync(join(dir, "package.json"), "{}");
+  expect(installStamp("npm ci", dir)).toBeUndefined();
+  writeFileSync(join(dir, "bun.lock"), "a");
+  const base = installStamp("npm ci", dir);
+  expect(base).toMatch(/^[0-9a-f]{64}$/);
+  expect(installStamp("npm install", dir)).not.toBe(base);
+  writeFileSync(join(dir, "bun.lock"), "b");
+  expect(installStamp("npm ci", dir)).not.toBe(base);
+});
+
+test("the preview command skips an unchanged install and --reinstall forces it", () => {
+  const { id, wt } = installRecipe();
+  const cli = join(import.meta.dir, "../src/cli.ts");
+  const run = (...extra: string[]) => spawnSync("bun", [cli, "preview", id, wt, ...extra], { encoding: "utf8", env: process.env });
+  expect(run().stderr).not.toContain("install skipped");
+  expect(run().stderr).toContain("install skipped (dependencies unchanged)");
+  expect(run("--reinstall").stderr).not.toContain("install skipped");
 }, 30_000);
 
 test("a slow install does not block the event loop", async () => {
@@ -891,6 +1021,17 @@ test("port picking skips 4400 and ports in use", async () => {
   expect(front).toEqual({ web: 3001 });
 });
 
+test("port picking tries the preferred ports first", async () => {
+  const all = async () => true;
+  expect(await pickPorts([svc("api", "back")], all, new Set(), { api: 4500 })).toEqual({ api: 4500 });
+  expect(await pickPorts([svc("api", "back")], async (p) => p !== 4500, new Set(), { api: 4500 })).toEqual({ api: 4000 });
+  expect(await pickPorts([svc("api", "back")], all, new Set([4500]), { api: 4500 })).toEqual({ api: 4000 });
+  const fronts = [svc("a", "front"), svc("b", "front")];
+  expect(await pickPorts(fronts, all, new Set(), { b: 3000 })).toEqual({ a: 3001, b: 3000 });
+  const db = svc("db", "infra", { fixedPort: 4000 });
+  expect(await pickPorts([db, svc("api", "back")], all, new Set(), { api: 4000 })).toEqual({ db: 4000, api: 4001 });
+});
+
 test("fixed ports are reserved and must be free", async () => {
   const services = [svc("db", "infra", { fixedPort: 4000, portEnv: undefined }), svc("api", "back")];
   expect(await pickPorts(services, async () => true)).toEqual({ db: 4000, api: 4001 });
@@ -961,8 +1102,31 @@ test("recipe validation errors", () => {
   expect(normalizeRecipe({ start: "bun dev" })).toEqual([
     { name: "app", kind: "front", start: "bun dev", portEnv: "PORT", readyPath: "/", ready: "http", env: {} },
   ]);
-  expect(normalizeRecipe({ services: [{ ...ok, fixedPort: 5432 }] })[0]!.portEnv).toBeUndefined();
+  expect(normalizeRecipe({ services: [{ ...ok, fixedPort: 5432 }] })[0]!.portEnv).toBe("PORT");
+  expect(normalizeRecipe({ services: [{ ...ok, fixedPort: 5432, portEnv: "DB_PORT" }] })[0]!.portEnv).toBe("DB_PORT");
 });
+
+test("a fixedPort service gets its port in PORT", async () => {
+  const free = await new Promise<number>((resolve) => {
+    const server = createServer().listen(0, () => {
+      const { port } = server.address() as AddressInfo;
+      server.close(() => resolve(port));
+    });
+  });
+  writeFileSync(
+    join(repo, ".pipeship.json"),
+    JSON.stringify({ services: [{ name: "app", kind: "back", fixedPort: free, start: `bun -e "Bun.serve({ port: Number(process.env.PORT), fetch: () => new Response('ok') })"` }] }),
+  );
+  const { id } = createPipeline({ repos: [{ path: repo }], title: "t", source: "text" });
+  finishBeforePreview(id);
+  try {
+    const state = await startPreview(id, repo);
+    expect(state.preview!.port).toBe(free);
+    expect(await (await fetch(`http://localhost:${free}`)).text()).toBe("ok");
+  } finally {
+    await stopPipeline(id);
+  }
+}, 30_000);
 
 test("a multi-service recipe starts back ends first, wires ports, and stop kills every service", async () => {
   const api = `Bun.serve({ port: Number(process.env.API_PORT), fetch: () => new Response('api') })`;
@@ -1143,6 +1307,70 @@ test("a tcp service is ready once its port accepts connections", async () => {
   } finally {
     await stopPipeline(id);
   }
+}, 30_000);
+
+test("a second start of the same pipeline fails fast while the first runs", async () => {
+  const { id, start } = installRecipe({ install: "sleep 2" });
+  const first = start();
+  await Bun.sleep(500);
+  expect(existsSync(previewLockPath(id))).toBe(true);
+  const err = await startPreview(id).then(() => undefined, (e: Error) => e);
+  expect(err?.message).toBe(`a preview is already starting for pipeline ${id} (pid ${process.pid}); wait for it or run \`pipeship stop ${id}\``);
+  await first;
+  expect(existsSync(previewLockPath(id))).toBe(false);
+}, 30_000);
+
+test("a lock of a dead or unreadable holder is stale", async () => {
+  const { id, start } = installRecipe();
+  const dead = Bun.spawn(["true"]);
+  await dead.exited;
+  writeFileSync(previewLockPath(id), JSON.stringify({ pid: dead.pid, token: "old" }));
+  await start();
+  expect(existsSync(previewLockPath(id))).toBe(false);
+  writeFileSync(previewLockPath(id), "not json");
+  await start();
+  expect(existsSync(previewLockPath(id))).toBe(false);
+}, 30_000);
+
+test("a live foreign holder blocks a start and a dashboard start", async () => {
+  const { id } = installRecipe();
+  finishSteps(id);
+  const holder = Bun.spawn(["sleep", "60"]);
+  try {
+    writeFileSync(previewLockPath(id), JSON.stringify({ pid: holder.pid, token: "other" }));
+    const err = await startPreview(id).then(() => undefined, (e: Error) => e);
+    expect(err?.message).toContain(`(pid ${holder.pid})`);
+    expect(() => requestPreviewStart(id)).toThrow(`(pid ${holder.pid})`);
+    expect(readFileSync(previewLockPath(id), "utf8")).toContain("other");
+  } finally {
+    holder.kill();
+  }
+}, 30_000);
+
+test("stop during an install kills it", async () => {
+  const { id, wt } = installRecipe({ install: "mkdir -p node_modules; sleep 30 & echo $! > sleep.pid; wait" });
+  const began = Date.now();
+  const pending = startPreview(id, wt).then(() => undefined, (e: Error) => e);
+  await until(() => readState(id).preview?.install !== undefined && existsSync(join(wt, "sleep.pid")));
+  const sleeper = Number(readFileSync(join(wt, "sleep.pid"), "utf8"));
+  await stopPreview(id);
+  expect((await pending)?.message).toBe("stopped while starting");
+  expect(isAlive(sleeper)).toBe(false);
+  expect(readState(id).preview).toBeUndefined();
+  expect(existsSync(join(wt, INSTALL_STAMP))).toBe(false);
+  expect(existsSync(previewLockPath(id))).toBe(false);
+  expect(Date.now() - began).toBeLessThan(10_000);
+}, 30_000);
+
+test("a signal to the preview command stops its install", async () => {
+  const { id, wt } = installRecipe({ install: "mkdir -p node_modules; sleep 30 & echo $! > sleep.pid; wait" });
+  const child = Bun.spawn(["bun", join(import.meta.dir, "../src/cli.ts"), "preview", id, wt], { env: process.env, stderr: "ignore" });
+  await until(() => readState(id).preview?.install !== undefined && existsSync(join(wt, "sleep.pid")));
+  const sleeper = Number(readFileSync(join(wt, "sleep.pid"), "utf8"));
+  child.kill("SIGTERM");
+  expect(await child.exited).toBe(143);
+  await Bun.sleep(300);
+  expect(isAlive(sleeper)).toBe(false);
 }, 30_000);
 
 test("stop during a slow start leaves no service running", async () => {

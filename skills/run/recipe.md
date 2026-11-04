@@ -42,7 +42,8 @@ For a monorepo or a front with its own API, list one service per app. `install` 
 - A service gets another service's URL through `env`: `"API_URL": "http://localhost:${api.port}"`.
 - pipeship picks every port first: fronts from 3000, other kinds from 4000 (4400 is skipped).
 - Back ends and other kinds start first, then fronts. Each service must answer on its `readyPath` before the next one starts. A status below 500 is ready (a 404 counts); a 5xx, such as a compile error page, is not. `"ready": "tcp"` only waits for a connection to its port (for a database or queue).
-- If a port truly cannot be set, write `"fixedPort": <port>`. pipeship then refuses to start a second pipeline that shares a repo while one runs.
+- If a port truly cannot be set, write `"fixedPort": <port>`. pipeship then refuses to start a second pipeline that shares a repo while one runs. The port is still exported in `portEnv` (`PORT` by default) and as `${<service>.port}`.
+- pipeship skips an `install` when its command and the lockfile are unchanged since the last start. Keep the install idempotent (`npm ci`, `pnpm install --frozen-lockfile`): `--reinstall` runs it again.
 
 ## A database per pipeline
 

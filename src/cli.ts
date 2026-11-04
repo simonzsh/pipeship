@@ -39,8 +39,9 @@ const USAGE = `pipeship — state, test environments and dashboard for the /pipe
                                on the repo base, recorded on the top chunk; an open PR is only pushed; a repo with no remote is skipped;
                                the body gets a "Chunks" list, and a "Related PRs" list with several repos; prints the PR URLs
   recipe <repo>...             print the recipe used to start the app for these repos, or "none"
-  preview <id> [<worktree>] [--recipe file]   start the preview: each service runs from the top worktree of its repo;
-                               <worktree> overrides it for a one-repo pipeline; a --recipe that works is saved for the pipeline's repos
+  preview <id> [<worktree>] [--recipe file] [--reinstall]   start the preview: each service runs from the top worktree of its repo;
+                               <worktree> overrides it for a one-repo pipeline; a --recipe that works is saved for the pipeline's repos;
+                               an install is skipped when its lockfile and command are unchanged since the last start: --reinstall runs it anyway
   stop <id>                    stop the pipeline and its preview
   archive <id>                 archive a done, failed or stopped pipeline (its preview stops)
   unarchive <id>               unarchive an archived pipeline; its preview stays stopped
@@ -57,7 +58,7 @@ const { positionals, values } = parseArgs({
     repo: { type: "string", multiple: true }, title: { type: "string" }, name: { type: "string" }, source: { type: "string" },
     ref: { type: "string", multiple: true }, url: { type: "string", multiple: true }, mode: { type: "string" }, skip: { type: "string" },
     "body-file": { type: "string" }, worktree: { type: "string" }, branch: { type: "string" }, status: { type: "string" }, pr: { type: "string" },
-    port: { type: "string" }, host: { type: "string" }, recipe: { type: "string" }, reason: { type: "string" }, force: { type: "boolean" }, check: { type: "boolean" }, help: { type: "boolean", short: "h" },
+    port: { type: "string" }, host: { type: "string" }, recipe: { type: "string" }, reason: { type: "string" }, force: { type: "boolean" }, check: { type: "boolean" }, reinstall: { type: "boolean" }, help: { type: "boolean", short: "h" },
   },
 });
 const [command, ...args] = positionals;
@@ -184,7 +185,7 @@ async function main() {
     }
     case "preview": {
       const draft = values.recipe ? resolve(values.recipe) : undefined;
-      const state = await startPreview(need(args[0], "<id>"), args[1] ? resolve(args[1]) : undefined, draft);
+      const state = await startPreview(need(args[0], "<id>"), args[1] ? resolve(args[1]) : undefined, draft, { reinstall: values.reinstall });
       return print(previewLines(state.preview!).join("\n"));
     }
     case "stop":

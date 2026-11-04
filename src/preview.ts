@@ -1,5 +1,5 @@
 import { spawn, spawnSync } from "node:child_process";
-import { copyFileSync, existsSync, mkdirSync, openSync, readFileSync, closeSync } from "node:fs";
+import { closeSync, copyFileSync, existsSync, linkSync, mkdirSync, openSync, readFileSync, renameSync, rmSync, writeFileSync, writeSync } from "node:fs";
 import { readdir, rm } from "node:fs/promises";
 import { connect, createServer } from "node:net";
 import { createHash } from "node:crypto";
@@ -152,7 +152,7 @@ export function normalizeRecipe(recipe: Recipe, source = "recipe", repos?: strin
       name,
       kind: raw.kind,
       start: raw.start,
-      portEnv: raw.portEnv ?? (fixedPort === undefined ? "PORT" : undefined),
+      portEnv: raw.portEnv ?? "PORT",
       readyPath: raw.readyPath ?? "/",
       ready: raw.ready ?? "http",
       env: raw.env ?? {},
@@ -185,20 +185,29 @@ function portIsFree(port: number): Promise<boolean> {
 }
 
 // Every port is picked before anything starts, so env templates resolve and no two services share a port.
+// A preferred port (the previous run's) is tried first, so a restart keeps its URL.
 export async function pickPorts(
   services: Service[],
   isFree: (port: number) => Promise<boolean> = portIsFree,
   reserved: Set<number> = new Set(),
+  preferred: Record<string, number> = {},
 ): Promise<Record<string, number>> {
   const taken = new Set<number>([DASHBOARD_PORT, ...reserved]);
   for (const s of services) if (s.fixedPort !== undefined) taken.add(s.fixedPort);
   const ports: Record<string, number> = {};
   for (const s of services) {
-    if (s.fixedPort !== undefined) {
-      if (reserved.has(s.fixedPort) || !(await isFree(s.fixedPort))) throw new Error(`service "${s.name}": fixed port ${s.fixedPort} is already in use`);
-      ports[s.name] = s.fixedPort;
-      continue;
-    }
+    if (s.fixedPort === undefined) continue;
+    if (reserved.has(s.fixedPort) || !(await isFree(s.fixedPort))) throw new Error(`service "${s.name}": fixed port ${s.fixedPort} is already in use`);
+    ports[s.name] = s.fixedPort;
+  }
+  for (const s of services) {
+    const want = preferred[s.name];
+    if (s.fixedPort !== undefined || want === undefined || taken.has(want) || !(await isFree(want))) continue;
+    taken.add(want);
+    ports[s.name] = want;
+  }
+  for (const s of services) {
+    if (ports[s.name] !== undefined) continue;
     const from = s.kind === "front" ? FRONT_FIRST_PORT : BACK_FIRST_PORT;
     let found: number | undefined;
     for (let port = from; port < from + PORT_SCAN && found === undefined; port++) {
@@ -309,6 +318,12 @@ export async function killGroup(pid: number, startedAt?: string): Promise<void> 
   if (isAlive(pid)) throw new Error(`process ${pid} is still running`);
 }
 
+function killQuietly(pid: number, signal: NodeJS.Signals = "SIGKILL"): void {
+  try {
+    process.kill(-pid, signal);
+  } catch {}
+}
+
 function tail(path: string, lines = 30): string {
   return existsSync(path) ? readFileSync(path, "utf8").split("\n").slice(-lines).join("\n") : "";
 }
@@ -372,9 +387,119 @@ function copyAll(recipe: Recipe, services: Service[], homes: Homes): void {
   for (const svc of services) copyFrom(homes.get(svc.name)!.repo, homes.get(svc.name)!.worktree, svc.copyFiles);
 }
 
+export const previewLockPath = (id: string) => join(pipelineDir(id), "preview.lock");
+
+// Liveness is pid-based, never age-based: an install can run for minutes.
+function liveHolder(raw: string): number | undefined {
+  try {
+    const { pid, startedAt } = JSON.parse(raw) as { pid?: unknown; startedAt?: string };
+    return typeof pid === "number" && isAlive(pid, startedAt) ? pid : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+const readRaw = (path: string): string | undefined => {
+  try {
+    return readFileSync(path, "utf8");
+  } catch {
+    return undefined;
+  }
+};
+
+export function previewLockHolder(id: string): number | undefined {
+  const raw = readRaw(previewLockPath(id));
+  return raw === undefined ? undefined : liveHolder(raw);
+}
+
+const lockHeld = (id: string, pid: number | undefined) =>
+  new Error(`a preview is already starting for pipeline ${id} (pid ${pid ?? "unknown"}); wait for it or run \`pipeship stop ${id}\``);
+
+let lockSeq = 0;
+
+// One start per pipeline at a time, across processes. The file appears whole (link of a temp file), never half-written.
+function acquirePreviewLock(id: string): () => void {
+  const path = previewLockPath(id);
+  const seq = ++lockSeq;
+  const token = `${process.pid}-${Date.now()}-${seq}`;
+  const tmp = `${path}.${process.pid}.${seq}.tmp`;
+  mkdirSync(dirname(path), { recursive: true });
+  writeFileSync(tmp, JSON.stringify({ pid: process.pid, startedAt: processStart(process.pid), token }));
+  try {
+    let last: number | undefined;
+    for (let i = 0; i < 3; i++) {
+      try {
+        linkSync(tmp, path);
+        return () => {
+          const raw = readRaw(path);
+          if (raw !== undefined && (JSON.parse(raw) as { token?: string }).token === token) rmSync(path, { force: true });
+        };
+      } catch (err) {
+        if ((err as NodeJS.ErrnoException).code !== "EEXIST") throw err;
+      }
+      const raw = readRaw(path);
+      if (raw === undefined) continue;
+      last = liveHolder(raw);
+      if (last !== undefined) throw lockHeld(id, last);
+      // Move the dead lock aside first: only the process whose rename wins may retry, so two starters cannot both take it.
+      const aside = `${path}.stale.${token}`;
+      try {
+        renameSync(path, aside);
+      } catch {
+        continue;
+      }
+      if (readRaw(aside) !== raw) {
+        if (!existsSync(path)) renameSync(aside, path);
+        rmSync(aside, { force: true });
+        continue;
+      }
+      rmSync(aside, { force: true });
+    }
+    throw lockHeld(id, last);
+  } finally {
+    rmSync(tmp, { force: true });
+  }
+}
+
+// A stamp in node_modules goes away with it, so a deleted node_modules always reinstalls.
+export const INSTALL_STAMP = "node_modules/.pipeship-install-stamp";
+const LOCKFILES = ["package-lock.json", "pnpm-lock.yaml", "yarn.lock", "bun.lockb", "bun.lock"];
+const INSTALL_INPUTS = [...LOCKFILES, "package.json"];
+
+// Digest of the install command and the dependency files of `dir`; undefined with no lockfile (nothing to compare).
+export function installStamp(cmd: string, dir: string): string | undefined {
+  if (!LOCKFILES.some((name) => existsSync(join(dir, name)))) return undefined;
+  const hash = createHash("sha256").update(`${cmd}\0`);
+  for (const name of INSTALL_INPUTS) {
+    if (existsSync(join(dir, name))) hash.update(`${name}\0`).update(readFileSync(join(dir, name))).update("\0");
+  }
+  return hash.digest("hex");
+}
+
+function installUnchanged(cmd: string, dir: string): boolean {
+  const stamp = installStamp(cmd, dir);
+  const file = join(dir, INSTALL_STAMP);
+  return stamp !== undefined && existsSync(join(dir, "node_modules")) && existsSync(file) && readFileSync(file, "utf8").trim() === stamp;
+}
+
+// Computed after the install: one that rewrites the lockfile still matches on the next start.
+function writeInstallStamp(cmd: string, dir: string): void {
+  try {
+    const stamp = installStamp(cmd, dir);
+    if (stamp !== undefined && existsSync(join(dir, "node_modules"))) writeFileSync(join(dir, INSTALL_STAMP), `${stamp}\n`);
+  } catch {}
+}
+
 // Top-level install first, then each service's, once per worktree and command.
 // Async so a slow install does not block the dashboard's event loop.
-async function runInstalls(recipe: Recipe, services: Service[], homes: Homes, log: string, several: boolean): Promise<void> {
+async function runInstalls(
+  id: string,
+  recipe: Recipe,
+  services: Service[],
+  homes: Homes,
+  log: string,
+  opts: { several: boolean; reinstall: boolean },
+): Promise<void> {
   const first = homes.get(services[0]!.name)!;
   const jobs = [
     ...(recipe.install ? [{ cmd: recipe.install, ...first }] : []),
@@ -387,14 +512,49 @@ async function runInstalls(recipe: Recipe, services: Service[], homes: Homes, lo
       const key = `${job.worktree}\0${job.cmd}`;
       if (done.has(key)) continue;
       done.add(key);
-      const failed = await new Promise<boolean>((resolve) => {
-        const child = spawn("sh", ["-c", job.cmd], { cwd: job.worktree, stdio: ["ignore", fd, fd] });
-        child.on("error", () => resolve(true));
-        child.on("close", (code) => resolve(code !== 0));
-      });
-      if (failed) {
-        throw new Error(`install failed (${job.cmd})${several ? ` in ${repoName(job.repo)}` : ""}. Log tail:\n${tail(log)}`);
+      const where = opts.several ? ` in ${repoName(job.repo)}` : "";
+      if (!readState(id).preview) throw new Error("stopped while starting");
+      if (!opts.reinstall && installUnchanged(job.cmd, job.worktree)) {
+        const line = `install skipped (dependencies unchanged): ${job.cmd}${where}\n`;
+        writeSync(fd, line);
+        process.stderr.write(line);
+        continue;
       }
+      // A failed or killed install may leave node_modules half-done: no stamp until this one succeeds.
+      rmSync(join(job.worktree, INSTALL_STAMP), { force: true });
+      const { failed, killed } = await new Promise<{ failed: boolean; killed: boolean }>((resolve) => {
+        // Own process group, so a stop kills the install and the workers it spawned.
+        const child = spawn("sh", ["-c", job.cmd], { cwd: job.worktree, detached: true, stdio: ["ignore", fd, fd] });
+        child.on("error", () => resolve({ failed: true, killed: false }));
+        const forward = (code: number) => (signal: NodeJS.Signals) => {
+          killQuietly(child.pid!, signal);
+          process.exit(code);
+        };
+        const onInt = forward(130);
+        const onTerm = forward(143);
+        child.on("close", (code, signal) => {
+          process.off("SIGINT", onInt);
+          process.off("SIGTERM", onTerm);
+          resolve({ failed: code !== 0, killed: signal !== null || (code ?? 0) >= 128 });
+        });
+        if (child.pid === undefined) return;
+        process.once("SIGINT", onInt);
+        process.once("SIGTERM", onTerm);
+        const pid = child.pid;
+        const at = processStart(pid);
+        updateState(id, (s) => {
+          if (s.preview) s.preview.install = { pid, ...(at && { startedAt: at }) };
+          else killQuietly(pid);
+        });
+      });
+      updateState(id, (s) => {
+        if (s.preview) delete s.preview.install;
+      });
+      // A stop kills the install before it clears the preview: give it a moment so the kill reads as a stop.
+      for (let i = 0; failed && killed && i < 40 && readState(id).preview; i++) await Bun.sleep(50);
+      if (!readState(id).preview) throw new Error("stopped while starting");
+      if (failed) throw new Error(`install failed (${job.cmd})${where}. Log tail:\n${tail(log)}`);
+      writeInstallStamp(job.cmd, job.worktree);
     }
   } finally {
     closeSync(fd);
@@ -402,9 +562,24 @@ async function runInstalls(recipe: Recipe, services: Service[], homes: Homes, lo
 }
 
 // `draft` is a recipe written by the agent; it is saved for the repos only once the app starts.
-export async function startPreview(id: string, worktree?: string, draft?: string): Promise<State> {
+export interface StartOptions {
+  reinstall?: boolean; // run every install even when the dependencies are unchanged
+}
+
+export async function startPreview(id: string, worktree?: string, draft?: string, opts: StartOptions = {}): Promise<State> {
+  readState(id); // an unknown id fails here, before the lock creates its directory
+  const release = acquirePreviewLock(id);
+  try {
+    return await startPreviewLocked(id, worktree, draft, opts);
+  } finally {
+    release();
+  }
+}
+
+async function startPreviewLocked(id: string, worktree: string | undefined, draft: string | undefined, opts: StartOptions): Promise<State> {
   let state = readState(id);
-  if (state.preview && previewAlive(state.preview)) await stopPreview(id);
+  // Also when no service runs: an install orphaned by a killed CLI may still run and must not overlap the next one.
+  if (state.preview) await killPreview(id);
   state = readState(id);
 
   const { repos } = state;
@@ -446,7 +621,7 @@ export async function startPreview(id: string, worktree?: string, draft?: string
 
   // Reserve the ports before the (slow) install, so another pipeline cannot pick them meanwhile.
   const installLog = join(pipelineDir(id), "preview.log");
-  const ports = await pickPorts(services, portIsFree, reservedPorts(id));
+  const ports = await pickPorts(services, portIsFree, reservedPorts(id), state.lastPorts);
   const main = mainService(services);
   const order = startOrder(services);
   const mainUrl = `http://localhost:${ports[main.name]}`;
@@ -462,6 +637,7 @@ export async function startPreview(id: string, worktree?: string, draft?: string
     ({ url: mainUrl, port: ports[main.name]!, pid: mainPid, log: installLog, services: planned });
   updateState(id, (s) => {
     s.preview = preview();
+    s.lastPorts = { ...ports };
   });
 
   const started: PreviewService[] = [];
@@ -480,7 +656,7 @@ export async function startPreview(id: string, worktree?: string, draft?: string
 
   try {
     copyAll(recipe, services, homes);
-    await runInstalls(recipe, services, homes, installLog, repos.length > 1);
+    await runInstalls(id, recipe, services, homes, installLog, { several: repos.length > 1, reinstall: opts.reinstall === true });
 
     for (const svc of order) {
       // A stop during a slow install or readiness wait must not leave a service behind.
@@ -534,11 +710,16 @@ export async function startPreview(id: string, worktree?: string, draft?: string
 
 export async function stopPreview(id: string): Promise<void> {
   if (startsInFlight.has(id)) stoppedMidStart.add(id);
+  await killPreview(id);
+}
+
+// Also kills the install a start is running. Neither the lock nor the in-flight marks: a start in another process must see a stop.
+async function killPreview(id: string): Promise<void> {
   const errors: string[] = [];
   const killed = new Set<number>();
   const killAll = async (preview: Preview | undefined) => {
     if (!preview) return;
-    for (const { pid, startedAt } of previewProcs(preview).reverse()) {
+    for (const { pid, startedAt } of [...previewProcs(preview), ...(preview.install ? [preview.install] : [])].reverse()) {
       if (pid === undefined || killed.has(pid) || !isAlive(pid, startedAt)) continue;
       killed.add(pid);
       try {
@@ -584,6 +765,8 @@ export function requestPreviewStart(id: string): { state: State; done: Promise<v
   const state = readStateOr404(id);
   if (state.status !== "done") throw new PreviewError("the pipeline is not done: no preview to start", 409);
   if (startsInFlight.has(id)) throw new PreviewError("a preview is already starting", 409);
+  const holder = previewLockHolder(id);
+  if (holder !== undefined) throw new PreviewError(lockHeld(id, holder).message, 409);
   // Before the guard is set: a throw here must not leave the id marked in flight.
   const cleared = updateState(id, (s) => {
     delete s.previewError;
