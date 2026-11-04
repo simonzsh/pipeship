@@ -85,7 +85,10 @@ export interface State {
   step: StepName;
   steps: { name: StepName; status: StepStatus; startedAt?: string; endedAt?: string }[];
   chunks: Chunk[];
-  preview?: { url: string; port: number; pid?: number; log: string; services?: PreviewService[] };
+  preview?: {
+    url: string; port: number; pid?: number; log: string; services?: PreviewService[];
+    install?: { pid: number; startedAt?: string }; // the install running now (own process group); gone when it exits
+  };
   lastPorts?: Record<string, number>; // service name -> port of the last planned preview; survives a stop
   session?: Session;
   previewError?: string; // why the last dashboard "Start preview" failed

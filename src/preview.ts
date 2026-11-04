@@ -1,5 +1,5 @@
 import { spawn, spawnSync } from "node:child_process";
-import { closeSync, copyFileSync, existsSync, mkdirSync, openSync, readFileSync, writeFileSync, writeSync } from "node:fs";
+import { closeSync, copyFileSync, existsSync, linkSync, mkdirSync, openSync, readFileSync, rmSync, writeFileSync, writeSync } from "node:fs";
 import { readdir, rm } from "node:fs/promises";
 import { connect, createServer } from "node:net";
 import { createHash } from "node:crypto";
@@ -318,6 +318,12 @@ export async function killGroup(pid: number, startedAt?: string): Promise<void> 
   if (isAlive(pid)) throw new Error(`process ${pid} is still running`);
 }
 
+function killQuietly(pid: number, signal: NodeJS.Signals = "SIGKILL"): void {
+  try {
+    process.kill(-pid, signal);
+  } catch {}
+}
+
 function tail(path: string, lines = 30): string {
   return existsSync(path) ? readFileSync(path, "utf8").split("\n").slice(-lines).join("\n") : "";
 }
@@ -381,6 +387,68 @@ function copyAll(recipe: Recipe, services: Service[], homes: Homes): void {
   for (const svc of services) copyFrom(homes.get(svc.name)!.repo, homes.get(svc.name)!.worktree, svc.copyFiles);
 }
 
+export const previewLockPath = (id: string) => join(pipelineDir(id), "preview.lock");
+
+// Liveness is pid-based, never age-based: an install can run for minutes.
+function liveHolder(raw: string): number | undefined {
+  try {
+    const { pid, startedAt } = JSON.parse(raw) as { pid?: unknown; startedAt?: string };
+    return typeof pid === "number" && isAlive(pid, startedAt) ? pid : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+const readRaw = (path: string): string | undefined => {
+  try {
+    return readFileSync(path, "utf8");
+  } catch {
+    return undefined;
+  }
+};
+
+export function previewLockHolder(id: string): number | undefined {
+  const raw = readRaw(previewLockPath(id));
+  return raw === undefined ? undefined : liveHolder(raw);
+}
+
+const lockHeld = (id: string, pid: number | undefined) =>
+  new Error(`a preview is already starting for pipeline ${id} (pid ${pid ?? "unknown"}); wait for it or run \`pipeship stop ${id}\``);
+
+let lockSeq = 0;
+
+// One start per pipeline at a time, across processes. The file appears whole (link of a temp file), never half-written.
+function acquirePreviewLock(id: string): () => void {
+  const path = previewLockPath(id);
+  const seq = ++lockSeq;
+  const token = `${process.pid}-${Date.now()}-${seq}`;
+  const tmp = `${path}.${process.pid}.${seq}.tmp`;
+  mkdirSync(dirname(path), { recursive: true });
+  writeFileSync(tmp, JSON.stringify({ pid: process.pid, startedAt: processStart(process.pid), token }));
+  try {
+    let last: number | undefined;
+    for (let i = 0; i < 3; i++) {
+      try {
+        linkSync(tmp, path);
+        return () => {
+          const raw = readRaw(path);
+          if (raw !== undefined && (JSON.parse(raw) as { token?: string }).token === token) rmSync(path, { force: true });
+        };
+      } catch (err) {
+        if ((err as NodeJS.ErrnoException).code !== "EEXIST") throw err;
+      }
+      const raw = readRaw(path);
+      if (raw === undefined) continue;
+      last = liveHolder(raw);
+      if (last !== undefined) throw lockHeld(id, last);
+      if (readRaw(path) === raw) rmSync(path, { force: true });
+    }
+    throw lockHeld(id, last);
+  } finally {
+    rmSync(tmp, { force: true });
+  }
+}
+
 // A stamp in node_modules goes away with it, so a deleted node_modules always reinstalls.
 export const INSTALL_STAMP = "node_modules/.pipeship-install-stamp";
 export const INSTALL_INPUTS = ["package-lock.json", "pnpm-lock.yaml", "yarn.lock", "bun.lockb", "bun.lock", "package.json"];
@@ -439,11 +507,36 @@ async function runInstalls(
         process.stderr.write(line);
         continue;
       }
-      const failed = await new Promise<boolean>((resolve) => {
-        const child = spawn("sh", ["-c", job.cmd], { cwd: job.worktree, stdio: ["ignore", fd, fd] });
-        child.on("error", () => resolve(true));
-        child.on("close", (code) => resolve(code !== 0));
+      const { failed, killed } = await new Promise<{ failed: boolean; killed: boolean }>((resolve) => {
+        // Own process group, so a stop kills the install and the workers it spawned.
+        const child = spawn("sh", ["-c", job.cmd], { cwd: job.worktree, detached: true, stdio: ["ignore", fd, fd] });
+        child.on("error", () => resolve({ failed: true, killed: false }));
+        const forward = (code: number) => (signal: NodeJS.Signals) => {
+          killQuietly(child.pid!, signal);
+          process.exit(code);
+        };
+        const onInt = forward(130);
+        const onTerm = forward(143);
+        child.on("close", (code, signal) => {
+          process.off("SIGINT", onInt);
+          process.off("SIGTERM", onTerm);
+          resolve({ failed: code !== 0, killed: signal !== null || (code ?? 0) >= 128 });
+        });
+        if (child.pid === undefined) return;
+        process.once("SIGINT", onInt);
+        process.once("SIGTERM", onTerm);
+        const pid = child.pid;
+        const at = processStart(pid);
+        updateState(id, (s) => {
+          if (s.preview) s.preview.install = { pid, ...(at && { startedAt: at }) };
+          else killQuietly(pid);
+        });
       });
+      updateState(id, (s) => {
+        if (s.preview) delete s.preview.install;
+      });
+      // A stop kills the install before it clears the preview: give it a moment so the kill reads as a stop.
+      for (let i = 0; failed && killed && i < 40 && readState(id).preview; i++) await Bun.sleep(50);
       if (!readState(id).preview) throw new Error("stopped while starting");
       if (failed) throw new Error(`install failed (${job.cmd})${where}. Log tail:\n${tail(log)}`);
       writeInstallStamp(job.cmd, job.worktree);
@@ -459,8 +552,18 @@ export interface StartOptions {
 }
 
 export async function startPreview(id: string, worktree?: string, draft?: string, opts: StartOptions = {}): Promise<State> {
+  readState(id); // an unknown id fails here, before the lock creates its directory
+  const release = acquirePreviewLock(id);
+  try {
+    return await startPreviewLocked(id, worktree, draft, opts);
+  } finally {
+    release();
+  }
+}
+
+async function startPreviewLocked(id: string, worktree: string | undefined, draft: string | undefined, opts: StartOptions): Promise<State> {
   let state = readState(id);
-  if (state.preview && previewAlive(state.preview)) await stopPreview(id);
+  if (state.preview && previewAlive(state.preview)) await killPreview(id);
   state = readState(id);
 
   const { repos } = state;
@@ -591,11 +694,16 @@ export async function startPreview(id: string, worktree?: string, draft?: string
 
 export async function stopPreview(id: string): Promise<void> {
   if (startsInFlight.has(id)) stoppedMidStart.add(id);
+  await killPreview(id);
+}
+
+// Also kills the install a start is running. Neither the lock nor the in-flight marks: a start in another process must see a stop.
+async function killPreview(id: string): Promise<void> {
   const errors: string[] = [];
   const killed = new Set<number>();
   const killAll = async (preview: Preview | undefined) => {
     if (!preview) return;
-    for (const { pid, startedAt } of previewProcs(preview).reverse()) {
+    for (const { pid, startedAt } of [...previewProcs(preview), ...(preview.install ? [preview.install] : [])].reverse()) {
       if (pid === undefined || killed.has(pid) || !isAlive(pid, startedAt)) continue;
       killed.add(pid);
       try {
@@ -641,6 +749,8 @@ export function requestPreviewStart(id: string): { state: State; done: Promise<v
   const state = readStateOr404(id);
   if (state.status !== "done") throw new PreviewError("the pipeline is not done: no preview to start", 409);
   if (startsInFlight.has(id)) throw new PreviewError("a preview is already starting", 409);
+  const holder = previewLockHolder(id);
+  if (holder !== undefined) throw new PreviewError(lockHeld(id, holder).message, 409);
   // Before the guard is set: a throw here must not leave the id marked in flight.
   const cleared = updateState(id, (s) => {
     delete s.previewError;

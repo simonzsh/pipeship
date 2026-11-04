@@ -7,7 +7,7 @@ import {
 } from "../src/state.ts";
 import { chunksOf, diffRange, holdingPr, openPrChunks, repoName, repoChunks, sharesRepo, stackRefusal, topChunk } from "../src/repos.ts";
 import {
-  archiveIfAllMerged, archivePipeline, DASHBOARD_PORT, deleteArchivedPipelines, deletePipeline, findRecipe, getDeleteRun, INSTALL_STAMP, installStamp, isAlive, isDeleting, killGroup, mainService, normalizeRecipe, pickPorts, previewLines, processStart, resolveEnv,
+  archiveIfAllMerged, archivePipeline, DASHBOARD_PORT, deleteArchivedPipelines, deletePipeline, findRecipe, getDeleteRun, INSTALL_STAMP, installStamp, isAlive, isDeleting, killGroup, mainService, normalizeRecipe, pickPorts, previewLines, previewLockPath, processStart, resolveEnv,
   requestPreviewStart, savedRecipePath, startDeleteArchived, startOrder, startPreview, stopPipeline, stopPreview, stopPreviewAndSettle, type Service, unarchivePipeline, waitReady,
 } from "../src/preview.ts";
 import { diffTotals, parseDiff } from "../src/diff.ts";
@@ -1270,6 +1270,71 @@ test("a tcp service is ready once its port accepts connections", async () => {
   } finally {
     await stopPipeline(id);
   }
+}, 30_000);
+
+test("a second start of the same pipeline fails fast while the first runs", async () => {
+  const { id, start } = installRecipe({ install: "sleep 2" });
+  const first = start();
+  await Bun.sleep(500);
+  expect(existsSync(previewLockPath(id))).toBe(true);
+  const err = await startPreview(id).then(() => undefined, (e: Error) => e);
+  expect(err?.message).toBe(`a preview is already starting for pipeline ${id} (pid ${process.pid}); wait for it or run \`pipeship stop ${id}\``);
+  await first;
+  expect(existsSync(previewLockPath(id))).toBe(false);
+}, 30_000);
+
+test("a lock of a dead or unreadable holder is stale", async () => {
+  const { id, start } = installRecipe();
+  const dead = Bun.spawn(["true"]);
+  await dead.exited;
+  writeFileSync(previewLockPath(id), JSON.stringify({ pid: dead.pid, token: "old" }));
+  await start();
+  expect(existsSync(previewLockPath(id))).toBe(false);
+  writeFileSync(previewLockPath(id), "not json");
+  await start();
+  expect(existsSync(previewLockPath(id))).toBe(false);
+}, 30_000);
+
+test("a live foreign holder blocks a start and a dashboard start", async () => {
+  const { id } = installRecipe();
+  finishSteps(id);
+  const holder = Bun.spawn(["sleep", "60"]);
+  try {
+    writeFileSync(previewLockPath(id), JSON.stringify({ pid: holder.pid, token: "other" }));
+    const err = await startPreview(id).then(() => undefined, (e: Error) => e);
+    expect(err?.message).toContain(`(pid ${holder.pid})`);
+    expect(() => requestPreviewStart(id)).toThrow(`(pid ${holder.pid})`);
+    expect(readFileSync(previewLockPath(id), "utf8")).toContain("other");
+  } finally {
+    holder.kill();
+  }
+}, 30_000);
+
+test("stop during an install kills it", async () => {
+  const { id, wt } = installRecipe({ install: "mkdir -p node_modules; sleep 30 & echo $! > sleep.pid; wait" });
+  const began = Date.now();
+  const pending = startPreview(id, wt).then(() => undefined, (e: Error) => e);
+  await Bun.sleep(1000);
+  expect(readState(id).preview!.install).toBeDefined();
+  const sleeper = Number(readFileSync(join(wt, "sleep.pid"), "utf8"));
+  await stopPreview(id);
+  expect((await pending)?.message).toBe("stopped while starting");
+  expect(isAlive(sleeper)).toBe(false);
+  expect(readState(id).preview).toBeUndefined();
+  expect(existsSync(join(wt, INSTALL_STAMP))).toBe(false);
+  expect(existsSync(previewLockPath(id))).toBe(false);
+  expect(Date.now() - began).toBeLessThan(10_000);
+}, 30_000);
+
+test("a signal to the preview command stops its install", async () => {
+  const { id, wt } = installRecipe({ install: "mkdir -p node_modules; sleep 30 & echo $! > sleep.pid; wait" });
+  const child = Bun.spawn(["bun", join(import.meta.dir, "../src/cli.ts"), "preview", id, wt], { env: process.env, stderr: "ignore" });
+  await Bun.sleep(1500);
+  const sleeper = Number(readFileSync(join(wt, "sleep.pid"), "utf8"));
+  child.kill("SIGTERM");
+  expect(await child.exited).toBe(143);
+  await Bun.sleep(300);
+  expect(isAlive(sleeper)).toBe(false);
 }, 30_000);
 
 test("stop during a slow start leaves no service running", async () => {
