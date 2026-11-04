@@ -1,5 +1,5 @@
 import { spawn, spawnSync } from "node:child_process";
-import { closeSync, copyFileSync, existsSync, linkSync, mkdirSync, openSync, readFileSync, rmSync, writeFileSync, writeSync } from "node:fs";
+import { closeSync, copyFileSync, existsSync, linkSync, mkdirSync, openSync, readFileSync, renameSync, rmSync, writeFileSync, writeSync } from "node:fs";
 import { readdir, rm } from "node:fs/promises";
 import { connect, createServer } from "node:net";
 import { createHash } from "node:crypto";
@@ -441,7 +441,19 @@ function acquirePreviewLock(id: string): () => void {
       if (raw === undefined) continue;
       last = liveHolder(raw);
       if (last !== undefined) throw lockHeld(id, last);
-      if (readRaw(path) === raw) rmSync(path, { force: true });
+      // Move the dead lock aside first: only the process whose rename wins may retry, so two starters cannot both take it.
+      const aside = `${path}.stale.${token}`;
+      try {
+        renameSync(path, aside);
+      } catch {
+        continue;
+      }
+      if (readRaw(aside) !== raw) {
+        if (!existsSync(path)) renameSync(aside, path);
+        rmSync(aside, { force: true });
+        continue;
+      }
+      rmSync(aside, { force: true });
     }
     throw lockHeld(id, last);
   } finally {
@@ -508,6 +520,8 @@ async function runInstalls(
         process.stderr.write(line);
         continue;
       }
+      // A failed or killed install may leave node_modules half-done: no stamp until this one succeeds.
+      rmSync(join(job.worktree, INSTALL_STAMP), { force: true });
       const { failed, killed } = await new Promise<{ failed: boolean; killed: boolean }>((resolve) => {
         // Own process group, so a stop kills the install and the workers it spawned.
         const child = spawn("sh", ["-c", job.cmd], { cwd: job.worktree, detached: true, stdio: ["ignore", fd, fd] });
@@ -564,7 +578,8 @@ export async function startPreview(id: string, worktree?: string, draft?: string
 
 async function startPreviewLocked(id: string, worktree: string | undefined, draft: string | undefined, opts: StartOptions): Promise<State> {
   let state = readState(id);
-  if (state.preview && previewAlive(state.preview)) await killPreview(id);
+  // Also when no service runs: an install orphaned by a killed CLI may still run and must not overlap the next one.
+  if (state.preview) await killPreview(id);
   state = readState(id);
 
   const { repos } = state;

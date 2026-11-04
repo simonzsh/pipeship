@@ -482,6 +482,43 @@ test("a failed install writes no stamp", async () => {
   expect(existsSync(join(wt, INSTALL_STAMP))).toBe(false);
 }, 30_000);
 
+test("a failed install after a change leaves no old stamp to match", async () => {
+  const { wt, start, runs } = installRecipe({ install: "mkdir -p node_modules && echo x >> count && test ! -f broken" });
+  await start();
+  expect(runs()).toBe(1);
+  writeFileSync(join(wt, "package-lock.json"), '{"v":2}');
+  writeFileSync(join(wt, "broken"), "");
+  await start();
+  expect(runs()).toBe(2);
+  // Back to the first lockfile: the old stamp must not skip over the half-done node_modules.
+  writeFileSync(join(wt, "package-lock.json"), "{}");
+  rmSync(join(wt, "broken"));
+  await start();
+  expect(runs()).toBe(3);
+}, 30_000);
+
+test("a new start kills an install left running by a killed CLI", async () => {
+  const { id, wt } = installRecipe();
+  // Own process group, like a real install.
+  const orphan = spawn("sleep", ["60"], { detached: true, stdio: "ignore" });
+  const exited = new Promise((resolve) => orphan.on("exit", resolve));
+  try {
+    updateState(id, (s) => {
+      s.preview = { url: "http://localhost:1", port: 1, log: "x", services: [], install: { pid: orphan.pid! } };
+    });
+    await startPreview(id, wt).catch(() => undefined);
+    await exited;
+    expect(isAlive(orphan.pid!)).toBe(false);
+  } finally {
+    orphan.kill("SIGKILL");
+  }
+}, 30_000);
+
+const until = async (ok: () => boolean) => {
+  for (let i = 0; i < 200 && !ok(); i++) await Bun.sleep(50);
+  expect(ok()).toBe(true);
+};
+
 test("services sharing one install log one skip", async () => {
   const install = "mkdir -p node_modules && echo x >> count";
   const { id, start, runs } = installRecipe({
@@ -1314,8 +1351,7 @@ test("stop during an install kills it", async () => {
   const { id, wt } = installRecipe({ install: "mkdir -p node_modules; sleep 30 & echo $! > sleep.pid; wait" });
   const began = Date.now();
   const pending = startPreview(id, wt).then(() => undefined, (e: Error) => e);
-  await Bun.sleep(1000);
-  expect(readState(id).preview!.install).toBeDefined();
+  await until(() => readState(id).preview?.install !== undefined && existsSync(join(wt, "sleep.pid")));
   const sleeper = Number(readFileSync(join(wt, "sleep.pid"), "utf8"));
   await stopPreview(id);
   expect((await pending)?.message).toBe("stopped while starting");
@@ -1329,7 +1365,7 @@ test("stop during an install kills it", async () => {
 test("a signal to the preview command stops its install", async () => {
   const { id, wt } = installRecipe({ install: "mkdir -p node_modules; sleep 30 & echo $! > sleep.pid; wait" });
   const child = Bun.spawn(["bun", join(import.meta.dir, "../src/cli.ts"), "preview", id, wt], { env: process.env, stderr: "ignore" });
-  await Bun.sleep(1500);
+  await until(() => readState(id).preview?.install !== undefined && existsSync(join(wt, "sleep.pid")));
   const sleeper = Number(readFileSync(join(wt, "sleep.pid"), "utf8"));
   child.kill("SIGTERM");
   expect(await child.exited).toBe(143);
