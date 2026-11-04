@@ -113,7 +113,9 @@ For a ticket that spans several repos, give each service its `repo` (the repo's 
 }
 ```
 
-A service that cannot take its port from the environment can set `"fixedPort": <port>`. pipeship then refuses to start a second pipeline that shares a repo while one test environment runs.
+A service that cannot take its port from the environment can set `"fixedPort": <port>`. pipeship then refuses to start a second pipeline that shares a repo while one test environment runs. The port is still exported in `portEnv` (`PORT` by default) and as `${<service>.port}`.
+
+A start skips an `install` when its command and the lockfile (and `package.json`) in its worktree are unchanged since the last successful install, and `node_modules` still exists. It logs `install skipped (dependencies unchanged)`. Run `pipeship preview <id> --reinstall` to force it. A start tries the ports of the previous run first, so the URLs stay the same when those ports are free. One start runs per pipeline at a time: a second one fails and names the pid of the first. A stop during a start also kills the running install.
 
 ## Review
 
