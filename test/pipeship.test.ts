@@ -19,6 +19,7 @@ import {
 import { startPrSync, syncPrStatuses } from "../src/pr-sync.ts";
 import { openPrs } from "../src/pr.ts";
 import { spawn, spawnSync } from "node:child_process";
+import { createServer, type AddressInfo } from "node:net";
 import { Database } from "bun:sqlite";
 import { detectSession, findT3Thread, type ReadProc } from "../src/session.ts";
 import { groupByStatus } from "../src/dashboard/groups.ts";
@@ -961,8 +962,31 @@ test("recipe validation errors", () => {
   expect(normalizeRecipe({ start: "bun dev" })).toEqual([
     { name: "app", kind: "front", start: "bun dev", portEnv: "PORT", readyPath: "/", ready: "http", env: {} },
   ]);
-  expect(normalizeRecipe({ services: [{ ...ok, fixedPort: 5432 }] })[0]!.portEnv).toBeUndefined();
+  expect(normalizeRecipe({ services: [{ ...ok, fixedPort: 5432 }] })[0]!.portEnv).toBe("PORT");
+  expect(normalizeRecipe({ services: [{ ...ok, fixedPort: 5432, portEnv: "DB_PORT" }] })[0]!.portEnv).toBe("DB_PORT");
 });
+
+test("a fixedPort service gets its port in PORT", async () => {
+  const free = await new Promise<number>((resolve) => {
+    const server = createServer().listen(0, () => {
+      const { port } = server.address() as AddressInfo;
+      server.close(() => resolve(port));
+    });
+  });
+  writeFileSync(
+    join(repo, ".pipeship.json"),
+    JSON.stringify({ services: [{ name: "app", kind: "back", fixedPort: free, start: `bun -e "Bun.serve({ port: Number(process.env.PORT), fetch: () => new Response('ok') })"` }] }),
+  );
+  const { id } = createPipeline({ repos: [{ path: repo }], title: "t", source: "text" });
+  finishBeforePreview(id);
+  try {
+    const state = await startPreview(id, repo);
+    expect(state.preview!.port).toBe(free);
+    expect(await (await fetch(`http://localhost:${free}`)).text()).toBe("ok");
+  } finally {
+    await stopPipeline(id);
+  }
+}, 30_000);
 
 test("a multi-service recipe starts back ends first, wires ports, and stop kills every service", async () => {
   const api = `Bun.serve({ port: Number(process.env.API_PORT), fetch: () => new Response('api') })`;

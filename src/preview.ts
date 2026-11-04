@@ -152,7 +152,7 @@ export function normalizeRecipe(recipe: Recipe, source = "recipe", repos?: strin
       name,
       kind: raw.kind,
       start: raw.start,
-      portEnv: raw.portEnv ?? (fixedPort === undefined ? "PORT" : undefined),
+      portEnv: raw.portEnv ?? "PORT",
       readyPath: raw.readyPath ?? "/",
       ready: raw.ready ?? "http",
       env: raw.env ?? {},
