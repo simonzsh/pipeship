@@ -1,5 +1,5 @@
 import { spawn, spawnSync } from "node:child_process";
-import { copyFileSync, existsSync, mkdirSync, openSync, readFileSync, closeSync } from "node:fs";
+import { closeSync, copyFileSync, existsSync, mkdirSync, openSync, readFileSync, writeFileSync, writeSync } from "node:fs";
 import { readdir, rm } from "node:fs/promises";
 import { connect, createServer } from "node:net";
 import { createHash } from "node:crypto";
@@ -381,9 +381,44 @@ function copyAll(recipe: Recipe, services: Service[], homes: Homes): void {
   for (const svc of services) copyFrom(homes.get(svc.name)!.repo, homes.get(svc.name)!.worktree, svc.copyFiles);
 }
 
+// A stamp in node_modules goes away with it, so a deleted node_modules always reinstalls.
+export const INSTALL_STAMP = "node_modules/.pipeship-install-stamp";
+export const INSTALL_INPUTS = ["package-lock.json", "pnpm-lock.yaml", "yarn.lock", "bun.lockb", "bun.lock", "package.json"];
+
+// Digest of the install command and the dependency files of `dir`; undefined with no lockfile (nothing to compare).
+export function installStamp(cmd: string, dir: string): string | undefined {
+  if (!INSTALL_INPUTS.slice(0, 5).some((name) => existsSync(join(dir, name)))) return undefined;
+  const hash = createHash("sha256").update(`${cmd}\0`);
+  for (const name of INSTALL_INPUTS) {
+    if (existsSync(join(dir, name))) hash.update(`${name}\0`).update(readFileSync(join(dir, name))).update("\0");
+  }
+  return hash.digest("hex");
+}
+
+function installUnchanged(cmd: string, dir: string): boolean {
+  const stamp = installStamp(cmd, dir);
+  const file = join(dir, INSTALL_STAMP);
+  return stamp !== undefined && existsSync(join(dir, "node_modules")) && existsSync(file) && readFileSync(file, "utf8").trim() === stamp;
+}
+
+// Computed after the install: one that rewrites the lockfile still matches on the next start.
+function writeInstallStamp(cmd: string, dir: string): void {
+  try {
+    const stamp = installStamp(cmd, dir);
+    if (stamp !== undefined && existsSync(join(dir, "node_modules"))) writeFileSync(join(dir, INSTALL_STAMP), `${stamp}\n`);
+  } catch {}
+}
+
 // Top-level install first, then each service's, once per worktree and command.
 // Async so a slow install does not block the dashboard's event loop.
-async function runInstalls(recipe: Recipe, services: Service[], homes: Homes, log: string, several: boolean): Promise<void> {
+async function runInstalls(
+  id: string,
+  recipe: Recipe,
+  services: Service[],
+  homes: Homes,
+  log: string,
+  opts: { several: boolean; reinstall: boolean },
+): Promise<void> {
   const first = homes.get(services[0]!.name)!;
   const jobs = [
     ...(recipe.install ? [{ cmd: recipe.install, ...first }] : []),
@@ -396,14 +431,22 @@ async function runInstalls(recipe: Recipe, services: Service[], homes: Homes, lo
       const key = `${job.worktree}\0${job.cmd}`;
       if (done.has(key)) continue;
       done.add(key);
+      const where = opts.several ? ` in ${repoName(job.repo)}` : "";
+      if (!readState(id).preview) throw new Error("stopped while starting");
+      if (!opts.reinstall && installUnchanged(job.cmd, job.worktree)) {
+        const line = `install skipped (dependencies unchanged): ${job.cmd}${where}\n`;
+        writeSync(fd, line);
+        process.stderr.write(line);
+        continue;
+      }
       const failed = await new Promise<boolean>((resolve) => {
         const child = spawn("sh", ["-c", job.cmd], { cwd: job.worktree, stdio: ["ignore", fd, fd] });
         child.on("error", () => resolve(true));
         child.on("close", (code) => resolve(code !== 0));
       });
-      if (failed) {
-        throw new Error(`install failed (${job.cmd})${several ? ` in ${repoName(job.repo)}` : ""}. Log tail:\n${tail(log)}`);
-      }
+      if (!readState(id).preview) throw new Error("stopped while starting");
+      if (failed) throw new Error(`install failed (${job.cmd})${where}. Log tail:\n${tail(log)}`);
+      writeInstallStamp(job.cmd, job.worktree);
     }
   } finally {
     closeSync(fd);
@@ -411,7 +454,11 @@ async function runInstalls(recipe: Recipe, services: Service[], homes: Homes, lo
 }
 
 // `draft` is a recipe written by the agent; it is saved for the repos only once the app starts.
-export async function startPreview(id: string, worktree?: string, draft?: string): Promise<State> {
+export interface StartOptions {
+  reinstall?: boolean; // run every install even when the dependencies are unchanged
+}
+
+export async function startPreview(id: string, worktree?: string, draft?: string, opts: StartOptions = {}): Promise<State> {
   let state = readState(id);
   if (state.preview && previewAlive(state.preview)) await stopPreview(id);
   state = readState(id);
@@ -490,7 +537,7 @@ export async function startPreview(id: string, worktree?: string, draft?: string
 
   try {
     copyAll(recipe, services, homes);
-    await runInstalls(recipe, services, homes, installLog, repos.length > 1);
+    await runInstalls(id, recipe, services, homes, installLog, { several: repos.length > 1, reinstall: opts.reinstall === true });
 
     for (const svc of order) {
       // A stop during a slow install or readiness wait must not leave a service behind.

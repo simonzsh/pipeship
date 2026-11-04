@@ -7,7 +7,7 @@ import {
 } from "../src/state.ts";
 import { chunksOf, diffRange, holdingPr, openPrChunks, repoName, repoChunks, sharesRepo, stackRefusal, topChunk } from "../src/repos.ts";
 import {
-  archiveIfAllMerged, archivePipeline, DASHBOARD_PORT, deleteArchivedPipelines, deletePipeline, findRecipe, getDeleteRun, isAlive, isDeleting, killGroup, mainService, normalizeRecipe, pickPorts, previewLines, processStart, resolveEnv,
+  archiveIfAllMerged, archivePipeline, DASHBOARD_PORT, deleteArchivedPipelines, deletePipeline, findRecipe, getDeleteRun, INSTALL_STAMP, installStamp, isAlive, isDeleting, killGroup, mainService, normalizeRecipe, pickPorts, previewLines, processStart, resolveEnv,
   requestPreviewStart, savedRecipePath, startDeleteArchived, startOrder, startPreview, stopPipeline, stopPreview, stopPreviewAndSettle, type Service, unarchivePipeline, waitReady,
 } from "../src/preview.ts";
 import { diffTotals, parseDiff } from "../src/diff.ts";
@@ -428,6 +428,96 @@ test("the same install command runs once per worktree", async () => {
   const { id } = createPipeline({ repos: [{ path: repo }], title: "t", source: "text" });
   await startPreview(id, wt).catch(() => undefined);
   expect(readFileSync(join(wt, "count"), "utf8").trim().split("\n")).toHaveLength(1);
+}, 30_000);
+
+// A recipe whose install counts its runs and whose start exits at once: only the install matters.
+function installRecipe(extra: Record<string, unknown> = {}) {
+  writeFileSync(join(repo, ".pipeship.json"), JSON.stringify({ install: "mkdir -p node_modules && echo x >> count", start: "exit 1", ...extra }));
+  const wt = mkdtempSync(join(root, "wt-"));
+  writeFileSync(join(wt, "package-lock.json"), "{}");
+  const { id } = createPipeline({ repos: [{ path: repo }], title: "t", source: "text" });
+  const start = (reinstall = false) => startPreview(id, wt, undefined, { reinstall }).catch(() => undefined);
+  const runs = () => (existsSync(join(wt, "count")) ? readFileSync(join(wt, "count"), "utf8").trim().split("\n").length : 0);
+  return { id, wt, start, runs };
+}
+
+test("an install is skipped when the dependencies are unchanged", async () => {
+  const { id, wt, start, runs } = installRecipe();
+  await start();
+  expect(runs()).toBe(1);
+  expect(existsSync(join(wt, INSTALL_STAMP))).toBe(true);
+  await start();
+  expect(runs()).toBe(1);
+  expect(readFileSync(join(pipelineDir(id), "preview.log"), "utf8")).toContain("install skipped (dependencies unchanged): mkdir -p node_modules && echo x >> count");
+  await start(true);
+  expect(runs()).toBe(2);
+}, 30_000);
+
+test("an install runs again when its inputs change", async () => {
+  const { wt, start, runs } = installRecipe();
+  await start();
+  writeFileSync(join(wt, "package-lock.json"), '{"changed":true}');
+  await start();
+  expect(runs()).toBe(2);
+  writeFileSync(join(wt, "package.json"), "{}");
+  await start();
+  expect(runs()).toBe(3);
+  rmSync(join(wt, "node_modules"), { recursive: true });
+  await start();
+  expect(runs()).toBe(4);
+}, 30_000);
+
+test("an install with no lockfile runs every time", async () => {
+  const { wt, start, runs } = installRecipe();
+  rmSync(join(wt, "package-lock.json"));
+  await start();
+  await start();
+  expect(runs()).toBe(2);
+  expect(existsSync(join(wt, INSTALL_STAMP))).toBe(false);
+}, 30_000);
+
+test("a failed install writes no stamp", async () => {
+  const { wt, start } = installRecipe({ install: "mkdir -p node_modules && exit 1" });
+  await start();
+  expect(existsSync(join(wt, INSTALL_STAMP))).toBe(false);
+}, 30_000);
+
+test("services sharing one install log one skip", async () => {
+  const install = "mkdir -p node_modules && echo x >> count";
+  const { id, start, runs } = installRecipe({
+    install: undefined,
+    start: undefined,
+    services: [
+      { name: "a", kind: "back", start: "exit 1", install },
+      { name: "b", kind: "back", start: "exit 1", install },
+    ],
+  });
+  await start();
+  await start();
+  expect(runs()).toBe(1);
+  expect(readFileSync(join(pipelineDir(id), "preview.log"), "utf8").match(/install skipped/g)).toHaveLength(1);
+}, 30_000);
+
+test("installStamp depends on the command and the dependency files", () => {
+  const dir = mkdtempSync(join(root, "stamp-"));
+  expect(installStamp("npm ci", dir)).toBeUndefined();
+  writeFileSync(join(dir, "package.json"), "{}");
+  expect(installStamp("npm ci", dir)).toBeUndefined();
+  writeFileSync(join(dir, "bun.lock"), "a");
+  const base = installStamp("npm ci", dir);
+  expect(base).toMatch(/^[0-9a-f]{64}$/);
+  expect(installStamp("npm install", dir)).not.toBe(base);
+  writeFileSync(join(dir, "bun.lock"), "b");
+  expect(installStamp("npm ci", dir)).not.toBe(base);
+});
+
+test("the preview command skips an unchanged install and --reinstall forces it", () => {
+  const { id, wt } = installRecipe();
+  const cli = join(import.meta.dir, "../src/cli.ts");
+  const run = (...extra: string[]) => spawnSync("bun", [cli, "preview", id, wt, ...extra], { encoding: "utf8", env: process.env });
+  expect(run().stderr).not.toContain("install skipped");
+  expect(run().stderr).toContain("install skipped (dependencies unchanged)");
+  expect(run("--reinstall").stderr).not.toContain("install skipped");
 }, 30_000);
 
 test("a slow install does not block the event loop", async () => {
