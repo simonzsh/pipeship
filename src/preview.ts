@@ -451,11 +451,12 @@ function acquirePreviewLock(id: string): () => void {
 
 // A stamp in node_modules goes away with it, so a deleted node_modules always reinstalls.
 export const INSTALL_STAMP = "node_modules/.pipeship-install-stamp";
-export const INSTALL_INPUTS = ["package-lock.json", "pnpm-lock.yaml", "yarn.lock", "bun.lockb", "bun.lock", "package.json"];
+const LOCKFILES = ["package-lock.json", "pnpm-lock.yaml", "yarn.lock", "bun.lockb", "bun.lock"];
+const INSTALL_INPUTS = [...LOCKFILES, "package.json"];
 
 // Digest of the install command and the dependency files of `dir`; undefined with no lockfile (nothing to compare).
 export function installStamp(cmd: string, dir: string): string | undefined {
-  if (!INSTALL_INPUTS.slice(0, 5).some((name) => existsSync(join(dir, name)))) return undefined;
+  if (!LOCKFILES.some((name) => existsSync(join(dir, name)))) return undefined;
   const hash = createHash("sha256").update(`${cmd}\0`);
   for (const name of INSTALL_INPUTS) {
     if (existsSync(join(dir, name))) hash.update(`${name}\0`).update(readFileSync(join(dir, name))).update("\0");
