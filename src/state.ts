@@ -86,6 +86,7 @@ export interface State {
   steps: { name: StepName; status: StepStatus; startedAt?: string; endedAt?: string }[];
   chunks: Chunk[];
   preview?: { url: string; port: number; pid?: number; log: string; services?: PreviewService[] };
+  lastPorts?: Record<string, number>; // service name -> port of the last planned preview; survives a stop
   session?: Session;
   previewError?: string; // why the last dashboard "Start preview" failed
   merges?: Record<string, MergeRun>; // last dashboard merge run per repo, keyed by Repo.path

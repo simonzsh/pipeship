@@ -185,20 +185,29 @@ function portIsFree(port: number): Promise<boolean> {
 }
 
 // Every port is picked before anything starts, so env templates resolve and no two services share a port.
+// A preferred port (the previous run's) is tried first, so a restart keeps its URL.
 export async function pickPorts(
   services: Service[],
   isFree: (port: number) => Promise<boolean> = portIsFree,
   reserved: Set<number> = new Set(),
+  preferred: Record<string, number> = {},
 ): Promise<Record<string, number>> {
   const taken = new Set<number>([DASHBOARD_PORT, ...reserved]);
   for (const s of services) if (s.fixedPort !== undefined) taken.add(s.fixedPort);
   const ports: Record<string, number> = {};
   for (const s of services) {
-    if (s.fixedPort !== undefined) {
-      if (reserved.has(s.fixedPort) || !(await isFree(s.fixedPort))) throw new Error(`service "${s.name}": fixed port ${s.fixedPort} is already in use`);
-      ports[s.name] = s.fixedPort;
-      continue;
-    }
+    if (s.fixedPort === undefined) continue;
+    if (reserved.has(s.fixedPort) || !(await isFree(s.fixedPort))) throw new Error(`service "${s.name}": fixed port ${s.fixedPort} is already in use`);
+    ports[s.name] = s.fixedPort;
+  }
+  for (const s of services) {
+    const want = preferred[s.name];
+    if (s.fixedPort !== undefined || want === undefined || taken.has(want) || !(await isFree(want))) continue;
+    taken.add(want);
+    ports[s.name] = want;
+  }
+  for (const s of services) {
+    if (ports[s.name] !== undefined) continue;
     const from = s.kind === "front" ? FRONT_FIRST_PORT : BACK_FIRST_PORT;
     let found: number | undefined;
     for (let port = from; port < from + PORT_SCAN && found === undefined; port++) {
@@ -446,7 +455,7 @@ export async function startPreview(id: string, worktree?: string, draft?: string
 
   // Reserve the ports before the (slow) install, so another pipeline cannot pick them meanwhile.
   const installLog = join(pipelineDir(id), "preview.log");
-  const ports = await pickPorts(services, portIsFree, reservedPorts(id));
+  const ports = await pickPorts(services, portIsFree, reservedPorts(id), state.lastPorts);
   const main = mainService(services);
   const order = startOrder(services);
   const mainUrl = `http://localhost:${ports[main.name]}`;
@@ -462,6 +471,7 @@ export async function startPreview(id: string, worktree?: string, draft?: string
     ({ url: mainUrl, port: ports[main.name]!, pid: mainPid, log: installLog, services: planned });
   updateState(id, (s) => {
     s.preview = preview();
+    s.lastPorts = { ...ports };
   });
 
   const started: PreviewService[] = [];

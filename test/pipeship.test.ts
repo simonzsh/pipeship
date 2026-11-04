@@ -384,6 +384,8 @@ test("preview starts the app, copies local files, and stop kills it", async () =
   expect(stopped.stopRequested).toBe(true);
   expect(isAlive(pid)).toBe(false);
 
+  expect(readState(id).lastPorts).toEqual({ app: port });
+
   // A done pipeline can start its test environment again.
   const again = await startPreview(id, worktree);
   expect(await (await fetch(again.preview!.url)).text()).toBe("hello");
@@ -890,6 +892,17 @@ test("port picking skips 4400 and ports in use", async () => {
   expect(back).toEqual({ api: 4401 });
   const front = await pickPorts([svc("web", "front")], async (p) => p !== 3000);
   expect(front).toEqual({ web: 3001 });
+});
+
+test("port picking tries the preferred ports first", async () => {
+  const all = async () => true;
+  expect(await pickPorts([svc("api", "back")], all, new Set(), { api: 4500 })).toEqual({ api: 4500 });
+  expect(await pickPorts([svc("api", "back")], async (p) => p !== 4500, new Set(), { api: 4500 })).toEqual({ api: 4000 });
+  expect(await pickPorts([svc("api", "back")], all, new Set([4500]), { api: 4500 })).toEqual({ api: 4000 });
+  const fronts = [svc("a", "front"), svc("b", "front")];
+  expect(await pickPorts(fronts, all, new Set(), { b: 3000 })).toEqual({ a: 3001, b: 3000 });
+  const db = svc("db", "infra", { fixedPort: 4000 });
+  expect(await pickPorts([db, svc("api", "back")], all, new Set(), { api: 4000 })).toEqual({ db: 4000, api: 4001 });
 });
 
 test("fixed ports are reserved and must be free", async () => {
